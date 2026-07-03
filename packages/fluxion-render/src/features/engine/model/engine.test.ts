@@ -1211,6 +1211,61 @@ describe("Engine", () => {
     });
   });
 
+  describe("RELEASE_BACKING idle shrink", () => {
+    it("shrinks main + axis backings to 0×0 but keeps the engine usable", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(100, 100);
+      engine.dispatch({ op: Op.INIT, canvas, width: 100, height: 100, dpr: 2 });
+      const xAxisCanvas = newCanvas(0, 0);
+      const yAxisCanvas = newCanvas(0, 0);
+      engine.dispatch({
+        op: Op.SET_AXIS_CANVAS,
+        xAxisCanvas: xAxisCanvas as unknown as OffscreenCanvas,
+        yAxisCanvas: yAxisCanvas as unknown as OffscreenCanvas,
+        xAxisHeight: 30,
+        yAxisWidth: 60,
+      });
+      flushFrame();
+      expect(canvas.width).toBeGreaterThan(0);
+      expect(xAxisCanvas.width).toBeGreaterThan(0);
+      expect(yAxisCanvas.height).toBeGreaterThan(0);
+
+      engine.dispatch({ op: Op.RELEASE_BACKING });
+
+      // All three GPU backings freed; canvas/context bindings kept.
+      expect(canvas.width).toBe(0);
+      expect(canvas.height).toBe(0);
+      expect(xAxisCanvas.width).toBe(0);
+      expect(xAxisCanvas.height).toBe(0);
+      expect(yAxisCanvas.width).toBe(0);
+      expect(yAxisCanvas.height).toBe(0);
+
+      // A later RESIZE re-allocates (the width-diff check compares against 0)
+      // and the engine renders again — the shrink was non-destructive.
+      engine.dispatch({ op: Op.RESIZE, width: 100, height: 100, dpr: 2 });
+      expect(canvas.width).toBe(200);
+      expect(canvas.height).toBe(200);
+      expect(xAxisCanvas.width).toBe(200); // 100 × dpr 2
+      expect(xAxisCanvas.height).toBe(60); // 30 × dpr 2
+      expect(yAxisCanvas.width).toBe(120); // 60 × dpr 2
+      expect(yAxisCanvas.height).toBe(200);
+      flushFrame(); // renders without throwing on the re-allocated backing
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
+    it("shrinks only the main canvas when no axis canvases exist", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(100, 100);
+      engine.dispatch({ op: Op.INIT, canvas, width: 100, height: 100, dpr: 1 });
+      flushFrame();
+      expect(canvas.width).toBe(100);
+      engine.dispatch({ op: Op.RELEASE_BACKING });
+      expect(canvas.width).toBe(0);
+      expect(canvas.height).toBe(0);
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+  });
+
   describe("context + resize optimizations", () => {
     type WithCtxOpts = { contextOptions: { alpha?: boolean } };
 

@@ -8,11 +8,16 @@ import type { FluxionWorkerPool } from "../../worker-pool";
 import type { FluxionHost } from "./fluxion-host";
 import { createHostRecyclePool, type HostBundle } from "./host-recycle-pool";
 
-type FakeBundle = HostBundle & { host: { dispose: ReturnType<typeof vi.fn> } };
+type FakeBundle = HostBundle & {
+  host: {
+    dispose: ReturnType<typeof vi.fn>;
+    releaseBackings: ReturnType<typeof vi.fn>;
+  };
+};
 
 function makeBundle(key: string): FakeBundle {
   return {
-    host: { dispose: vi.fn() } as unknown as FluxionHost,
+    host: { dispose: vi.fn(), releaseBackings: vi.fn() } as unknown as FluxionHost,
     canvas: {} as HTMLCanvasElement,
     key,
   } as FakeBundle;
@@ -236,6 +241,134 @@ describe("createHostRecyclePool", () => {
       pool.dispose();
       pool.release(makeBundle("k")); // disposed-pool teardown — NOT an overflow
       expect(pool.stats.overflowDisposed).toBe(2);
+    });
+  });
+
+  describe("idle shrink (idleShrinkMs)", () => {
+    const params = { hostOptions: {}, hasXAxis: false, hasYAxis: false };
+
+    it("releases backings of bundles parked past the threshold, exactly once", () => {
+      vi.useFakeTimers();
+      try {
+        const pool = createHostRecyclePool({ idleShrinkMs: 4000 }); // sweep every 2s
+        const key = pool.keyFor(params);
+        const b = makeBundle(key);
+        pool.release(b);
+        vi.advanceTimersByTime(2000); // sweep: parked 2s < 4s → still holding
+        expect(b.host.releaseBackings).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(2000); // sweep: parked 4s → shrink
+        expect(b.host.releaseBackings).toHaveBeenCalledTimes(1);
+        expect(pool.stats.shrunk).toBe(1);
+        vi.advanceTimersByTime(20_000); // never re-posts for an already-shrunk bundle
+        expect(b.host.releaseBackings).toHaveBeenCalledTimes(1);
+        expect(pool.size).toBe(1); // still parked and acquirable
+        expect(pool.acquire(params)).toBe(b);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("an acquire before the threshold never shrinks (and stops the sweep)", () => {
+      vi.useFakeTimers();
+      try {
+        const pool = createHostRecyclePool({ idleShrinkMs: 4000 });
+        const b = makeBundle(pool.keyFor(params));
+        pool.release(b);
+        vi.advanceTimersByTime(2000);
+        expect(pool.acquire(params)).toBe(b); // pool now empty → sweep stops
+        expect(vi.getTimerCount()).toBe(0);
+        vi.advanceTimersByTime(20_000);
+        expect(b.host.releaseBackings).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("re-parking re-arms the idle clock and re-shrinks after the full period", () => {
+      vi.useFakeTimers();
+      try {
+        const pool = createHostRecyclePool({ idleShrinkMs: 4000 });
+        const b = makeBundle(pool.keyFor(params));
+        pool.release(b);
+        vi.advanceTimersByTime(4000); // shrunk once; nothing left holding → sweep stops
+        expect(b.host.releaseBackings).toHaveBeenCalledTimes(1);
+        expect(vi.getTimerCount()).toBe(0);
+        pool.acquire(params);
+        pool.release(b); // re-park re-arms the sweep + resets the clock
+        vi.advanceTimersByTime(2000);
+        expect(b.host.releaseBackings).toHaveBeenCalledTimes(1); // not yet
+        vi.advanceTimersByTime(2000);
+        expect(b.host.releaseBackings).toHaveBeenCalledTimes(2);
+        expect(pool.stats.shrunk).toBe(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("staggered parks shrink independently; the sweep runs until all released", () => {
+      vi.useFakeTimers();
+      try {
+        const pool = createHostRecyclePool({ idleShrinkMs: 4000 });
+        const key = pool.keyFor(params);
+        const b1 = makeBundle(key);
+        const b2 = makeBundle(key);
+        pool.release(b1);
+        vi.advanceTimersByTime(2000);
+        pool.release(b2); // parked 2s later
+        vi.advanceTimersByTime(2000); // t=4s: b1 shrinks, b2 (2s) still holding
+        expect(b1.host.releaseBackings).toHaveBeenCalledTimes(1);
+        expect(b2.host.releaseBackings).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(2000); // t=6s: b2 shrinks → nothing holding → stop
+        expect(b2.host.releaseBackings).toHaveBeenCalledTimes(1);
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("floors the sweep interval at 1s for tiny thresholds", () => {
+      vi.useFakeTimers();
+      try {
+        const pool = createHostRecyclePool({ idleShrinkMs: 100 });
+        const b = makeBundle(pool.keyFor(params));
+        pool.release(b);
+        vi.advanceTimersByTime(999);
+        expect(b.host.releaseBackings).not.toHaveBeenCalled(); // sweep hasn't run yet
+        vi.advanceTimersByTime(1); // first 1s sweep — 1000ms parked ≥ 100ms
+        expect(b.host.releaseBackings).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("schedules no timer when idle shrink is off (default)", () => {
+      vi.useFakeTimers();
+      try {
+        const pool = createHostRecyclePool();
+        const b = makeBundle(pool.keyFor(params));
+        pool.release(b);
+        expect(vi.getTimerCount()).toBe(0);
+        vi.advanceTimersByTime(60_000);
+        expect(b.host.releaseBackings).not.toHaveBeenCalled();
+        expect(pool.stats.shrunk).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("pool dispose stops the sweep before it ever fires", () => {
+      vi.useFakeTimers();
+      try {
+        const pool = createHostRecyclePool({ idleShrinkMs: 4000 });
+        const b = makeBundle(pool.keyFor(params));
+        pool.release(b);
+        pool.dispose(); // stops the sweep; teardown drains via the frame queue
+        vi.advanceTimersByTime(60_000);
+        expect(b.host.releaseBackings).not.toHaveBeenCalled();
+        expect(b.host.dispose).toHaveBeenCalledTimes(1); // deferred teardown ran
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

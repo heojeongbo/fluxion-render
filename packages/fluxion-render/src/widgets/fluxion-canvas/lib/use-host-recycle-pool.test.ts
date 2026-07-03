@@ -33,6 +33,7 @@ describe("useHostRecyclePool", () => {
       recycled: 0,
       overflowDisposed: 0,
       highWater: 0,
+      shrunk: 0,
     });
   });
 

@@ -423,6 +423,18 @@ export class FluxionHost {
   }
 
   /**
+   * Free the worker-side OffscreenCanvas GPU backings (main + axis) by
+   * shrinking them to 0×0, without tearing anything else down. Used by the
+   * recycle pool's `idleShrinkMs` so long-parked hosts stop holding full-size
+   * GPU surfaces; the host stays fully usable and the next `resize()`
+   * re-allocates the backings. No-op after `dispose()`.
+   */
+  releaseBackings(): void {
+    if (this.disposed) return;
+    this.post({ op: Op.RELEASE_BACKING });
+  }
+
+  /**
    * Update the canvas background color at runtime. Takes effect on the next
    * rendered frame. Useful for theme toggles without tearing down the host.
    */

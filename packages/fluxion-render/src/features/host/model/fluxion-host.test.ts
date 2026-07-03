@@ -1024,6 +1024,24 @@ describe("FluxionHost", () => {
     host.reset();
     expect(posts).toHaveLength(0);
   });
+
+  it("releaseBackings() posts RELEASE_BACKING", () => {
+    const { worker, posts } = makeFakeWorker();
+    const host = new FluxionHost(makeCanvas(), { workerFactory: () => worker });
+    posts.length = 0;
+    host.releaseBackings();
+    expect(posts.map((p) => (p.msg as { op: number }).op)).toEqual([Op.RELEASE_BACKING]);
+    host.dispose();
+  });
+
+  it("releaseBackings is a no-op after dispose", () => {
+    const { worker, posts } = makeFakeWorker();
+    const host = new FluxionHost(makeCanvas(), { workerFactory: () => worker });
+    host.dispose();
+    posts.length = 0;
+    host.releaseBackings();
+    expect(posts).toHaveLength(0);
+  });
 });
 
 describe("FluxionHost push coalescing", () => {

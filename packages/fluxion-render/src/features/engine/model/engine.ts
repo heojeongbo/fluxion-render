@@ -241,7 +241,24 @@ export class Engine {
       case Op.RESET:
         this.reset();
         break;
+      case Op.RELEASE_BACKING:
+        this.releaseBackings();
+        break;
     }
+  }
+
+  /**
+   * Free the GPU backing stores (main + axis canvases) by shrinking them to
+   * 0×0 while KEEPING the canvas/context bindings and all engine state — the
+   * worker half of parked-host idle shrink. Unlike `dispose`, the engine stays
+   * fully usable: the next RESIZE re-allocates because the width-diff check
+   * compares against 0. No `markDirty` — a parked host is invisible, and a
+   * render onto a 0×0 canvas would be a wasted no-op anyway.
+   */
+  private releaseBackings(): void {
+    Engine.releaseBacking(this.canvas);
+    Engine.releaseBacking(this.xAxisCanvas);
+    Engine.releaseBacking(this.yAxisCanvas);
   }
 
   /**

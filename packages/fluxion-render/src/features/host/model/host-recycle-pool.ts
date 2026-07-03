@@ -44,6 +44,19 @@ export interface HostRecyclePoolOptions {
    * raising `max`. Default `16`; pass `0` (or negative) to disable.
    */
   warnAfterOverflow?: number;
+  /**
+   * Idle shrink: after a bundle has been PARKED this many milliseconds, free
+   * its worker-side GPU backings (`FluxionHost.releaseBackings` — main + axis
+   * canvases shrink to 0×0) while keeping the host warm. The next acquire's
+   * mount-sequence `resize` re-allocates the backing, and that realloc runs
+   * inside the frame-budgeted mount task, so re-warm waves stay bounded.
+   *
+   * This is what makes a LARGE `max` safe: without it, a pool sized for a
+   * 64-chart grid parks 64 × (1–3) full-size GPU surfaces indefinitely —
+   * trading the allocation burst for idle GPU memory pressure. Default off
+   * (`0`): with the default `max` of 8, parked memory is modest.
+   */
+  idleShrinkMs?: number;
 }
 
 /** Inputs that determine which warm bundles are interchangeable with a mount. */
@@ -87,13 +100,16 @@ export interface HostRecyclePool {
    * full and tore the host down (churn the pool failed to absorb — if this
    * grows every remount cycle, `max` is undersized); `highWater` is the
    * largest number of concurrently outstanding (acquired or cold-created,
-   * not yet released) hosts — the working set `max` should be sized against.
+   * not yet released) hosts — the working set `max` should be sized against;
+   * `shrunk` counts parked bundles whose GPU backings were idle-released
+   * (see `idleShrinkMs`).
    */
   readonly stats: {
     created: number;
     recycled: number;
     overflowDisposed: number;
     highWater: number;
+    shrunk: number;
   };
 }
 
@@ -121,6 +137,7 @@ export function createHostRecyclePool(
 ): HostRecyclePool {
   const max = Math.max(0, options.max ?? DEFAULT_MAX);
   const warnAfterOverflow = options.warnAfterOverflow ?? DEFAULT_WARN_AFTER_OVERFLOW;
+  const idleShrinkMs = Math.max(0, options.idleShrinkMs ?? 0);
   // bucket key → LIFO stack of warm bundles (LIFO favors temporal locality).
   const warm = new Map<string, HostBundle[]>();
   // Stable per-object ids so the key separates distinct worker pools / factories
@@ -132,6 +149,7 @@ export function createHostRecyclePool(
   let created = 0;
   let recycled = 0;
   let overflowDisposed = 0;
+  let shrunk = 0;
   // Working-set tracking: outstanding = hosts handed out (warm hit or cold
   // create) and not yet released. Its high-water mark is what `max` should be
   // sized against. Clamped at 0 so a stray release can't skew it negative.
@@ -140,6 +158,52 @@ export function createHostRecyclePool(
   // Per-bucket overflow counts + once-per-bucket warn guard (arity-guard pattern).
   const overflowByKey = new Map<string, number>();
   const warnedKeys = new Set<string>();
+  // Idle shrink bookkeeping. `parkedAt` stamps park time; `shrunkSet` marks
+  // bundles whose backings are already released so the sweep never re-posts.
+  // Both are weak: a bundle that leaves the pool carries no residue.
+  const parkedAt = new WeakMap<HostBundle, number>();
+  const shrunkSet = new WeakSet<HostBundle>();
+  let sweepTimer: ReturnType<typeof setInterval> | null = null;
+
+  const totalParked = (): number => {
+    let n = 0;
+    for (const list of warm.values()) n += list.length;
+    return n;
+  };
+
+  const stopSweep = (): void => {
+    if (sweepTimer !== null) {
+      clearInterval(sweepTimer);
+      sweepTimer = null;
+    }
+  };
+
+  const sweep = (): void => {
+    const now = Date.now();
+    // Count bundles that still HOLD a backing; when none remain, the timer has
+    // nothing left to do — stop it (the next park re-arms).
+    let holding = 0;
+    for (const list of warm.values()) {
+      for (const b of list) {
+        if (shrunkSet.has(b)) continue;
+        if (now - (parkedAt.get(b) as number) >= idleShrinkMs) {
+          shrunkSet.add(b);
+          shrunk++;
+          b.host.releaseBackings();
+        } else {
+          holding++;
+        }
+      }
+    }
+    if (holding === 0) stopSweep();
+  };
+
+  const startSweep = (): void => {
+    if (idleShrinkMs <= 0 || sweepTimer !== null) return;
+    // Sweep at half the idle threshold (floor 1s) — worst-case a bundle holds
+    // its backing ~1.5× idleShrinkMs, in exchange for a coarse, cheap timer.
+    sweepTimer = setInterval(sweep, Math.max(1000, Math.floor(idleShrinkMs / 2)));
+  };
 
   const trackAcquired = (): void => {
     outstanding++;
@@ -156,7 +220,8 @@ export function createHostRecyclePool(
         `[fluxion] host recycle pool: bucket "${key}" has overflow-disposed ` +
           `${n} hosts (max=${max}, observed high-water ${highWater} concurrent). ` +
           "Each overflow re-pays the full host create/destroy cost the pool " +
-          "exists to avoid. Raise `max` toward the high-water mark.",
+          "exists to avoid. Raise `max` toward the high-water mark, and set " +
+          "`idleShrinkMs` so the larger warm pool doesn't hold idle GPU memory.",
       );
     }
   };
@@ -190,15 +255,13 @@ export function createHostRecyclePool(
   return {
     keyFor,
     get size() {
-      let n = 0;
-      for (const list of warm.values()) n += list.length;
-      return n;
+      return totalParked();
     },
     get isDisposed() {
       return disposed;
     },
     get stats() {
-      return { created, recycled, overflowDisposed, highWater };
+      return { created, recycled, overflowDisposed, highWater, shrunk };
     },
     markCreated() {
       created++;
@@ -210,6 +273,8 @@ export function createHostRecyclePool(
       if (bundle) {
         recycled++;
         trackAcquired();
+        // Nothing left parked → the idle-shrink sweep has nothing to watch.
+        if (sweepTimer !== null && totalParked() === 0) stopSweep();
         return bundle;
       }
       return null;
@@ -234,11 +299,17 @@ export function createHostRecyclePool(
         enqueueDispose(() => bundle.host.dispose());
         return;
       }
+      // Stamp the park time and clear any previous shrink mark (a re-parked
+      // bundle re-earns its idle period), then make sure the sweep is running.
+      parkedAt.set(bundle, Date.now());
+      shrunkSet.delete(bundle);
+      startSweep();
       list.push(bundle);
     },
     dispose() {
       if (disposed) return;
       disposed = true;
+      stopSweep();
       // `disposed` is set and `warm` cleared BEFORE any queued teardown runs,
       // so a deferred dispose can never resurrect or double-hand-out a bundle.
       for (const list of warm.values()) {

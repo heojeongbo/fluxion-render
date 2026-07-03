@@ -20,6 +20,7 @@ export const Op = {
   SET_VISIBLE: 14,
   CONFIG_BATCH: 15,
   RESET: 16,
+  RELEASE_BACKING: 17,
 } as const;
 export type Op = (typeof Op)[keyof typeof Op];
 
@@ -238,6 +239,20 @@ export interface SetAxisStyleMsg {
   bgColor?: string;
 }
 
+/**
+ * Free the engine's OffscreenCanvas GPU backing stores (main + axis) by
+ * shrinking them to 0×0, WITHOUT tearing down the engine, its layers, or the
+ * canvas bindings — the worker side of parked-host idle shrink (see the
+ * recycle pool's `idleShrinkMs`). The engine stays fully functional; the next
+ * RESIZE re-allocates the backings at the requested size. Rendering onto a
+ * 0×0 canvas in the interim is a silent no-op (parked hosts are also
+ * `SET_VISIBLE false`).
+ */
+export interface ReleaseBackingMsg {
+  op: typeof Op.RELEASE_BACKING;
+  hostId?: string;
+}
+
 export type HostMsg =
   | InitMsg
   | ResizeMsg
@@ -254,7 +269,8 @@ export type HostMsg =
   | SetAxisStyleMsg
   | ClearDataMsg
   | SetVisibleMsg
-  | ResetMsg;
+  | ResetMsg
+  | ReleaseBackingMsg;
 
 /**
  * Stream-channel message for custom worker scripts.

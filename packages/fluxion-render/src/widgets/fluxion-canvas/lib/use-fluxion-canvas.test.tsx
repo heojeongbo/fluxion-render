@@ -584,6 +584,7 @@ describe("useFluxionCanvas host recycling", () => {
       recycled: 1,
       overflowDisposed: 0,
       highWater: 1,
+      shrunk: 0,
     });
 
     second.unmount();
