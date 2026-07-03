@@ -143,10 +143,12 @@ describe("lifecycle-scheduler", () => {
     spy.mockRestore();
   });
 
-  it("ignores non-positive / missing perFrame", () => {
+  it("ignores non-positive / fractional-below-1 / missing perFrame", () => {
     configureMountScheduler({ perFrame: 3 });
     configureMountScheduler({ perFrame: 0 }); // ignored
     configureMountScheduler({ perFrame: -1 }); // ignored
+    configureMountScheduler({ perFrame: 0.5 }); // ignored — must NOT floor to a 0 budget
+    configureMountScheduler({ perFrame: Number.NaN }); // ignored
     configureMountScheduler({}); // ignored (undefined)
     const order: number[] = [];
     for (let i = 0; i < 4; i++) enqueueMount(() => order.push(i));
@@ -271,10 +273,11 @@ describe("lifecycle-scheduler", () => {
       expect(t.calls).toEqual([[2, 2, 1]]);
     });
 
-    it("ignores non-positive / missing resizePerFrame", () => {
+    it("ignores non-positive / fractional-below-1 / missing resizePerFrame", () => {
       configureMountScheduler({ resizePerFrame: 2 });
       configureMountScheduler({ resizePerFrame: 0 }); // ignored
       configureMountScheduler({ resizePerFrame: -3 }); // ignored
+      configureMountScheduler({ resizePerFrame: 0.9 }); // ignored — not floored to 0
       configureMountScheduler({}); // ignored (undefined)
       const targets = Array.from({ length: 3 }, makeTarget);
       for (const t of targets) scheduleResize(t, { width: 1, height: 1, dpr: 1 });
@@ -347,6 +350,35 @@ describe("lifecycle-scheduler", () => {
       expect(ran).toEqual(["via-timeout"]);
     } finally {
       globalThis.requestAnimationFrame = raf;
+    }
+  });
+
+  it("falls back to setTimeout while the page is hidden (rAF would never fire)", () => {
+    const rafSpy = vi
+      .spyOn(globalThis, "requestAnimationFrame")
+      .mockImplementation(() => 0); // a hidden tab's rAF: registered but never fires
+    const hiddenSpy = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+    try {
+      const ran: string[] = [];
+      enqueueDispose(() => ran.push("teardown"));
+      expect(rafSpy).not.toHaveBeenCalled(); // hidden → the timeout path was chosen
+      vi.advanceTimersByTime(20);
+      expect(ran).toEqual(["teardown"]); // teardown drains without a foreground frame
+    } finally {
+      hiddenSpy.mockRestore();
+      rafSpy.mockRestore();
+    }
+  });
+
+  it("uses rAF in a context with no document at all (worker-like) when rAF exists", () => {
+    vi.stubGlobal("document", undefined);
+    try {
+      const ran: string[] = [];
+      enqueueMount(() => ran.push("via-raf"));
+      vi.advanceTimersByTime(20); // happy-dom rAF is timer-backed
+      expect(ran).toEqual(["via-raf"]);
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 });

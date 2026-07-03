@@ -61,21 +61,44 @@ describe("FluxionWorkerHandle", () => {
       pool.dispose();
     });
 
-    it("forwards emitRenderStats into POOL_INIT (and leaves it unset when absent)", () => {
+    it("forwards EVERY perf/appearance field of INIT into POOL_INIT (none silently dropped)", () => {
+      // emitRenderStats was silently dropped by this projection for every
+      // pooled host — pin the FULL field set so the next added InitMsg field
+      // can't regress the same way unnoticed.
       const { pool, fakeWorkers } = makePool();
       const handle = pool.acquire();
-      handle.postMessage({ ...makeInitMsg(), emitRenderStats: true } as HostMsg, []);
-      const withStats = fakeWorkers[0]!.postMessage.mock.calls[0]![0] as {
-        emitRenderStats?: boolean;
-      };
-      expect(withStats.emitRenderStats).toBe(true);
+      handle.postMessage(
+        {
+          ...makeInitMsg(),
+          bgColor: "#123456",
+          maxFps: 30,
+          emitBounds: false,
+          emitTicks: false,
+          emitRenderStats: true,
+          transparent: true,
+        } as HostMsg,
+        [],
+      );
+      expect(fakeWorkers[0]!.postMessage.mock.calls[0]![0]).toMatchObject({
+        op: Op.POOL_INIT,
+        hostId: handle.hostId,
+        width: 400,
+        height: 300,
+        dpr: 1,
+        bgColor: "#123456",
+        maxFps: 30,
+        emitBounds: false,
+        emitTicks: false,
+        emitRenderStats: true,
+        transparent: true,
+      });
 
       const handle2 = pool.acquire();
       handle2.postMessage(makeInitMsg(), []);
-      const without = fakeWorkers[0]!.postMessage.mock.calls.at(-1)![0] as {
+      const bare = fakeWorkers[0]!.postMessage.mock.calls.at(-1)![0] as {
         emitRenderStats?: boolean;
       };
-      expect(without.emitRenderStats).toBeUndefined();
+      expect(bare.emitRenderStats).toBeUndefined(); // absent stays absent
       pool.dispose();
     });
 

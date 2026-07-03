@@ -101,8 +101,8 @@ export interface HostRecyclePool {
    * grows every remount cycle, `max` is undersized); `highWater` is the
    * largest number of concurrently outstanding (acquired or cold-created,
    * not yet released) hosts — the working set `max` should be sized against;
-   * `shrunk` counts parked bundles whose GPU backings were idle-released
-   * (see `idleShrinkMs`).
+   * `shrunk` counts idle-release actions (see `idleShrinkMs`) — a re-parked
+   * bundle re-earns its idle period, so one bundle can be counted repeatedly.
    */
   readonly stats: {
     created: number;
@@ -128,7 +128,7 @@ const DEFAULT_WARN_AFTER_OVERFLOW = 16;
  *
  * Bundles are only interchangeable when their construction-fixed options match
  * (worker pool / factory identity, axis-canvas presence, transparent, maxFps,
- * emitBounds, emitTicks); {@link keyFor} encodes that, and an explicit
+ * emitBounds, emitTicks, emitRenderStats); {@link keyFor} encodes that, and an explicit
  * `recycleKey` force-separates incompatible chart families. A request with no
  * matching warm bundle returns `null`, so correctness never depends on a hit.
  */
@@ -137,7 +137,13 @@ export function createHostRecyclePool(
 ): HostRecyclePool {
   const max = Math.max(0, options.max ?? DEFAULT_MAX);
   const warnAfterOverflow = options.warnAfterOverflow ?? DEFAULT_WARN_AFTER_OVERFLOW;
-  const idleShrinkMs = Math.max(0, options.idleShrinkMs ?? 0);
+  const rawIdleShrink = options.idleShrinkMs ?? 0;
+  // Non-finite (Infinity = "never shrink", NaN) means OFF, and huge finite
+  // values are clamped to the max 32-bit timer delay — both would otherwise
+  // overflow setInterval's int32 delay and spin the sweep at ~1ms forever.
+  const idleShrinkMs = Number.isFinite(rawIdleShrink)
+    ? Math.min(Math.max(0, rawIdleShrink), 2_147_483_647)
+    : 0;
   // bucket key → LIFO stack of warm bundles (LIFO favors temporal locality).
   const warm = new Map<string, HostBundle[]>();
   // Stable per-object ids so the key separates distinct worker pools / factories
@@ -201,7 +207,8 @@ export function createHostRecyclePool(
   const startSweep = (): void => {
     if (idleShrinkMs <= 0 || sweepTimer !== null) return;
     // Sweep at half the idle threshold (floor 1s) — worst-case a bundle holds
-    // its backing ~1.5× idleShrinkMs, in exchange for a coarse, cheap timer.
+    // its backing one sweep period past the threshold (≈1.5× idleShrinkMs for
+    // thresholds ≥2s; the 1s floor dominates below), for a coarse cheap timer.
     sweepTimer = setInterval(sweep, Math.max(1000, Math.floor(idleShrinkMs / 2)));
   };
 
@@ -249,6 +256,10 @@ export function createHostRecyclePool(
       `f${o.maxFps ?? 0}`,
       o.emitBounds === false ? "b0" : "b1",
       o.emitTicks === false ? "t0" : "t1",
+      // Construction-fixed like the flags above: INIT-only, preserved by
+      // Engine.reset(), never re-sent on warm reuse — so a stats-on chart must
+      // never inherit a stats-off engine (or vice versa).
+      o.emitRenderStats ? "r1" : "r0",
     ].join("|");
   };
 

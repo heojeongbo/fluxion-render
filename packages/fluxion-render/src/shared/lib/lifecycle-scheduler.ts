@@ -66,8 +66,13 @@ let resizesApplied = 0;
 function schedule(): void {
   if (scheduled) return;
   scheduled = true;
-  // setTimeout fallback for non-DOM/worker contexts where rAF is absent.
-  if (typeof requestAnimationFrame !== "undefined") {
+  // rAF is the normal drain trigger, but it never fires in a hidden tab — a
+  // teardown queued right before backgrounding (route change, pool dispose)
+  // would hold its GPU backings until the tab is foregrounded. Fall back to a
+  // (browser-throttled) timeout while hidden; the same fallback covers
+  // non-DOM/worker contexts where rAF is absent.
+  const hidden = typeof document !== "undefined" && document.hidden;
+  if (typeof requestAnimationFrame !== "undefined" && !hidden) {
     requestAnimationFrame(drain);
   } else {
     setTimeout(drain, 16);
@@ -179,17 +184,21 @@ export function cancelResize(target: Resizable): void {
  * pending host resizes are applied per frame (default 8 — a resize is cheaper
  * than a create: ≤3 backing reallocations, no worker init or first render).
  * Higher = faster settle but a larger per-frame spike; lower = smoother but
- * slower. Non-positive / missing values are ignored.
+ * slower. Values below 1 (and missing/NaN) are ignored — a budget can never
+ * be configured to 0, which would starve the lane forever.
  */
 export function configureMountScheduler(opts: {
   perFrame?: number;
   resizePerFrame?: number;
 }): void {
-  if (opts.perFrame != null && opts.perFrame > 0) {
-    perFrame = Math.floor(opts.perFrame);
+  // Floor BEFORE validating: 0.5 must be rejected, not floored to a 0 budget.
+  if (opts.perFrame != null) {
+    const v = Math.floor(opts.perFrame);
+    if (v > 0) perFrame = v;
   }
-  if (opts.resizePerFrame != null && opts.resizePerFrame > 0) {
-    resizePerFrame = Math.floor(opts.resizePerFrame);
+  if (opts.resizePerFrame != null) {
+    const v = Math.floor(opts.resizePerFrame);
+    if (v > 0) resizePerFrame = v;
   }
 }
 

@@ -733,4 +733,82 @@ describe("useFluxionCanvas resize forwarding", () => {
     flushMountScheduler();
     expect(ops(posts)).not.toContain(Op.RESIZE);
   });
+
+  it("parking (recycle) also drops the pending resize — no stale RESIZE reaches a parked host", () => {
+    function RecycleResizeHarness({
+      workerFactory,
+      recyclePool,
+    }: {
+      workerFactory: () => Worker;
+      recyclePool: ReturnType<typeof createHostRecyclePool>;
+    }) {
+      const { containerRef } = useFluxionCanvas({
+        layers: [{ id: "line", kind: "line" }],
+        hostOptions: { workerFactory },
+        recyclePool,
+        staggerMount: false,
+      });
+      return <div ref={containerRef} style={{ width: 200, height: 100 }} />;
+    }
+    const { factory, posts } = makeFakeWorkerFactory();
+    const pool = createHostRecyclePool();
+    const { unmount } = render(
+      <RecycleResizeHarness workerFactory={factory} recyclePool={pool} />,
+    );
+    posts.length = 0;
+    deliver(200, 100);
+    // Unmount PARKS the host (alive, not disposed) — unlike the dispose path,
+    // a stale resize here would really post and reallocate a parked backing.
+    unmount();
+    flushMountScheduler();
+    expect(ops(posts)).not.toContain(Op.RESIZE);
+    pool.dispose();
+  });
+
+  it("N charts' simultaneous resize applies at most resizePerFrame per frame", () => {
+    vi.useFakeTimers();
+    try {
+      configureMountScheduler({ resizePerFrame: 1 });
+      // Local RO stub that collects EVERY chart's callback (the describe-level
+      // stub keeps only the last), so one layout change can hit all charts.
+      const cbs: Array<(entries: unknown[]) => void> = [];
+      (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+        constructor(cb: (entries: unknown[]) => void) {
+          cbs.push(cb);
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      };
+      const charts = Array.from({ length: 3 }, () => makeFakeWorkerFactory());
+      render(
+        <>
+          {charts.map((c, i) => (
+            <Harness key={i} workerFactory={c.factory} />
+          ))}
+        </>,
+      );
+      for (const c of charts) c.posts.length = 0;
+      // One layout change fires every chart's observer in the same tick.
+      act(() => {
+        for (const cb of cbs) cb([{ contentRect: { width: 300, height: 150 } }]);
+      });
+      const resizeCount = () =>
+        charts.reduce(
+          (n, c) =>
+            n + c.posts.filter((p) => (p.msg as { op: number }).op === Op.RESIZE).length,
+          0,
+        );
+      expect(resizeCount()).toBe(0); // nothing in the observer tick
+      act(() => vi.advanceTimersByTime(20));
+      expect(resizeCount()).toBe(1); // budget: one chart per frame
+      act(() => vi.advanceTimersByTime(20));
+      expect(resizeCount()).toBe(2);
+      act(() => vi.advanceTimersByTime(20));
+      expect(resizeCount()).toBe(3); // all settle, none dropped
+    } finally {
+      vi.useRealTimers();
+      configureMountScheduler({ resizePerFrame: 8 });
+    }
+  });
 });

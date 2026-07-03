@@ -51,6 +51,11 @@ describe("createHostRecyclePool", () => {
       expect(pool.keyFor(base)).not.toBe(
         pool.keyFor({ ...base, hostOptions: { emitTicks: false } }),
       );
+      // Construction-fixed like the flags above — a stats-on chart must never
+      // inherit a stats-off engine (the flag is INIT-only, preserved by reset).
+      expect(pool.keyFor(base)).not.toBe(
+        pool.keyFor({ ...base, hostOptions: { emitRenderStats: true } }),
+      );
     });
 
     it("separates distinct worker pools / factories but is stable per object", () => {
@@ -320,6 +325,8 @@ describe("createHostRecyclePool", () => {
         expect(b2.host.releaseBackings).not.toHaveBeenCalled();
         vi.advanceTimersByTime(2000); // t=6s: b2 shrinks → nothing holding → stop
         expect(b2.host.releaseBackings).toHaveBeenCalledTimes(1);
+        // The t=6s sweep revisited b1 — the shrunk-mark must prevent a re-post.
+        expect(b1.host.releaseBackings).toHaveBeenCalledTimes(1);
         expect(vi.getTimerCount()).toBe(0);
       } finally {
         vi.useRealTimers();
@@ -336,6 +343,37 @@ describe("createHostRecyclePool", () => {
         expect(b.host.releaseBackings).not.toHaveBeenCalled(); // sweep hasn't run yet
         vi.advanceTimersByTime(1); // first 1s sweep — 1000ms parked ≥ 100ms
         expect(b.host.releaseBackings).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("treats non-finite idleShrinkMs (Infinity = never, NaN) as OFF — no ~1ms spin", () => {
+      vi.useFakeTimers();
+      try {
+        for (const bad of [Number.POSITIVE_INFINITY, Number.NaN]) {
+          const pool = createHostRecyclePool({ idleShrinkMs: bad });
+          const b = makeBundle(pool.keyFor(params));
+          pool.release(b);
+          // An int32-overflowed setInterval delay would clamp to ~1ms and spin.
+          expect(vi.getTimerCount()).toBe(0);
+          vi.advanceTimersByTime(60_000);
+          expect(b.host.releaseBackings).not.toHaveBeenCalled();
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("clamps a huge finite idleShrinkMs to a valid timer delay", () => {
+      vi.useFakeTimers();
+      try {
+        const pool = createHostRecyclePool({ idleShrinkMs: 2 ** 40 }); // > int32 ms
+        const b = makeBundle(pool.keyFor(params));
+        pool.release(b);
+        expect(vi.getTimerCount()).toBe(1); // sweep armed with a clamped delay
+        vi.advanceTimersByTime(10_000); // far below the clamped threshold
+        expect(b.host.releaseBackings).not.toHaveBeenCalled(); // no ~1ms spin-shrink
       } finally {
         vi.useRealTimers();
       }

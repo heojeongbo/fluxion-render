@@ -450,7 +450,8 @@ function Grid({ items }) {
 
 - **Compatibility.** Warm hosts are only reused for a mount with matching
   construction-fixed options — same worker `pool` (or `workerFactory`), axis-canvas
-  presence, `maxFps`, `transparent`, `emitBounds`/`emitTicks`. The key is derived
+  presence, `maxFps`, `transparent`, `emitBounds`/`emitTicks`/`emitRenderStats`.
+  The key is derived
   automatically; pass `recycleKey="…"` to force-separate structurally different
   chart families that share one pool. A request with no compatible warm host
   simply falls back to a cold create — recycling never changes correctness, only
