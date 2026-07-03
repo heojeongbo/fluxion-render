@@ -579,7 +579,12 @@ describe("useFluxionCanvas host recycling", () => {
     expect(ops).toContain(Op.SET_BG_COLOR);
     expect(ops).toContain(Op.RESIZE);
     expect(ops).toContain(Op.SET_VISIBLE);
-    expect(pool.stats).toEqual({ created: 1, recycled: 1 });
+    expect(pool.stats).toEqual({
+      created: 1,
+      recycled: 1,
+      overflowDisposed: 0,
+      highWater: 1,
+    });
 
     second.unmount();
     pool.dispose();

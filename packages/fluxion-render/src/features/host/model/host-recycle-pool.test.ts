@@ -199,6 +199,90 @@ describe("createHostRecyclePool", () => {
     expect(pool.stats.created).toBe(2);
   });
 
+  describe("working-set stats", () => {
+    const params = { hostOptions: {}, hasXAxis: false, hasYAxis: false };
+
+    it("tracks highWater across interleaved creates, acquires, and releases", () => {
+      const pool = createHostRecyclePool();
+      const key = pool.keyFor(params);
+      pool.markCreated(); // outstanding 1
+      pool.markCreated(); // outstanding 2
+      pool.markCreated(); // outstanding 3 → high water 3
+      expect(pool.stats.highWater).toBe(3);
+      pool.release(makeBundle(key)); // outstanding 2
+      pool.release(makeBundle(key)); // outstanding 1
+      expect(pool.acquire(params)).not.toBeNull(); // warm hit → outstanding 2
+      expect(pool.stats.highWater).toBe(3); // high water unchanged
+      pool.markCreated(); // outstanding 3
+      pool.markCreated(); // outstanding 4 → new high water
+      expect(pool.stats.highWater).toBe(4);
+    });
+
+    it("clamps outstanding at zero so stray releases can't skew highWater", () => {
+      const pool = createHostRecyclePool();
+      const key = pool.keyFor(params);
+      pool.release(makeBundle(key)); // release without acquire — clamped
+      pool.release(makeBundle(key));
+      pool.markCreated();
+      expect(pool.stats.highWater).toBe(1); // not swallowed by a negative count
+    });
+
+    it("counts overflow disposes (bucket-full only, not pool-teardown)", () => {
+      const pool = createHostRecyclePool({ max: 1 });
+      pool.release(makeBundle("k")); // parked
+      pool.release(makeBundle("k")); // overflow
+      pool.release(makeBundle("k")); // overflow
+      expect(pool.stats.overflowDisposed).toBe(2);
+      pool.dispose();
+      pool.release(makeBundle("k")); // disposed-pool teardown — NOT an overflow
+      expect(pool.stats.overflowDisposed).toBe(2);
+    });
+  });
+
+  describe("overflow warning", () => {
+    const warnSpy = () => vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    it("warns once per bucket when overflow disposes cross the threshold", () => {
+      const spy = warnSpy();
+      const pool = createHostRecyclePool({ max: 0, warnAfterOverflow: 2 });
+      pool.release(makeBundle("k")); // 1 — below threshold
+      expect(spy).not.toHaveBeenCalled();
+      pool.release(makeBundle("k")); // 2 — crosses
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy.mock.calls[0]![0]).toContain('bucket "k"');
+      pool.release(makeBundle("k")); // 3 — already warned for this bucket
+      expect(spy).toHaveBeenCalledTimes(1);
+      spy.mockRestore();
+    });
+
+    it("warns independently per bucket", () => {
+      const spy = warnSpy();
+      const pool = createHostRecyclePool({ max: 0, warnAfterOverflow: 1 });
+      pool.release(makeBundle("a"));
+      pool.release(makeBundle("b"));
+      expect(spy).toHaveBeenCalledTimes(2);
+      spy.mockRestore();
+    });
+
+    it("warnAfterOverflow: 0 disables the warning", () => {
+      const spy = warnSpy();
+      const pool = createHostRecyclePool({ max: 0, warnAfterOverflow: 0 });
+      for (let i = 0; i < 20; i++) pool.release(makeBundle("k"));
+      expect(spy).not.toHaveBeenCalled();
+      spy.mockRestore();
+    });
+
+    it("defaults the threshold to 16 overflow disposes", () => {
+      const spy = warnSpy();
+      const pool = createHostRecyclePool({ max: 0 });
+      for (let i = 0; i < 15; i++) pool.release(makeBundle("k"));
+      expect(spy).not.toHaveBeenCalled();
+      pool.release(makeBundle("k")); // 16th
+      expect(spy).toHaveBeenCalledTimes(1);
+      spy.mockRestore();
+    });
+  });
+
   it("dispose defer-tears-down every parked host and refuses further reuse (idempotent)", () => {
     const pool = createHostRecyclePool();
     const key = pool.keyFor({ hostOptions: {}, hasXAxis: false, hasYAxis: false });

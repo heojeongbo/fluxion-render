@@ -28,7 +28,12 @@ describe("useHostRecyclePool", () => {
   it("defaults its options when none are passed", () => {
     const { result } = renderHook(() => useHostRecyclePool());
     expect(result.current.size).toBe(0);
-    expect(result.current.stats).toEqual({ created: 0, recycled: 0 });
+    expect(result.current.stats).toEqual({
+      created: 0,
+      recycled: 0,
+      overflowDisposed: 0,
+      highWater: 0,
+    });
   });
 
   it("unmount defers parked-host teardown through the lifecycle queue", () => {

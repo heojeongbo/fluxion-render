@@ -24,11 +24,26 @@ export interface HostRecyclePoolOptions {
    * Max warm (parked) bundles kept PER recycle key. When a release would exceed
    * this, the host is truly disposed instead of parked. Higher = fewer cold
    * creates under churn, but more idle memory held — each warm host keeps its
-   * worker-side Engine + OffscreenCanvas alive. Default `8` (a good fit for a
-   * virtualized list whose visible working set is small; raise it toward the
-   * concurrent count for a grid that remounts everything at once).
+   * worker-side Engine + OffscreenCanvas alive. Default `8`.
+   *
+   * Sizing guide: for a virtualized list whose visible working set is small,
+   * a small `max` is right. For a grid that remounts EVERYTHING at once (a
+   * route/key change over 64+ charts), size `max` toward the grid size —
+   * otherwise each remount cycle recycles only `max` hosts and cold-creates +
+   * overflow-disposes the rest, re-paying the full GPU allocation burst the
+   * pool exists to avoid. `stats.highWater` reports the concurrent working
+   * set actually observed; the pool warns (see {@link warnAfterOverflow})
+   * when overflow churn suggests `max` is undersized.
    */
   max?: number;
+  /**
+   * Overflow-churn warning threshold. When a single recycle bucket has
+   * overflow-disposed this many bundles (releases that found the bucket full
+   * and tore the host down instead of parking it), a one-time `console.warn`
+   * for that bucket reports the observed `stats.highWater` and recommends
+   * raising `max`. Default `16`; pass `0` (or negative) to disable.
+   */
+  warnAfterOverflow?: number;
 }
 
 /** Inputs that determine which warm bundles are interchangeable with a mount. */
@@ -66,11 +81,24 @@ export interface HostRecyclePool {
   /** Total parked bundles across all buckets. */
   readonly size: number;
   readonly isDisposed: boolean;
-  /** Lifetime counters — `created` cold hosts vs `recycled` warm reuses. */
-  readonly stats: { created: number; recycled: number };
+  /**
+   * Lifetime counters. `created` cold hosts vs `recycled` warm reuses tell you
+   * the hit rate; `overflowDisposed` counts releases that found their bucket
+   * full and tore the host down (churn the pool failed to absorb — if this
+   * grows every remount cycle, `max` is undersized); `highWater` is the
+   * largest number of concurrently outstanding (acquired or cold-created,
+   * not yet released) hosts — the working set `max` should be sized against.
+   */
+  readonly stats: {
+    created: number;
+    recycled: number;
+    overflowDisposed: number;
+    highWater: number;
+  };
 }
 
 const DEFAULT_MAX = 8;
+const DEFAULT_WARN_AFTER_OVERFLOW = 16;
 
 /**
  * A pool of warm, reusable chart hosts. In churny UIs (virtualized lists,
@@ -92,6 +120,7 @@ export function createHostRecyclePool(
   options: HostRecyclePoolOptions = {},
 ): HostRecyclePool {
   const max = Math.max(0, options.max ?? DEFAULT_MAX);
+  const warnAfterOverflow = options.warnAfterOverflow ?? DEFAULT_WARN_AFTER_OVERFLOW;
   // bucket key → LIFO stack of warm bundles (LIFO favors temporal locality).
   const warm = new Map<string, HostBundle[]>();
   // Stable per-object ids so the key separates distinct worker pools / factories
@@ -102,6 +131,35 @@ export function createHostRecyclePool(
   let disposed = false;
   let created = 0;
   let recycled = 0;
+  let overflowDisposed = 0;
+  // Working-set tracking: outstanding = hosts handed out (warm hit or cold
+  // create) and not yet released. Its high-water mark is what `max` should be
+  // sized against. Clamped at 0 so a stray release can't skew it negative.
+  let outstanding = 0;
+  let highWater = 0;
+  // Per-bucket overflow counts + once-per-bucket warn guard (arity-guard pattern).
+  const overflowByKey = new Map<string, number>();
+  const warnedKeys = new Set<string>();
+
+  const trackAcquired = (): void => {
+    outstanding++;
+    if (outstanding > highWater) highWater = outstanding;
+  };
+
+  const trackOverflow = (key: string): void => {
+    overflowDisposed++;
+    const n = (overflowByKey.get(key) ?? 0) + 1;
+    overflowByKey.set(key, n);
+    if (warnAfterOverflow > 0 && n >= warnAfterOverflow && !warnedKeys.has(key)) {
+      warnedKeys.add(key);
+      console.warn(
+        `[fluxion] host recycle pool: bucket "${key}" has overflow-disposed ` +
+          `${n} hosts (max=${max}, observed high-water ${highWater} concurrent). ` +
+          "Each overflow re-pays the full host create/destroy cost the pool " +
+          "exists to avoid. Raise `max` toward the high-water mark.",
+      );
+    }
+  };
 
   const idFor = (obj: object | undefined): string => {
     if (!obj) return "default";
@@ -140,21 +198,24 @@ export function createHostRecyclePool(
       return disposed;
     },
     get stats() {
-      return { created, recycled };
+      return { created, recycled, overflowDisposed, highWater };
     },
     markCreated() {
       created++;
+      trackAcquired();
     },
     acquire(params) {
       if (disposed) return null;
       const bundle = warm.get(keyFor(params))?.pop();
       if (bundle) {
         recycled++;
+        trackAcquired();
         return bundle;
       }
       return null;
     },
     release(bundle) {
+      outstanding = Math.max(0, outstanding - 1);
       // A disposed pool (or a full bucket) tears the released host down for
       // real — deferred so a bulk unmount's overflow can't burst-free dozens
       // of GPU backings inside one React commit. The bundle never (re-)enters
@@ -169,6 +230,7 @@ export function createHostRecyclePool(
         warm.set(bundle.key, list);
       }
       if (list.length >= max) {
+        trackOverflow(bundle.key);
         enqueueDispose(() => bundle.host.dispose());
         return;
       }
