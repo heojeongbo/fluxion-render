@@ -333,7 +333,10 @@ globally:
 ```tsx
 import { configureMountScheduler } from '@heojeongbo/fluxion-render/react';
 
-configureMountScheduler({ perFrame: 6 }); // host creations per frame (default 4)
+configureMountScheduler({
+  perFrame: 6,       // host creations/teardowns per frame (default 4)
+  resizePerFrame: 12, // host resizes applied per frame (default 8)
+});
 
 <FluxionCanvas layers={[/* … */]} hostOptions={{ pool }} />          // staggered (default)
 <FluxionCanvas staggerMount={false} layers={[/* … */]} />            // synchronous (opt out)
@@ -354,6 +357,33 @@ regenerate it) and push it once with `handle.pushBatch(...)` — or
 `handle.reset(latestT)` then `pushBatch(...)` to also rewind the time axis. The
 backfill and the live stream share one ring and merge in push order, so keep the
 backfilled timestamps `<=` the next live sample.
+
+**Resize bursts are frame-budgeted too.** One layout change — a split-pane drag,
+a window resize, a devicePixelRatio flip — fires *every* chart's ResizeObserver
+in the same tick, and each resize reallocates up to three GPU backing stores
+(main + axis canvases) in the worker. Applying all of them at once is the same
+freeze as an unstaggered mount burst, so resizes flow through the shared
+scheduler as a **latest-wins-per-chart lane**: at most `resizePerFrame`
+(default 8) charts are resized per animation frame, repeated schedules for the
+same chart coalesce to the newest size, and a pending resize is dropped if the
+chart unmounts first. A grid-wide resize settles over a few frames (charts
+CSS-stretch briefly instead of the page freezing); a lone chart's resize gains
+at most one frame of latency. This is on top of the per-chart 100 ms debounce,
+which merges repeated changes for one chart but can't spread a cross-chart
+burst.
+
+To see what the queues are doing (e.g. while profiling a freeze), read the live
+counters:
+
+```ts
+import { getLifecycleStats } from '@heojeongbo/fluxion-render/react';
+
+getLifecycleStats();
+// { mountsRun, disposesRun, resizesApplied, pendingTasks, pendingResizes }
+```
+
+Pair it with `recyclePool.stats` (below) to tell cold-create storms apart from
+resize storms.
 
 ### Spreading the React mount of a big grid (`useStaggeredMount`)
 
@@ -429,7 +459,20 @@ function Grid({ items }) {
   creates under churn, but more idle memory held (each warm host keeps its
   worker-side engine + OffscreenCanvas alive). For a virtualized list whose visible
   working set is small, `8`–`16` is plenty; for a grid that remounts *everything*
-  at once, raise it toward the concurrent count so the whole set recycles.
+  at once, raise it toward the concurrent count so the whole set recycles —
+  `stats.highWater` reports the peak working set actually observed, and the pool
+  `console.warn`s once per bucket when overflow churn says `max` is undersized
+  (threshold `warnAfterOverflow`, default 16 overflow disposes; `0` disables).
+- **`idleShrinkMs`** (default off) makes a *large* `max` safe: after a host has
+  been parked that long, its worker-side GPU backings are released (canvases
+  shrink to `0×0`) while the host stays warm and reusable — the next acquire's
+  resize re-allocates them inside the frame-budgeted mount task. Without it, a
+  pool sized for a 64-chart grid parks up to ~200 full-size idle GPU surfaces.
+- **Teardown is deferred.** When a release overflows a full bucket, or the pool
+  itself is disposed (route change), the real `host.dispose()` calls drain
+  through the same frame-throttled queue as staggered mounts — a bulk unmount
+  can't burst-free dozens of GPU backings inside one React commit. Bundles
+  become unreachable immediately; only the teardown work is spread out.
 - **Stacks with `staggerMount`.** A warm reuse is far cheaper than a cold create,
   so the per-frame mount budget goes much further. The pool is disposed (tearing
   down every warm host) when the component holding `useHostRecyclePool` unmounts.
@@ -873,17 +916,25 @@ for when and how.
 
 ```ts
 const recyclePool = useHostRecyclePool({
-  max?: number,   // warm hosts kept per recycle key, default 8 (higher = fewer
-});                // cold creates, more idle worker/GPU memory held)
+  max?: number,               // warm hosts kept per recycle key, default 8 (higher =
+                              // fewer cold creates, more idle worker/GPU memory held)
+  idleShrinkMs?: number,      // release a parked host's GPU backings after this long
+                              // idle (default off) — makes a large `max` safe
+  warnAfterOverflow?: number, // once-per-bucket console.warn after this many overflow
+                              // disposes (default 16, 0 disables)
+});
 
-// recyclePool.stats → { created, recycled }   // cold creates vs warm reuses
+// recyclePool.stats → { created, recycled, overflowDisposed, highWater, shrunk }
 // recyclePool.size                            // currently parked hosts
 
 <FluxionCanvas recyclePool={recyclePool} hostOptions={{ pool }} layers={…} />;
 ```
 
 `stats` is handy for a HUD that shows the recycling working (flip the chart churn
-on and watch `recycled` climb while `created` plateaus).
+on and watch `recycled` climb while `created` plateaus). `highWater` is the peak
+concurrent working set — the number to size `max` against; a growing
+`overflowDisposed` means the pool is undersized and churn is re-paying the full
+create/destroy cost.
 
 ### `useStaggeredMount(total, options?)`
 
