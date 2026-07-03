@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHostRecyclePool } from "../../../features/host";
 import {
   configureMountScheduler,
+  flushMountScheduler,
   resetMountScheduler,
 } from "../../../shared/lib/lifecycle-scheduler";
 import { Op } from "../../../shared/protocol";
@@ -664,6 +665,7 @@ describe("useFluxionCanvas resize forwarding", () => {
   });
   afterEach(() => {
     (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = realRO;
+    resetMountScheduler(); // drop any resize a test left pending
   });
 
   const deliver = (w: number, h: number) =>
@@ -673,13 +675,39 @@ describe("useFluxionCanvas resize forwarding", () => {
 
   const ops = (posts: RecordedPost[]) => posts.map((p) => (p.msg as { op: number }).op);
 
-  it("forwards a non-zero observer size to host.resize", () => {
+  it("defers a non-zero observer size through the resize lane (no sync RESIZE)", () => {
     const { factory, posts } = makeFakeWorkerFactory();
     // staggerMount defaults to false in Harness → host created synchronously.
     render(<Harness workerFactory={factory} />);
     posts.length = 0;
     deliver(200, 100);
+    // Not applied in the observer tick — a grid-wide layout change must not
+    // reallocate every chart's backing in one frame.
+    expect(ops(posts)).not.toContain(Op.RESIZE);
+    flushMountScheduler();
     expect(ops(posts)).toContain(Op.RESIZE);
+  });
+
+  it("a second delivery inside the debounce window adds no extra RESIZE", () => {
+    const { factory, posts } = makeFakeWorkerFactory();
+    render(<Harness workerFactory={factory} />);
+    posts.length = 0;
+    deliver(200, 100); // first measurement emits immediately → one lane entry
+    deliver(300, 150); // within the observer's 100ms debounce → no emit yet
+    flushMountScheduler();
+    const resizes = posts.filter((p) => (p.msg as { op: number }).op === Op.RESIZE);
+    expect(resizes).toHaveLength(1); // per-chart debounce + lane compose: one apply
+    expect(resizes[0]!.msg).toMatchObject({ width: 200, height: 100 });
+  });
+
+  it("unmounting before the frame drops the pending resize", () => {
+    const { factory, posts } = makeFakeWorkerFactory();
+    const { unmount } = render(<Harness workerFactory={factory} />);
+    posts.length = 0;
+    deliver(200, 100);
+    unmount(); // cleanup cancels the scheduled resize for this host
+    flushMountScheduler();
+    expect(ops(posts)).not.toContain(Op.RESIZE);
   });
 
   it("ignores a zero-sized observer entry", () => {
@@ -687,6 +715,7 @@ describe("useFluxionCanvas resize forwarding", () => {
     render(<Harness workerFactory={factory} />);
     posts.length = 0;
     deliver(0, 0);
+    flushMountScheduler();
     expect(ops(posts)).not.toContain(Op.RESIZE);
   });
 });

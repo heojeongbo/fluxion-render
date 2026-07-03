@@ -26,7 +26,12 @@ import {
   type HostBundle,
   type HostRecyclePool,
 } from "../../../features/host";
-import { enqueueDispose, enqueueMount } from "../../../shared/lib/lifecycle-scheduler";
+import {
+  cancelResize,
+  enqueueDispose,
+  enqueueMount,
+  scheduleResize,
+} from "../../../shared/lib/lifecycle-scheduler";
 import { type ResizeInfo, useResizeObserver } from "./use-resize-observer";
 
 /**
@@ -334,6 +339,9 @@ export function useFluxionCanvas(
       detachCanvas(xAxisCanvas, xAxisContainer);
       detachCanvas(yAxisCanvas, yAxisContainer);
       if (bundle) {
+        // Drop any not-yet-applied scheduled resize: it must not reallocate a
+        // parked (recycled) host's backing or touch a host queued for dispose.
+        cancelResize(bundle.host);
         if (recyclePool && !recyclePool.isDisposed) {
           // Recycle: reset to pristine + pause (synchronous so the same-commit
           // remount can borrow it back), then park for the next mount.
@@ -405,10 +413,14 @@ export function useFluxionCanvas(
   const handleResize = useCallback((info: ResizeInfo) => {
     // Forward to the host only once it exists (under staggerMount a resize can
     // arrive before the deferred host is created) and the size is real (a
-    // detached / pre-layout element reports 0×0).
+    // detached / pre-layout element reports 0×0). Routed through the shared
+    // frame-budgeted resize lane: one layout change (split-pane drag, window
+    // resize, DPR flip) fires EVERY chart's ResizeObserver in the same tick,
+    // and applying them all at once would reallocate every chart's GPU backing
+    // in a single frame — the per-chart debounce can't spread that burst.
     const instance = hostRef.current;
     if (instance && info.width > 0 && info.height > 0) {
-      instance.resize(info.width, info.height, info.dpr);
+      scheduleResize(instance, info);
     }
   }, []);
 

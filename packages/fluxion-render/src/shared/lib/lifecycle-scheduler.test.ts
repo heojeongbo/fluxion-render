@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  cancelResize,
   configureMountScheduler,
   enqueueDispose,
   enqueueMount,
   flushMountScheduler,
   resetMountScheduler,
+  scheduleResize,
 } from "./lifecycle-scheduler";
 
 /** Advance one animation frame (fires the faked rAF / setTimeout drain). */
@@ -18,7 +20,8 @@ describe("lifecycle-scheduler", () => {
   });
   afterEach(() => {
     vi.useRealTimers();
-    configureMountScheduler({ perFrame: 4 }); // reset module default for the next test
+    // reset module defaults for the next test
+    configureMountScheduler({ perFrame: 4, resizePerFrame: 8 });
   });
 
   it("runs at most perFrame tasks per frame, rescheduling until drained", () => {
@@ -149,6 +152,135 @@ describe("lifecycle-scheduler", () => {
     expect(order).toEqual([0, 1, 2]); // perFrame stayed 3
     frame(); // drain the leftover so module state resets cleanly
     expect(order).toEqual([0, 1, 2, 3]);
+  });
+
+  describe("resize lane", () => {
+    /** A Resizable that records every applied size. */
+    function makeTarget() {
+      const calls: Array<[number, number, number]> = [];
+      return {
+        calls,
+        resize(width: number, height: number, dpr: number) {
+          calls.push([width, height, dpr]);
+        },
+      };
+    }
+
+    it("coalesces repeated schedules for the same target — latest size wins", () => {
+      const t = makeTarget();
+      scheduleResize(t, { width: 100, height: 50, dpr: 1 });
+      scheduleResize(t, { width: 300, height: 150, dpr: 2 });
+      expect(t.calls).toEqual([]); // nothing synchronous
+      frame();
+      expect(t.calls).toEqual([[300, 150, 2]]); // one apply, last size
+      frame(); // drained → no further applies
+      expect(t.calls).toHaveLength(1);
+    });
+
+    it("applies at most resizePerFrame targets per frame, FIFO", () => {
+      configureMountScheduler({ resizePerFrame: 2 });
+      const targets = Array.from({ length: 5 }, makeTarget);
+      for (const t of targets) scheduleResize(t, { width: 10, height: 10, dpr: 1 });
+      frame();
+      expect(targets.map((t) => t.calls.length)).toEqual([1, 1, 0, 0, 0]);
+      frame();
+      expect(targets.map((t) => t.calls.length)).toEqual([1, 1, 1, 1, 0]);
+      frame();
+      expect(targets.map((t) => t.calls.length)).toEqual([1, 1, 1, 1, 1]);
+    });
+
+    it("a re-scheduled target keeps its original queue position", () => {
+      configureMountScheduler({ resizePerFrame: 1 });
+      const a = makeTarget();
+      const b = makeTarget();
+      scheduleResize(a, { width: 1, height: 1, dpr: 1 });
+      scheduleResize(b, { width: 2, height: 2, dpr: 1 });
+      scheduleResize(a, { width: 9, height: 9, dpr: 1 }); // update, not re-append
+      frame();
+      expect(a.calls).toEqual([[9, 9, 1]]); // a still first, with the new size
+      expect(b.calls).toEqual([]);
+      frame();
+      expect(b.calls).toEqual([[2, 2, 1]]);
+    });
+
+    it("cancelResize drops a pending resize; a later schedule works again", () => {
+      const t = makeTarget();
+      scheduleResize(t, { width: 100, height: 100, dpr: 1 });
+      cancelResize(t);
+      frame();
+      expect(t.calls).toEqual([]); // cancelled before its frame
+      cancelResize(t); // nothing pending → no-op, must not throw
+      scheduleResize(t, { width: 200, height: 200, dpr: 1 });
+      frame();
+      expect(t.calls).toEqual([[200, 200, 1]]);
+    });
+
+    it("task and resize lanes drain in the same frame with independent budgets", () => {
+      configureMountScheduler({ perFrame: 1, resizePerFrame: 1 });
+      const order: string[] = [];
+      enqueueMount(() => order.push("m1"));
+      enqueueMount(() => order.push("m2"));
+      const a = makeTarget();
+      const b = makeTarget();
+      scheduleResize(a, { width: 1, height: 1, dpr: 1 });
+      scheduleResize(b, { width: 2, height: 2, dpr: 1 });
+      frame(); // 1 task + 1 resize in the same frame
+      expect(order).toEqual(["m1"]);
+      expect(a.calls).toHaveLength(1);
+      expect(b.calls).toHaveLength(0);
+      frame();
+      expect(order).toEqual(["m1", "m2"]);
+      expect(b.calls).toHaveLength(1);
+    });
+
+    it("isolates a throwing resize so later targets in the batch still apply", () => {
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const bad = {
+        resize() {
+          throw new Error("boom");
+        },
+      };
+      const ok = makeTarget();
+      scheduleResize(bad, { width: 1, height: 1, dpr: 1 });
+      scheduleResize(ok, { width: 2, height: 2, dpr: 1 });
+      frame();
+      expect(ok.calls).toHaveLength(1);
+      expect(spy).toHaveBeenCalled();
+      spy.mockRestore();
+    });
+
+    it("flushMountScheduler applies every pending resize, ignoring the budget", () => {
+      configureMountScheduler({ resizePerFrame: 1 });
+      const targets = Array.from({ length: 3 }, makeTarget);
+      for (const t of targets) scheduleResize(t, { width: 7, height: 7, dpr: 1 });
+      flushMountScheduler();
+      expect(targets.map((t) => t.calls.length)).toEqual([1, 1, 1]);
+    });
+
+    it("resetMountScheduler drops pending resizes without applying them", () => {
+      const t = makeTarget();
+      scheduleResize(t, { width: 1, height: 1, dpr: 1 });
+      resetMountScheduler();
+      frame();
+      expect(t.calls).toEqual([]);
+      // Reusable afterwards.
+      scheduleResize(t, { width: 2, height: 2, dpr: 1 });
+      frame();
+      expect(t.calls).toEqual([[2, 2, 1]]);
+    });
+
+    it("ignores non-positive / missing resizePerFrame", () => {
+      configureMountScheduler({ resizePerFrame: 2 });
+      configureMountScheduler({ resizePerFrame: 0 }); // ignored
+      configureMountScheduler({ resizePerFrame: -3 }); // ignored
+      configureMountScheduler({}); // ignored (undefined)
+      const targets = Array.from({ length: 3 }, makeTarget);
+      for (const t of targets) scheduleResize(t, { width: 1, height: 1, dpr: 1 });
+      frame();
+      expect(targets.map((t) => t.calls.length)).toEqual([1, 1, 0]); // stayed 2
+      frame(); // drain the leftover so module state resets cleanly
+      expect(targets.map((t) => t.calls.length)).toEqual([1, 1, 1]);
+    });
   });
 
   it("falls back to setTimeout when requestAnimationFrame is unavailable", () => {
