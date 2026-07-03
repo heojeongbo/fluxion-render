@@ -536,6 +536,11 @@ describe("useFluxionCanvas host recycling", () => {
   const initCount = (posts: RecordedPost[]) =>
     opsOf(posts).filter((o) => o === Op.INIT).length;
 
+  afterEach(() => {
+    // Pool teardowns are deferred through the module-global lifecycle queue.
+    resetMountScheduler();
+  });
+
   it("reuses a warm host on remount instead of creating a new one", () => {
     const { factory, posts, terminate } = makeFakeWorkerFactory();
     const pool = createHostRecyclePool();
@@ -605,7 +610,7 @@ describe("useFluxionCanvas host recycling", () => {
     pool.dispose();
   });
 
-  it("disposing the recycle pool tears down a parked host", () => {
+  it("disposing the recycle pool tears down a parked host (deferred)", () => {
     const { factory, terminate } = makeFakeWorkerFactory();
     const pool = createHostRecyclePool();
     const { unmount } = render(
@@ -614,10 +619,12 @@ describe("useFluxionCanvas host recycling", () => {
     unmount();
     expect(terminate).not.toHaveBeenCalled(); // parked
     pool.dispose();
+    expect(terminate).not.toHaveBeenCalled(); // teardown queued, not synchronous
+    flushMountScheduler();
     expect(terminate).toHaveBeenCalledTimes(1); // torn down with the pool
   });
 
-  it("disposes the host directly when the recycle pool is already disposed", () => {
+  it("disposes the host (deferred) when the recycle pool is already disposed", () => {
     const { factory, terminate } = makeFakeWorkerFactory();
     const pool = createHostRecyclePool();
     const { unmount } = render(
@@ -625,6 +632,7 @@ describe("useFluxionCanvas host recycling", () => {
     );
     pool.dispose(); // pool dies while the chart is still mounted
     unmount(); // cleanup sees a disposed pool → disposes the host instead of parking
+    flushMountScheduler();
     expect(terminate).toHaveBeenCalledTimes(1);
   });
 
@@ -644,6 +652,7 @@ describe("useFluxionCanvas host recycling", () => {
     expect(terminate).not.toHaveBeenCalled();
     result!.unmount(); // park the in-use host back
     pool.dispose();
+    flushMountScheduler(); // teardown is deferred through the frame queue
     expect(terminate).toHaveBeenCalledTimes(1);
   });
 });

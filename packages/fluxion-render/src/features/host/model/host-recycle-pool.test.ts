@@ -1,4 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  configureMountScheduler,
+  flushMountScheduler,
+  resetMountScheduler,
+} from "../../../shared/lib/lifecycle-scheduler";
 import type { FluxionWorkerPool } from "../../worker-pool";
 import type { FluxionHost } from "./fluxion-host";
 import { createHostRecyclePool, type HostBundle } from "./host-recycle-pool";
@@ -16,6 +21,12 @@ function makeBundle(key: string): FakeBundle {
 const fakePool = () => ({}) as unknown as FluxionWorkerPool;
 
 describe("createHostRecyclePool", () => {
+  afterEach(() => {
+    // Teardowns are deferred through the module-global lifecycle queue — don't
+    // leak a pending dispose into the next test.
+    resetMountScheduler();
+  });
+
   describe("keyFor", () => {
     it("is stable for identical params and differs for axis presence / render options", () => {
       const pool = createHostRecyclePool();
@@ -111,17 +122,73 @@ describe("createHostRecyclePool", () => {
     expect(pool.acquire(noAxis)).not.toBeNull(); // compatible → reuse
   });
 
-  it("disposes a released bundle when its bucket is already at max", () => {
+  it("defer-disposes a released bundle when its bucket is already at max", () => {
     const pool = createHostRecyclePool({ max: 2 });
     const b1 = makeBundle("k");
     const b2 = makeBundle("k");
     const b3 = makeBundle("k");
     pool.release(b1);
     pool.release(b2);
-    pool.release(b3); // bucket full → disposed instead of parked
+    pool.release(b3); // bucket full → torn down instead of parked
+    // NOT synchronous — the teardown is queued so a bulk-unmount overflow
+    // can't burst-free GPU backings inside one commit.
+    expect(b3.host.dispose).not.toHaveBeenCalled();
+    expect(pool.size).toBe(2);
+    flushMountScheduler();
     expect(b3.host.dispose).toHaveBeenCalledTimes(1);
     expect(b1.host.dispose).not.toHaveBeenCalled();
     expect(pool.size).toBe(2);
+  });
+
+  it("an overflow bundle is never acquirable between enqueue and drain", () => {
+    const pool = createHostRecyclePool({ max: 1 });
+    const params = { hostOptions: {}, hasXAxis: false, hasYAxis: false };
+    const key = pool.keyFor(params);
+    const parked = makeBundle(key);
+    const overflow = makeBundle(key);
+    pool.release(parked);
+    pool.release(overflow); // dispose queued, never parked
+    expect(pool.acquire(params)).toBe(parked); // only the parked one is handed out
+    expect(pool.acquire(params)).toBeNull();
+    flushMountScheduler();
+    expect(overflow.host.dispose).toHaveBeenCalledTimes(1);
+    expect(parked.host.dispose).not.toHaveBeenCalled();
+  });
+
+  it("spreads overflow disposes across frames on the shared perFrame budget", () => {
+    vi.useFakeTimers();
+    try {
+      configureMountScheduler({ perFrame: 2 });
+      const pool = createHostRecyclePool({ max: 0 }); // every release overflows
+      const bundles = Array.from({ length: 4 }, () => makeBundle("k"));
+      for (const b of bundles) pool.release(b);
+      const disposed = () =>
+        bundles.filter((b) => b.host.dispose.mock.calls.length > 0).length;
+      expect(disposed()).toBe(0); // nothing in the release commit
+      vi.advanceTimersByTime(20);
+      expect(disposed()).toBe(2); // bounded per frame
+      vi.advanceTimersByTime(20);
+      expect(disposed()).toBe(4);
+    } finally {
+      vi.useRealTimers();
+      configureMountScheduler({ perFrame: 4 });
+    }
+  });
+
+  it("isolates a throwing deferred dispose so later ones still run", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const pool = createHostRecyclePool({ max: 0 });
+    const bad = makeBundle("k");
+    bad.host.dispose.mockImplementation(() => {
+      throw new Error("boom");
+    });
+    const ok = makeBundle("k");
+    pool.release(bad);
+    pool.release(ok);
+    flushMountScheduler();
+    expect(ok.host.dispose).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
   });
 
   it("markCreated increments stats.created", () => {
@@ -132,7 +199,7 @@ describe("createHostRecyclePool", () => {
     expect(pool.stats.created).toBe(2);
   });
 
-  it("dispose tears down every parked host and refuses further reuse (idempotent)", () => {
+  it("dispose defer-tears-down every parked host and refuses further reuse (idempotent)", () => {
     const pool = createHostRecyclePool();
     const key = pool.keyFor({ hostOptions: {}, hasXAxis: false, hasYAxis: false });
     const b1 = makeBundle(key);
@@ -141,20 +208,29 @@ describe("createHostRecyclePool", () => {
     pool.release(b2);
 
     pool.dispose();
-    expect(b1.host.dispose).toHaveBeenCalledTimes(1);
-    expect(b2.host.dispose).toHaveBeenCalledTimes(1);
+    // Bundles are unreachable IMMEDIATELY (no resurrection window)…
     expect(pool.isDisposed).toBe(true);
     expect(pool.size).toBe(0);
-
-    // After dispose: acquire is always cold; release disposes immediately.
     expect(
       pool.acquire({ hostOptions: {}, hasXAxis: false, hasYAxis: false }),
     ).toBeNull();
+    // …but the actual teardown drains through the frame queue, not in the
+    // dispose() call itself (a route change must not burst-free all backings).
+    expect(b1.host.dispose).not.toHaveBeenCalled();
+    expect(b2.host.dispose).not.toHaveBeenCalled();
+    flushMountScheduler();
+    expect(b1.host.dispose).toHaveBeenCalledTimes(1);
+    expect(b2.host.dispose).toHaveBeenCalledTimes(1);
+
+    // After dispose: release defers a real teardown.
     const b3 = makeBundle(key);
     pool.release(b3);
+    expect(b3.host.dispose).not.toHaveBeenCalled();
+    flushMountScheduler();
     expect(b3.host.dispose).toHaveBeenCalledTimes(1);
 
     pool.dispose(); // idempotent — no throw, no double-dispose
+    flushMountScheduler();
     expect(b1.host.dispose).toHaveBeenCalledTimes(1);
   });
 });

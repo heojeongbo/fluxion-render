@@ -1,3 +1,4 @@
+import { enqueueDispose } from "../../../shared/lib/lifecycle-scheduler";
 import type { FluxionHost, FluxionHostOptions } from "./fluxion-host";
 
 /**
@@ -46,9 +47,21 @@ export interface HostRecyclePool {
   acquire(params: RecycleKeyParams): HostBundle | null;
   /** Count a cold (fresh) host creation, for `stats.created`. */
   markCreated(): void;
-  /** Park a bundle for reuse, or dispose it when its bucket is already full. */
+  /**
+   * Park a bundle for reuse, or tear it down when its bucket is already full
+   * (or the pool is disposed). Teardown is DEFERRED through the shared
+   * frame-budgeted lifecycle queue — a bulk unmount that overflows the bucket
+   * spreads its `host.dispose()` burst across frames instead of running every
+   * teardown synchronously in the unmount commit. In tests, run
+   * `flushMountScheduler()` to make the deferred disposes observable.
+   */
   release(bundle: HostBundle): void;
-  /** Dispose every parked host and stop accepting new ones. Idempotent. */
+  /**
+   * Stop accepting new bundles and tear down every parked host — deferred
+   * through the shared frame-budgeted lifecycle queue (see {@link release}),
+   * so a route change doesn't free every warm backing in one synchronous
+   * pass. Parked bundles become unreachable immediately. Idempotent.
+   */
   dispose(): void;
   /** Total parked bundles across all buckets. */
   readonly size: number;
@@ -142,9 +155,12 @@ export function createHostRecyclePool(
       return null;
     },
     release(bundle) {
-      // A disposed pool (or a full bucket) tears the released host down for real.
+      // A disposed pool (or a full bucket) tears the released host down for
+      // real — deferred so a bulk unmount's overflow can't burst-free dozens
+      // of GPU backings inside one React commit. The bundle never (re-)enters
+      // `warm`, so it can't be acquired between enqueue and drain.
       if (disposed) {
-        bundle.host.dispose();
+        enqueueDispose(() => bundle.host.dispose());
         return;
       }
       let list = warm.get(bundle.key);
@@ -153,7 +169,7 @@ export function createHostRecyclePool(
         warm.set(bundle.key, list);
       }
       if (list.length >= max) {
-        bundle.host.dispose();
+        enqueueDispose(() => bundle.host.dispose());
         return;
       }
       list.push(bundle);
@@ -161,8 +177,10 @@ export function createHostRecyclePool(
     dispose() {
       if (disposed) return;
       disposed = true;
+      // `disposed` is set and `warm` cleared BEFORE any queued teardown runs,
+      // so a deferred dispose can never resurrect or double-hand-out a bundle.
       for (const list of warm.values()) {
-        for (const b of list) b.host.dispose();
+        for (const b of list) enqueueDispose(() => b.host.dispose());
       }
       warm.clear();
     },
