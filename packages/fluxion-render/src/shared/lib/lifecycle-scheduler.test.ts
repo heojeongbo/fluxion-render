@@ -5,14 +5,14 @@ import {
   enqueueMount,
   flushMountScheduler,
   resetMountScheduler,
-} from "./mount-scheduler";
+} from "./lifecycle-scheduler";
 
 /** Advance one animation frame (fires the faked rAF / setTimeout drain). */
 function frame() {
   vi.advanceTimersByTime(20);
 }
 
-describe("mount-scheduler", () => {
+describe("lifecycle-scheduler", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });

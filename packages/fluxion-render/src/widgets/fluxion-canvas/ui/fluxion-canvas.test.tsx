@@ -1,8 +1,8 @@
 import { act, render } from "@testing-library/react";
 import { createRef, StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { resetMountScheduler } from "../../../shared/lib/lifecycle-scheduler";
 import { Op } from "../../../shared/protocol";
-import { resetMountScheduler } from "../lib/mount-scheduler";
 import { FluxionCanvas, type FluxionCanvasHandle } from "./fluxion-canvas";
 
 interface RecordedPost {

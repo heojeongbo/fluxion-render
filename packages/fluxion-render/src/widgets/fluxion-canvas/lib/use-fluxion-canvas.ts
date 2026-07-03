@@ -26,7 +26,7 @@ import {
   type HostBundle,
   type HostRecyclePool,
 } from "../../../features/host";
-import { enqueueDispose, enqueueMount } from "./mount-scheduler";
+import { enqueueDispose, enqueueMount } from "../../../shared/lib/lifecycle-scheduler";
 import { type ResizeInfo, useResizeObserver } from "./use-resize-observer";
 
 /**

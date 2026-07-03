@@ -1,3 +1,4 @@
+export { configureMountScheduler } from "../../shared/lib/lifecycle-scheduler";
 export { type CapacityAdvisory, checkCapacity } from "./lib/check-capacity";
 export {
   areaLayer,
@@ -25,7 +26,6 @@ export {
   trajectoryLayer,
 } from "./lib/layer-specs";
 export { legendFromLayers } from "./lib/legend-from-layers";
-export { configureMountScheduler } from "./lib/mount-scheduler";
 export { subscribeTicker, useSharedTicker } from "./lib/shared-ticker";
 export { useXAxisCanvas, useYAxisCanvas } from "./lib/use-axis-canvas";
 export { useAxisTicks } from "./lib/use-axis-ticks";

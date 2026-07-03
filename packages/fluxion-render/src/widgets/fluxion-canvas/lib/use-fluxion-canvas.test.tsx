@@ -2,8 +2,11 @@ import { act, render } from "@testing-library/react";
 import { StrictMode, useEffect, useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHostRecyclePool } from "../../../features/host";
+import {
+  configureMountScheduler,
+  resetMountScheduler,
+} from "../../../shared/lib/lifecycle-scheduler";
 import { Op } from "../../../shared/protocol";
-import { configureMountScheduler, resetMountScheduler } from "./mount-scheduler";
 import { type FluxionLayerSpec, useFluxionCanvas } from "./use-fluxion-canvas";
 
 interface RecordedPost {

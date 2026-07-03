@@ -18,7 +18,7 @@ export {
   configureMountScheduler,
   flushMountScheduler,
   resetMountScheduler,
-} from "../widgets/fluxion-canvas/lib/mount-scheduler";
+} from "../shared/lib/lifecycle-scheduler";
 export { mulberry32 } from "./signals/mulberry32";
 export type { LinearRampOptions, SineSynthOptions } from "./signals/pumps";
 export { createLinearRamp, createSineSynth } from "./signals/pumps";
