@@ -1,4 +1,8 @@
-export { configureMountScheduler } from "../../shared/lib/lifecycle-scheduler";
+export {
+  configureMountScheduler,
+  getLifecycleStats,
+  type LifecycleSchedulerStats,
+} from "../../shared/lib/lifecycle-scheduler";
 export { type CapacityAdvisory, checkCapacity } from "./lib/check-capacity";
 export {
   areaLayer,

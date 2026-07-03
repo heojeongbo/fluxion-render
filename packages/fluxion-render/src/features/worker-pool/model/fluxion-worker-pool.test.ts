@@ -61,6 +61,24 @@ describe("FluxionWorkerHandle", () => {
       pool.dispose();
     });
 
+    it("forwards emitRenderStats into POOL_INIT (and leaves it unset when absent)", () => {
+      const { pool, fakeWorkers } = makePool();
+      const handle = pool.acquire();
+      handle.postMessage({ ...makeInitMsg(), emitRenderStats: true } as HostMsg, []);
+      const withStats = fakeWorkers[0]!.postMessage.mock.calls[0]![0] as {
+        emitRenderStats?: boolean;
+      };
+      expect(withStats.emitRenderStats).toBe(true);
+
+      const handle2 = pool.acquire();
+      handle2.postMessage(makeInitMsg(), []);
+      const without = fakeWorkers[0]!.postMessage.mock.calls.at(-1)![0] as {
+        emitRenderStats?: boolean;
+      };
+      expect(without.emitRenderStats).toBeUndefined();
+      pool.dispose();
+    });
+
     it("uses empty transfer when none provided", () => {
       const { pool, fakeWorkers } = makePool();
       const handle = pool.acquire();

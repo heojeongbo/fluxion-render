@@ -22,7 +22,7 @@
  * rates with `configureMountScheduler({ perFrame, resizePerFrame })`.
  */
 
-type LifecycleTask = { run: () => void; cancelled: boolean };
+type LifecycleTask = { run: () => void; cancelled: boolean; kind: "mount" | "dispose" };
 
 /** Structural target for {@link scheduleResize} — satisfied by `FluxionHost`. */
 export interface Resizable {
@@ -36,6 +36,20 @@ export interface ResizeRequest {
   dpr: number;
 }
 
+/** Snapshot returned by {@link getLifecycleStats}. */
+export interface LifecycleSchedulerStats {
+  /** Host creations the queue has run (lifetime, until reset). */
+  mountsRun: number;
+  /** Host teardowns the queue has run (lifetime, until reset). */
+  disposesRun: number;
+  /** Resizes the lane has applied (lifetime, until reset). */
+  resizesApplied: number;
+  /** Live (non-cancelled) mount/dispose tasks currently queued. */
+  pendingTasks: number;
+  /** Hosts with a resize currently pending. */
+  pendingResizes: number;
+}
+
 let perFrame = 4;
 let resizePerFrame = 8;
 const queue: LifecycleTask[] = [];
@@ -44,6 +58,10 @@ const queue: LifecycleTask[] = [];
 // repeatedly neither queues stale sizes nor jumps the FIFO line.
 const resizeQueue = new Map<Resizable, ResizeRequest>();
 let scheduled = false;
+// Burst observability — read via getLifecycleStats(), zeroed by resetMountScheduler().
+let mountsRun = 0;
+let disposesRun = 0;
+let resizesApplied = 0;
 
 function schedule(): void {
   if (scheduled) return;
@@ -57,6 +75,7 @@ function schedule(): void {
 }
 
 function applyResize(target: Resizable, size: ResizeRequest): void {
+  resizesApplied++;
   // A throwing resize must not stop the drain — same isolation as tasks.
   try {
     target.resize(size.width, size.height, size.dpr);
@@ -76,11 +95,7 @@ function drain(): void {
     ran++;
     // A throwing task must not stop the drain — isolate and keep going so one
     // bad mount/dispose can't strand every later one in the queue.
-    try {
-      task.run();
-    } catch (err) {
-      console.error("[fluxion] lifecycle task error:", err);
-    }
+    runTask(task);
   }
   // Resize lane: independent budget so a grid-wide resize storm can't starve
   // pending mounts/disposes (or vice versa). Deleting while iterating a Map is
@@ -97,8 +112,18 @@ function drain(): void {
   if (queue.length > 0 || resizeQueue.size > 0) schedule();
 }
 
-function enqueue(run: () => void): LifecycleTask {
-  const task: LifecycleTask = { run, cancelled: false };
+function runTask(task: LifecycleTask): void {
+  if (task.kind === "mount") mountsRun++;
+  else disposesRun++;
+  try {
+    task.run();
+  } catch (err) {
+    console.error("[fluxion] lifecycle task error:", err);
+  }
+}
+
+function enqueue(run: () => void, kind: LifecycleTask["kind"]): LifecycleTask {
+  const task: LifecycleTask = { run, cancelled: false, kind };
   queue.push(task);
   schedule();
   return task;
@@ -111,7 +136,7 @@ function enqueue(run: () => void): LifecycleTask {
  * so collapsing a large accordion mid-mount doesn't spike.
  */
 export function enqueueMount(task: () => void): () => void {
-  const t = enqueue(task);
+  const t = enqueue(task, "mount");
   return () => {
     t.cancelled = true;
   };
@@ -123,7 +148,7 @@ export function enqueueMount(task: () => void): () => void {
  * frames instead of running every teardown in the unmount commit.
  */
 export function enqueueDispose(task: () => void): void {
-  enqueue(task);
+  enqueue(task, "dispose");
 }
 
 /**
@@ -182,11 +207,7 @@ export function flushMountScheduler(): void {
   while (queue.length > 0) {
     const task = queue.shift() as LifecycleTask;
     if (task.cancelled) continue;
-    try {
-      task.run();
-    } catch (err) {
-      console.error("[fluxion] lifecycle task error:", err);
-    }
+    runTask(task);
   }
   for (const [target, size] of resizeQueue) {
     resizeQueue.delete(target);
@@ -196,12 +217,37 @@ export function flushMountScheduler(): void {
 }
 
 /**
- * Drop all queued tasks and pending resizes, and clear the pending-frame flag,
- * without running them. Call in a test `afterEach` so the module-global queues
- * can't leak pending mounts/disposes/resizes across tests.
+ * Snapshot of the scheduler's counters and queue depths — the main-thread half
+ * of a burst investigation. Pair with the recycle pool's `stats` (cold creates
+ * vs warm reuses vs overflow disposes) to see WHERE a mount/resize storm comes
+ * from and how fast the queues are draining. Counters accumulate until
+ * {@link resetMountScheduler}; the two `pending*` fields are live gauges.
+ */
+export function getLifecycleStats(): LifecycleSchedulerStats {
+  let pendingTasks = 0;
+  for (const t of queue) {
+    if (!t.cancelled) pendingTasks++;
+  }
+  return {
+    mountsRun,
+    disposesRun,
+    resizesApplied,
+    pendingTasks,
+    pendingResizes: resizeQueue.size,
+  };
+}
+
+/**
+ * Drop all queued tasks and pending resizes, zero the stats counters, and
+ * clear the pending-frame flag, without running anything. Call in a test
+ * `afterEach` so the module-global queues can't leak pending
+ * mounts/disposes/resizes across tests.
  */
 export function resetMountScheduler(): void {
   queue.length = 0;
   resizeQueue.clear();
   scheduled = false;
+  mountsRun = 0;
+  disposesRun = 0;
+  resizesApplied = 0;
 }

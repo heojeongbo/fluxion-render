@@ -5,6 +5,7 @@ import {
   enqueueDispose,
   enqueueMount,
   flushMountScheduler,
+  getLifecycleStats,
   resetMountScheduler,
   scheduleResize,
 } from "./lifecycle-scheduler";
@@ -20,8 +21,9 @@ describe("lifecycle-scheduler", () => {
   });
   afterEach(() => {
     vi.useRealTimers();
-    // reset module defaults for the next test
+    // reset module defaults + stats counters for the next test
     configureMountScheduler({ perFrame: 4, resizePerFrame: 8 });
+    resetMountScheduler();
   });
 
   it("runs at most perFrame tasks per frame, rescheduling until drained", () => {
@@ -280,6 +282,56 @@ describe("lifecycle-scheduler", () => {
       expect(targets.map((t) => t.calls.length)).toEqual([1, 1, 0]); // stayed 2
       frame(); // drain the leftover so module state resets cleanly
       expect(targets.map((t) => t.calls.length)).toEqual([1, 1, 1]);
+    });
+  });
+
+  describe("getLifecycleStats", () => {
+    it("counts drained mounts, disposes, and applied resizes separately", () => {
+      enqueueMount(() => {});
+      enqueueMount(() => {});
+      enqueueDispose(() => {});
+      scheduleResize({ resize() {} }, { width: 1, height: 1, dpr: 1 });
+      frame();
+      expect(getLifecycleStats()).toMatchObject({
+        mountsRun: 2,
+        disposesRun: 1,
+        resizesApplied: 1,
+        pendingTasks: 0,
+        pendingResizes: 0,
+      });
+    });
+
+    it("gauges pending work, excluding cancelled tasks", () => {
+      const cancel = enqueueMount(() => {});
+      enqueueMount(() => {});
+      enqueueDispose(() => {});
+      scheduleResize({ resize() {} }, { width: 1, height: 1, dpr: 1 });
+      cancel(); // tombstoned — must not count as pending
+      expect(getLifecycleStats()).toMatchObject({
+        pendingTasks: 2,
+        pendingResizes: 1,
+        mountsRun: 0,
+      });
+    });
+
+    it("counts a flushed queue and is zeroed by resetMountScheduler", () => {
+      enqueueMount(() => {});
+      enqueueDispose(() => {});
+      scheduleResize({ resize() {} }, { width: 1, height: 1, dpr: 1 });
+      flushMountScheduler();
+      expect(getLifecycleStats()).toMatchObject({
+        mountsRun: 1,
+        disposesRun: 1,
+        resizesApplied: 1,
+      });
+      resetMountScheduler();
+      expect(getLifecycleStats()).toEqual({
+        mountsRun: 0,
+        disposesRun: 0,
+        resizesApplied: 0,
+        pendingTasks: 0,
+        pendingResizes: 0,
+      });
     });
   });
 
