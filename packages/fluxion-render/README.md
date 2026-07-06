@@ -13,6 +13,17 @@ npm install @heojeongbo/fluxion-render
 
 > **Need time-travel replay?** See [`@heojeongbo/fluxion-replay`](https://www.npmjs.com/package/@heojeongbo/fluxion-replay) — record any data stream and scrub back through the last N minutes, including video. Part of a three-package set: **fluxion-worker ← fluxion-render ← fluxion-replay**.
 
+### Requirements & entry points
+
+- **ESM-only.** The package ships ES modules (no CommonJS `require` build). Use a bundler or Node's native ESM.
+- **Browser baseline.** Rendering uses `OffscreenCanvas` + `canvas.transferControlToOffscreen()` in a Web Worker: **Chrome/Edge 69+, Firefox 105+, Safari 16.4+**. There is no main-thread fallback.
+- **Client-only.** The engine touches `Worker`, `OffscreenCanvas`, and (in `/react`) DOM refs — it does not run during SSR. In Next.js/Remix, render `<FluxionCanvas>` (and any `useFluxion*` hook) only on the client (`'use client'` + a mount guard); server-render a placeholder.
+- **Import paths:**
+  - `@heojeongbo/fluxion-render` — framework-agnostic core: `FluxionHost`, `FluxionWorkerPool`, layer factories, protocol types. **No React.**
+  - `@heojeongbo/fluxion-render/react` — a superset of the core **plus** all hooks/components. React apps import from here (core types like `AreaChartConfig` are re-exported, so one import is enough).
+  - `@heojeongbo/fluxion-render/worker` — for a custom worker script: `Engine`, `Op`/`WorkerOp`, and message types (`HostMsg`, `EngineOutMsg`, …).
+  - `@heojeongbo/fluxion-render/testing` — deterministic test helpers (`flushLifecycleScheduler`, signal synths).
+
 ---
 
 ## Contents
@@ -331,9 +342,9 @@ must call `getHost()` imperatively the moment the chart mounts. Tune the rate
 globally:
 
 ```tsx
-import { configureMountScheduler } from '@heojeongbo/fluxion-render/react';
+import { configureLifecycleScheduler } from '@heojeongbo/fluxion-render/react';
 
-configureMountScheduler({
+configureLifecycleScheduler({
   perFrame: 6,       // host creations/teardowns per frame (default 4)
   resizePerFrame: 12, // host resizes applied per frame (default 8)
 });
@@ -1412,12 +1423,17 @@ host.emitStream(id, buffer, length)  // transfer raw ArrayBuffer to streamHandle
 
 // Canvas / lifecycle
 host.resize(width, height, dpr)
-host.setBgColor(color)
+host.setBgColor(color)              // re-theme the canvas background at runtime
+host.setAxisStyle(style)            // re-theme the external axis strip at runtime
+                                    // (Partial<AxisStyle>: color/font/tickSize/…)
 host.setVisible(visible)  // pause/resume the worker render loop (also driven by
                           // document visibility); pauses a parked recycled host
 host.reset()              // back to pristine: dispose all layers + rewind
                           // viewport/bounds/bg, KEEPING the worker engine +
                           // OffscreenCanvas alive — the primitive behind recycling
+host.releaseBackings()    // free the worker GPU backings (main + axis) to 0×0 while
+                          // keeping the host usable; next resize() re-allocates.
+                          // Advanced — the recycle pool's `idleShrinkMs` uses this
 host.dispose()
 ```
 
@@ -1480,8 +1496,13 @@ const pool = new FluxionWorkerPool({
   targetPerWorker?: number, // active hosts/worker that triggers growth, default 12 (min 1).
                             // Only effective when maxSize > size — lower it for heavier
                             // (e.g. high-Hz) per-host workloads to spread sooner
-  workerFactory: () => Worker, // required
+  workerFactory: () => Worker, // required — or use createFluxionWorkerFactory() (below)
 });
+
+// createFluxionWorkerFactory() builds the default-engine workerFactory for you,
+// so you don't hand-write `() => new Worker(new URL(...))` for the built-in engine:
+import { createFluxionWorkerFactory } from '@heojeongbo/fluxion-render';
+const pool = new FluxionWorkerPool({ workerFactory: createFluxionWorkerFactory() });
 
 // Pass to FluxionHost — called automatically, you rarely need this directly
 pool.acquire() // → FluxionWorkerHandle
@@ -1784,28 +1805,28 @@ Because [staggered mount](#performance--many-charts) is on by default, mounting 
 ```ts
 import { render, act } from '@testing-library/react';
 import {
-  flushMountScheduler,
-  resetMountScheduler,
+  flushLifecycleScheduler,
+  resetLifecycleScheduler,
 } from '@heojeongbo/fluxion-render/testing';
 
-afterEach(resetMountScheduler);             // drop any queued tasks between tests
+afterEach(resetLifecycleScheduler);             // drop any queued tasks between tests
 
 it('streams once mounted', () => {
   render(<MyChart />);
-  act(() => flushMountScheduler());         // run the deferred mount now → host + onReady
+  act(() => flushLifecycleScheduler());         // run the deferred mount now → host + onReady
   // ...assert the chart is live...
 });
 
 it('tears down on unmount', () => {
   const { unmount } = render(<MyChart />);
-  act(() => flushMountScheduler());         // mount
+  act(() => flushLifecycleScheduler());         // mount
   unmount();
-  act(() => flushMountScheduler());         // run the deferred dispose now
+  act(() => flushLifecycleScheduler());         // run the deferred dispose now
   // ...assert it was cleaned up...
 });
 ```
 
-`flushMountScheduler()` runs **all** queued mount/dispose tasks synchronously (ignoring the per-frame rate); wrap it in `act()` because a flushed mount calls `setHost`. Prefer this over fake timers for lifecycle assertions. Alternatively, pass `staggerMount={false}` to a chart under test to make its mount/unmount fully synchronous (no flush needed). `configureMountScheduler` is re-exported here too for tuning the rate in tests.
+`flushLifecycleScheduler()` runs **all** queued mount/dispose tasks synchronously (ignoring the per-frame rate); wrap it in `act()` because a flushed mount calls `setHost`. Prefer this over fake timers for lifecycle assertions. Alternatively, pass `staggerMount={false}` to a chart under test to make its mount/unmount fully synchronous (no flush needed). `configureLifecycleScheduler` is re-exported here too for tuning the rate in tests.
 
 ---
 
@@ -1847,6 +1868,15 @@ Push **host-relative** ms (`Date.now() - timeOrigin`), not absolute epoch ms —
 ---
 
 ## Upgrading
+
+### 1.0 — stable public API
+
+1.0 marks the public API as stable: from here, breaking changes only land in a major release. Two breaking cleanups happened at the 0.24 → 1.0 boundary — both are simple import edits:
+
+- **Lifecycle-scheduler rename.** `configureMountScheduler` / `flushMountScheduler` / `resetMountScheduler` → **`configureLifecycleScheduler` / `flushLifecycleScheduler` / `resetLifecycleScheduler`** (the module now governs mounts, disposes, **and** resizes). Same signatures — just the names changed.
+- **React-free core entry.** The React components/hooks that were also exported from `@heojeongbo/fluxion-render` (`FluxionBrush`, `FluxionGauge`, `FluxionPieChart`, `useSyncedTimeWindow`, `useFluxionExport`, `useTimeOrigin`, …) now live only in `@heojeongbo/fluxion-render/react`. If you imported those from the root, switch the import to `/react`. `/react` is a **superset** of the core, so React apps can import everything (including core types) from `/react` alone.
+
+Also new in 1.0: `FluxionHost.setAxisStyle()` for runtime axis re-theming, and several public types are now exported (`AxisStyle`, `FluxionWorkerHandle`, `BoundsChangeListener`, and the engine-out message types on `/worker`). No runtime behavior changed.
 
 **Staggered mount is on by default (since 0.21).** `<FluxionCanvas>` and `useFluxionCanvas` now defer host creation across animation frames, so `host` / `onReady` arrive **one frame later** than before — even for a single chart. If you relied on a synchronous host (e.g. calling `getHost()` immediately after mount), either move that logic into `onReady` or opt out with `staggerMount={false}`. See [Performance / many charts](#performance--many-charts).
 
