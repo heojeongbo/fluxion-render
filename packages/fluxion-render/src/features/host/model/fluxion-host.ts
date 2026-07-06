@@ -443,6 +443,21 @@ export class FluxionHost {
   }
 
   /**
+   * Update the external axis-canvas style (color / font / tick sizing) at
+   * runtime — the counterpart to {@link setBgColor} for the axis strips. Only
+   * the provided fields change; omitted ones keep their current value. Takes
+   * effect on the next rendered frame, so a light/dark toggle can re-theme the
+   * axes without a `key` remount. No-op after `dispose()`.
+   *
+   * Only affects the worker-rendered axis canvases (`externalAxes`); the
+   * in-canvas grid/axis/label colors live in the `axis-grid` layer's config and
+   * re-theme through the normal layer reconcile instead.
+   */
+  setAxisStyle(style: Partial<AxisStyle>): void {
+    this.post({ op: Op.SET_AXIS_STYLE, ...style });
+  }
+
+  /**
    * Register a listener that fires whenever the worker reports new effective
    * y bounds (typically once per frame when `yMode: "auto"` causes a change).
    * Returns an unsubscribe function.

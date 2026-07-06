@@ -139,4 +139,31 @@ describe("FluxionCanvas", () => {
     // xAxisHeight 0 → `xAxisHeight > 0 ? "1fr Npx" : "1fr"` takes the false arm.
     expect(container.firstChild).not.toBeNull();
   });
+
+  it("re-themes the external axis live when the axisColor prop changes (no remount)", () => {
+    const { factory, posts } = makeFakeWorkerFactory();
+    const { rerender } = render(
+      <FluxionCanvas
+        hostOptions={{ workerFactory: factory }}
+        staggerMount={false}
+        layers={[{ id: "axis", kind: "axis-grid" }]}
+        axisColor="#666666"
+      />,
+    );
+    posts.length = 0;
+    rerender(
+      <FluxionCanvas
+        hostOptions={{ workerFactory: factory }}
+        staggerMount={false}
+        layers={[{ id: "axis", kind: "axis-grid" }]}
+        axisColor="#e6e6e6"
+      />,
+    );
+    const axis = posts.find((p) => (p.msg as { op: number }).op === Op.SET_AXIS_STYLE);
+    expect(axis).toBeDefined();
+    expect((axis!.msg as { color: string }).color).toBe("#e6e6e6");
+    // No new INIT — a theme flip must not tear the chart down.
+    expect(posts.map((p) => (p.msg as { op: number }).op)).not.toContain(Op.INIT);
+    resetMountScheduler();
+  });
 });

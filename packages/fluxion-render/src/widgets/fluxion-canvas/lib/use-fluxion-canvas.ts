@@ -207,6 +207,12 @@ export function useFluxionCanvas(
   // synchronously on the warm path; set inside the deferred work on the cold
   // path. Carried so cleanup can recycle (park) or dispose it.
   const bundleRef = useRef<HostBundle | null>(null);
+  // Last bgColor / serialized axisStyle applied to the live host. Seeded at
+  // mount (INIT already carried them) so the theme-reconcile effect below only
+  // re-sends on an actual change — a light/dark toggle re-themes without a
+  // remount, and an unchanged value across a grid never spams postMessages.
+  const appliedBgRef = useRef<string | undefined>(undefined);
+  const appliedAxisRef = useRef<string>("null");
 
   useEffect(() => {
     const container = containerRef.current;
@@ -236,12 +242,16 @@ export function useFluxionCanvas(
     };
 
     // Baseline the reconcile maps to the layers we just (re-)applied so the
-    // reconcile effect doesn't re-send what the worker already holds.
+    // reconcile effect doesn't re-send what the worker already holds. Same for
+    // bg/axis style — INIT (cold) or the warm reactivation already applied the
+    // current values, so seed them to skip a redundant re-send on the next run.
     const seedReconcile = () => {
       lastAppliedRef.current = new Map(
         current.layers.map((l) => [l.id, JSON.stringify(l.config)]),
       );
       lastKindsRef.current = new Map(current.layers.map((l) => [l.id, l.kind]));
+      appliedBgRef.current = current.hostOptions?.bgColor;
+      appliedAxisRef.current = JSON.stringify(current.hostOptions?.axisStyle ?? null);
     };
 
     // Borrow a warm host for this config, or null → cold create. Parked bundles
@@ -409,6 +419,26 @@ export function useFluxionCanvas(
       }
     }
   }, [host, layers]);
+
+  // Reconcile the theme-able host options (bgColor + external-axis style) to the
+  // live host when they change, so a light/dark toggle re-themes without a
+  // remount. `hostOptions` is otherwise mount-only; these two are the parts a
+  // theme switch flips. Seeded in `seedReconcile` (INIT/warm already sent the
+  // current values), so an unchanged value never re-posts.
+  const bgColor = options.hostOptions?.bgColor;
+  const axisStyleKey = JSON.stringify(options.hostOptions?.axisStyle ?? null);
+  useEffect(() => {
+    if (!host) return;
+    if (bgColor !== undefined && bgColor !== appliedBgRef.current) {
+      appliedBgRef.current = bgColor;
+      host.setBgColor(bgColor);
+    }
+    if (axisStyleKey !== appliedAxisRef.current) {
+      appliedAxisRef.current = axisStyleKey;
+      const style = optionsRef.current.hostOptions?.axisStyle;
+      if (style) host.setAxisStyle(style);
+    }
+  }, [host, bgColor, axisStyleKey]);
 
   const handleResize = useCallback((info: ResizeInfo) => {
     // Forward to the host only once it exists (under staggerMount a resize can

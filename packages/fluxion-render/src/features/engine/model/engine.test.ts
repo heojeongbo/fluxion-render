@@ -724,6 +724,40 @@ describe("Engine", () => {
       flushFrame();
       engine.dispatch({ op: Op.DISPOSE });
     });
+
+    it("re-themes the external axis canvas at RUNTIME (light/dark toggle)", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(100, 100);
+      engine.dispatch({ op: Op.INIT, canvas, width: 100, height: 100, dpr: 1 });
+      engine.dispatch({
+        op: Op.ADD_LAYER,
+        id: "axis",
+        kind: "axis-grid",
+        config: { xRange: [0, 10], yRange: [0, 10] },
+      });
+      const xAxisCanvas = newCanvas(100, 30);
+      engine.dispatch({
+        op: Op.SET_AXIS_CANVAS,
+        xAxisCanvas: xAxisCanvas as unknown as OffscreenCanvas,
+        xAxisHeight: 30,
+        yAxisWidth: 60,
+      });
+      const axisCtx = (
+        xAxisCanvas as unknown as { getContext: () => { fillStyle: string } }
+      ).getContext();
+
+      flushFrame();
+      // drawXAxis sets ctx.fillStyle = style.color ?? "#666" for the labels.
+      expect(axisCtx.fillStyle).toBe("#666"); // default axis color
+
+      // A theme toggle re-sends SET_AXIS_STYLE (no remount) → next frame repaints
+      // the axis strip in the new color.
+      engine.dispatch({ op: Op.SET_AXIS_STYLE, color: "#ff0000" });
+      flushFrame();
+      expect(axisCtx.fillStyle).toBe("#ff0000");
+
+      engine.dispatch({ op: Op.DISPOSE });
+    });
   });
 
   describe("maybeSendTickUpdate (no axis canvases)", () => {

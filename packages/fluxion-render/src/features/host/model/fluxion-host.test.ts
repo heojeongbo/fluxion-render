@@ -330,6 +330,34 @@ describe("FluxionHost", () => {
     host.dispose();
   });
 
+  it("setAxisStyle posts a SET_AXIS_STYLE message with only the given fields", () => {
+    const { worker, posts } = makeFakeWorker();
+    const host = new FluxionHost(makeCanvas(), { workerFactory: () => worker });
+    posts.length = 0;
+    host.setAxisStyle({ color: "#eee", tickSize: 8 });
+    expect(posts).toHaveLength(1);
+    const msg = posts[0].msg as {
+      op: number;
+      color?: string;
+      tickSize?: number;
+      font?: string;
+    };
+    expect(msg.op).toBe(Op.SET_AXIS_STYLE);
+    expect(msg.color).toBe("#eee");
+    expect(msg.tickSize).toBe(8);
+    expect(msg.font).toBeUndefined(); // omitted fields aren't sent
+    host.dispose();
+  });
+
+  it("setAxisStyle is a no-op after dispose", () => {
+    const { worker, posts } = makeFakeWorker();
+    const host = new FluxionHost(makeCanvas(), { workerFactory: () => worker });
+    host.dispose();
+    posts.length = 0;
+    host.setAxisStyle({ color: "#eee" });
+    expect(posts).toHaveLength(0);
+  });
+
   it("resize posts a RESIZE message with dpr", () => {
     const { worker, posts } = makeFakeWorker();
     const host = new FluxionHost(makeCanvas(), {

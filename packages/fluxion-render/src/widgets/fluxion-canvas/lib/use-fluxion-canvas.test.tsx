@@ -812,3 +812,82 @@ describe("useFluxionCanvas resize forwarding", () => {
     }
   });
 });
+
+describe("useFluxionCanvas theme reconcile (bgColor / axisStyle)", () => {
+  function ThemeHarness({
+    workerFactory,
+    bgColor,
+    axisStyle,
+  }: {
+    workerFactory: () => Worker;
+    bgColor?: string;
+    axisStyle?: { color?: string; tickSize?: number };
+  }) {
+    const { containerRef } = useFluxionCanvas({
+      layers: [{ id: "line", kind: "line" }],
+      hostOptions: { workerFactory, bgColor, axisStyle },
+      staggerMount: false, // synchronous host so a rerender observes the reconcile
+    });
+    return <div ref={containerRef} style={{ width: 200, height: 100 }} />;
+  }
+
+  const ops = (posts: RecordedPost[]) => posts.map((p) => (p.msg as { op: number }).op);
+
+  it("re-sends SET_BG_COLOR on a bgColor change without a remount", () => {
+    const { factory, posts } = makeFakeWorkerFactory();
+    const { rerender } = render(
+      <ThemeHarness workerFactory={factory} bgColor="#ffffff" />,
+    );
+    expect(ops(posts)).toContain(Op.INIT); // initial bg went out with INIT
+    posts.length = 0;
+    rerender(<ThemeHarness workerFactory={factory} bgColor="#0b0d12" />);
+    expect(ops(posts)).toContain(Op.SET_BG_COLOR); // theme flip applied live
+    expect(ops(posts)).not.toContain(Op.INIT); // no remount
+    const bg = posts.find((p) => (p.msg as { op: number }).op === Op.SET_BG_COLOR);
+    expect((bg!.msg as { color: string }).color).toBe("#0b0d12");
+  });
+
+  it("does NOT re-send SET_BG_COLOR when bgColor is unchanged across a rerender", () => {
+    const { factory, posts } = makeFakeWorkerFactory();
+    const { rerender } = render(
+      <ThemeHarness workerFactory={factory} bgColor="#ffffff" />,
+    );
+    posts.length = 0;
+    rerender(<ThemeHarness workerFactory={factory} bgColor="#ffffff" />);
+    expect(ops(posts)).not.toContain(Op.SET_BG_COLOR); // seeded → no spam
+  });
+
+  it("re-sends SET_AXIS_STYLE on an axisStyle change without a remount", () => {
+    const { factory, posts } = makeFakeWorkerFactory();
+    const { rerender } = render(
+      <ThemeHarness workerFactory={factory} axisStyle={{ color: "#666666" }} />,
+    );
+    posts.length = 0;
+    rerender(<ThemeHarness workerFactory={factory} axisStyle={{ color: "#e6e6e6" }} />);
+    const axis = posts.find((p) => (p.msg as { op: number }).op === Op.SET_AXIS_STYLE);
+    expect(axis).toBeDefined();
+    expect((axis!.msg as { color: string }).color).toBe("#e6e6e6");
+    expect(ops(posts)).not.toContain(Op.INIT); // no remount
+  });
+
+  it("does NOT re-send SET_AXIS_STYLE when the style is unchanged", () => {
+    const { factory, posts } = makeFakeWorkerFactory();
+    const { rerender } = render(
+      <ThemeHarness workerFactory={factory} axisStyle={{ color: "#666666" }} />,
+    );
+    posts.length = 0;
+    rerender(<ThemeHarness workerFactory={factory} axisStyle={{ color: "#666666" }} />);
+    expect(ops(posts)).not.toContain(Op.SET_AXIS_STYLE);
+  });
+
+  it("dropping axisStyle entirely posts nothing (there's no style to re-apply)", () => {
+    const { factory, posts } = makeFakeWorkerFactory();
+    const { rerender } = render(
+      <ThemeHarness workerFactory={factory} axisStyle={{ color: "#666666" }} />,
+    );
+    posts.length = 0;
+    // key changes ("{…}" → "null") but there is no style object to send.
+    rerender(<ThemeHarness workerFactory={factory} axisStyle={undefined} />);
+    expect(ops(posts)).not.toContain(Op.SET_AXIS_STYLE);
+  });
+});
