@@ -385,6 +385,50 @@ getLifecycleStats();
 Pair it with `recyclePool.stats` (below) to tell cold-create storms apart from
 resize storms.
 
+### Theming (light/dark) — colors CSS can't reach
+
+The chart is drawn on an OffscreenCanvas **inside a Web Worker**, so CSS
+variables and Tailwind `dark:` classes never touch its pixels. A light/dark
+toggle re-themes the chart by pushing resolved color *values* in. Three
+surfaces, all reconciled to the **live host with no `key` remount** — flip a
+theme and the chart repaints in place:
+
+| Surface | How to set it | Runtime path |
+| --- | --- | --- |
+| Canvas background | `hostOptions.bgColor` (or `host.setBgColor()`) | reconciled on change |
+| External axis strip | `<FluxionCanvas axisColor=… axisFont=…>` / `host.setAxisStyle()` | `SET_AXIS_STYLE` |
+| In-canvas grid / axis / labels | `axis-grid` layer config (`gridColor`, `axisColor`, `labelColor`) | `configLayer` |
+
+```tsx
+// theme is your app's resolved palette; changing it re-themes without remount.
+const layers = useMemo(() => [
+  axisGridLayer('axis', { gridColor: theme.grid, axisColor: theme.axis, labelColor: theme.label }),
+  lineLayer('s1', { color: seriesColor }),   // series colors are usually theme-independent identities
+], [theme, seriesColor]);
+
+<FluxionCanvas layers={layers} axisColor={theme.label} hostOptions={{ bgColor: theme.bg }} />
+```
+
+`bgColor` and `axisStyle` are otherwise mount-only; the hook reconciles just
+these two on change (seeded at mount, so an unchanged value never re-posts
+across a large grid). Series colors already reconcile through the normal layer
+config path.
+
+**Color format — `oklch()` and CSS variables work.** Every color field
+(`bgColor`, layer `color`, axis `color`) is assigned straight to the canvas
+`fillStyle`/`strokeStyle`, so it accepts any CSS `<color>` the browser's canvas
+supports — including `oklch(…)`, `rgb()/rgba()`, `hsl()`, and named colors
+(OffscreenCanvas in a worker supports the same set as the main thread; `oklch`
+in canvas is Chrome 111+ / Safari 15.4+ / Firefox 113+). So you can read a
+shadcn-style `--background: oklch(…)` token and pass it through as-is on modern
+browsers. Two caveats: (1) the **`area` layer fill** and the **colormap /
+gradient utilities** (`heatmap`, `scatter-colored`, occupancy) parse **hex
+only** — give those `#rrggbb`; (2) to support browsers without canvas-`oklch`,
+resolve the token to `rgb()` on the main thread first (set it on a throwaway
+element's `style.color`, then read back `getComputedStyle(el).color`) and pass
+the normalized string in. The worker can't do this — CSS resolution is
+main-thread only.
+
 ### Spreading the React mount of a big grid (`useStaggeredMount`)
 
 `staggerMount` defers each host's *worker* creation, but React still mounts all N

@@ -37,6 +37,7 @@ import { StreamDemoPage } from "../pages/stream-demo";
 import { StreamWorkerDemoPage } from "../pages/stream-worker-demo";
 import { StressTestDemoPage } from "../pages/stress-test-demo";
 import { TableDemoPage } from "../pages/table-demo";
+import { ThemeDemoPage } from "../pages/theme-demo";
 import { TrajectoryDemoPage } from "../pages/trajectory-demo";
 
 /** One demo: its URL slug, sidebar label, and page component. */
@@ -153,6 +154,7 @@ export const DEMO_GROUPS: readonly DemoGroup[] = [
         component: FluxionWorkerDemoPage,
       },
       { slug: "external-axes", label: "External axes", component: ExternalAxesDemoPage },
+      { slug: "theme", label: "Theme Switch (light/dark)", component: ThemeDemoPage },
     ],
   },
 ];
