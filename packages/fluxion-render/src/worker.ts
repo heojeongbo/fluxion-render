@@ -40,12 +40,20 @@ export {
 } from "@heojeongbo/fluxion-worker";
 export { Engine } from "./features/engine";
 export type {
+  BoundsUpdateMsg,
   DType,
   FluxionPoolStreamMsg,
   HostMsg,
   LayerKind,
   PoolDisposeMsg,
   PoolInitMsg,
+  RenderStatsMsg,
+  SerializedTick,
   StreamDataMsg,
+  TickUpdateMsg,
+  // The engine's worker→main output messages (bounds / tick / render-stats).
+  // Named `EngineOutMsg` to avoid colliding with fluxion-worker's generic
+  // `WorkerMsg` re-exported above; a custom worker forwards these to the host.
+  WorkerMsg as EngineOutMsg,
 } from "./shared/protocol";
-export { Op } from "./shared/protocol";
+export { Op, WorkerOp } from "./shared/protocol";

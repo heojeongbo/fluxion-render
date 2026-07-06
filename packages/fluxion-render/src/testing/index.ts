@@ -12,12 +12,12 @@
 // Lifecycle-scheduler test helpers. Because `staggerMount` is on by default,
 // mounting/unmounting a `<FluxionCanvas>` defers host creation/teardown across
 // animation frames — so a test can't observe the host synchronously. These make
-// it deterministic: render → `flushMountScheduler()` → assert (wrap in `act()`
-// for React state); `resetMountScheduler()` in `afterEach` for isolation.
+// it deterministic: render → `flushLifecycleScheduler()` → assert (wrap in `act()`
+// for React state); `resetLifecycleScheduler()` in `afterEach` for isolation.
 export {
-  configureMountScheduler,
-  flushMountScheduler,
-  resetMountScheduler,
+  configureLifecycleScheduler,
+  flushLifecycleScheduler,
+  resetLifecycleScheduler,
 } from "../shared/lib/lifecycle-scheduler";
 export { mulberry32 } from "./signals/mulberry32";
 export type { LinearRampOptions, SineSynthOptions } from "./signals/pumps";

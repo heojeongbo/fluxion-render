@@ -2,15 +2,15 @@ import { renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FluxionHost } from "../../../features/host";
 import {
-  flushMountScheduler,
-  resetMountScheduler,
+  flushLifecycleScheduler,
+  resetLifecycleScheduler,
 } from "../../../shared/lib/lifecycle-scheduler";
 import { useHostRecyclePool } from "./use-host-recycle-pool";
 
 describe("useHostRecyclePool", () => {
   afterEach(() => {
     vi.clearAllMocks();
-    resetMountScheduler(); // pool teardown defers through the lifecycle queue
+    resetLifecycleScheduler(); // pool teardown defers through the lifecycle queue
   });
 
   it("returns a stable pool across re-renders and disposes it on unmount", () => {
@@ -49,7 +49,7 @@ describe("useHostRecyclePool", () => {
     unmount(); // disposes the pool in the cleanup…
     expect(pool.isDisposed).toBe(true);
     expect(dispose).not.toHaveBeenCalled(); // …but teardown drains on a later frame
-    flushMountScheduler(); // module-global queue survives the unmount
+    flushLifecycleScheduler(); // module-global queue survives the unmount
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 });

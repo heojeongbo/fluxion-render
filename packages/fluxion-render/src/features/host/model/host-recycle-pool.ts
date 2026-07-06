@@ -81,7 +81,7 @@ export interface HostRecyclePool {
    * frame-budgeted lifecycle queue — a bulk unmount that overflows the bucket
    * spreads its `host.dispose()` burst across frames instead of running every
    * teardown synchronously in the unmount commit. In tests, run
-   * `flushMountScheduler()` to make the deferred disposes observable.
+   * `flushLifecycleScheduler()` to make the deferred disposes observable.
    */
   release(bundle: HostBundle): void;
   /**

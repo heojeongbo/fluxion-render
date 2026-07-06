@@ -85,7 +85,7 @@ export interface UseFluxionCanvasOptions {
    * spreads across frames instead of spiking one. The placeholder `<canvas>`
    * is still attached immediately; only the host spins up on a later frame, so
    * `host` / `onReady` arrive deferred (by one frame even for a lone chart).
-   * Tune the rate with {@link configureMountScheduler}.
+   * Tune the rate with {@link configureLifecycleScheduler}.
    *
    * **Default `true`.** Pass `false` for synchronous host creation — e.g. when
    * you read the host imperatively right after mount instead of via `onReady`.

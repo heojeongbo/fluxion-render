@@ -23,7 +23,7 @@ export interface FluxionCanvasProps {
   /**
    * Defer host creation through a shared frame-throttled queue so a burst of
    * simultaneous mounts (an accordion expanding, a grid appearing) spreads
-   * across frames instead of spiking one. Tune with `configureMountScheduler`.
+   * across frames instead of spiking one. Tune with `configureLifecycleScheduler`.
    * **Default `true`** — `host` / `onReady` arrive one frame deferred. Pass
    * `false` for synchronous host creation.
    */

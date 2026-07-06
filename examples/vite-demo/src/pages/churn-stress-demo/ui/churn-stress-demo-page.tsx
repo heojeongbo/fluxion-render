@@ -22,7 +22,7 @@ import type { FluxionHost, LineSample } from "@heojeongbo/fluxion-render";
 import { createFluxionWorkerFactory } from "@heojeongbo/fluxion-render";
 import {
   axisGridLayer,
-  configureMountScheduler,
+  configureLifecycleScheduler,
   FluxionCanvas,
   type HostRecyclePool,
   lineLayer,
@@ -375,8 +375,8 @@ export function ChurnStressDemoPage() {
   // Drives the mount-scheduler drain rate; restored to the library default on
   // leave so other demos aren't affected.
   useEffect(() => {
-    configureMountScheduler({ perFrame });
-    return () => configureMountScheduler({ perFrame: 4 });
+    configureLifecycleScheduler({ perFrame });
+    return () => configureLifecycleScheduler({ perFrame: 4 });
   }, [perFrame]);
 
   // A new churn cycle (grid remount or collapse→expand) creates a fresh batch of

@@ -3,9 +3,9 @@ import { StrictMode, useEffect, useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHostRecyclePool } from "../../../features/host";
 import {
-  configureMountScheduler,
-  flushMountScheduler,
-  resetMountScheduler,
+  configureLifecycleScheduler,
+  flushLifecycleScheduler,
+  resetLifecycleScheduler,
 } from "../../../shared/lib/lifecycle-scheduler";
 import { Op } from "../../../shared/protocol";
 import { type FluxionLayerSpec, useFluxionCanvas } from "./use-fluxion-canvas";
@@ -333,12 +333,12 @@ describe("useFluxionCanvas", () => {
     }
 
     beforeEach(() => {
-      resetMountScheduler(); // isolate from any task another test left queued
+      resetLifecycleScheduler(); // isolate from any task another test left queued
       vi.useFakeTimers();
     });
     afterEach(() => {
       vi.useRealTimers();
-      resetMountScheduler();
+      resetLifecycleScheduler();
     });
 
     it("defers host creation to a later frame", () => {
@@ -392,13 +392,13 @@ describe("useFluxionCanvas", () => {
     }
 
     beforeEach(() => {
-      resetMountScheduler();
+      resetLifecycleScheduler();
       vi.useFakeTimers();
     });
     afterEach(() => {
       vi.useRealTimers();
-      resetMountScheduler();
-      configureMountScheduler({ perFrame: 4 }); // restore default for other suites
+      resetLifecycleScheduler();
+      configureLifecycleScheduler({ perFrame: 4 }); // restore default for other suites
     });
 
     it("defers host creation by default (no staggerMount prop)", () => {
@@ -538,7 +538,7 @@ describe("useFluxionCanvas host recycling", () => {
 
   afterEach(() => {
     // Pool teardowns are deferred through the module-global lifecycle queue.
-    resetMountScheduler();
+    resetLifecycleScheduler();
   });
 
   it("reuses a warm host on remount instead of creating a new one", () => {
@@ -626,7 +626,7 @@ describe("useFluxionCanvas host recycling", () => {
     expect(terminate).not.toHaveBeenCalled(); // parked
     pool.dispose();
     expect(terminate).not.toHaveBeenCalled(); // teardown queued, not synchronous
-    flushMountScheduler();
+    flushLifecycleScheduler();
     expect(terminate).toHaveBeenCalledTimes(1); // torn down with the pool
   });
 
@@ -638,7 +638,7 @@ describe("useFluxionCanvas host recycling", () => {
     );
     pool.dispose(); // pool dies while the chart is still mounted
     unmount(); // cleanup sees a disposed pool → disposes the host instead of parking
-    flushMountScheduler();
+    flushLifecycleScheduler();
     expect(terminate).toHaveBeenCalledTimes(1);
   });
 
@@ -658,7 +658,7 @@ describe("useFluxionCanvas host recycling", () => {
     expect(terminate).not.toHaveBeenCalled();
     result!.unmount(); // park the in-use host back
     pool.dispose();
-    flushMountScheduler(); // teardown is deferred through the frame queue
+    flushLifecycleScheduler(); // teardown is deferred through the frame queue
     expect(terminate).toHaveBeenCalledTimes(1);
   });
 });
@@ -680,7 +680,7 @@ describe("useFluxionCanvas resize forwarding", () => {
   });
   afterEach(() => {
     (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = realRO;
-    resetMountScheduler(); // drop any resize a test left pending
+    resetLifecycleScheduler(); // drop any resize a test left pending
   });
 
   const deliver = (w: number, h: number) =>
@@ -699,7 +699,7 @@ describe("useFluxionCanvas resize forwarding", () => {
     // Not applied in the observer tick — a grid-wide layout change must not
     // reallocate every chart's backing in one frame.
     expect(ops(posts)).not.toContain(Op.RESIZE);
-    flushMountScheduler();
+    flushLifecycleScheduler();
     expect(ops(posts)).toContain(Op.RESIZE);
   });
 
@@ -709,7 +709,7 @@ describe("useFluxionCanvas resize forwarding", () => {
     posts.length = 0;
     deliver(200, 100); // first measurement emits immediately → one lane entry
     deliver(300, 150); // within the observer's 100ms debounce → no emit yet
-    flushMountScheduler();
+    flushLifecycleScheduler();
     const resizes = posts.filter((p) => (p.msg as { op: number }).op === Op.RESIZE);
     expect(resizes).toHaveLength(1); // per-chart debounce + lane compose: one apply
     expect(resizes[0]!.msg).toMatchObject({ width: 200, height: 100 });
@@ -721,7 +721,7 @@ describe("useFluxionCanvas resize forwarding", () => {
     posts.length = 0;
     deliver(200, 100);
     unmount(); // cleanup cancels the scheduled resize for this host
-    flushMountScheduler();
+    flushLifecycleScheduler();
     expect(ops(posts)).not.toContain(Op.RESIZE);
   });
 
@@ -730,7 +730,7 @@ describe("useFluxionCanvas resize forwarding", () => {
     render(<Harness workerFactory={factory} />);
     posts.length = 0;
     deliver(0, 0);
-    flushMountScheduler();
+    flushLifecycleScheduler();
     expect(ops(posts)).not.toContain(Op.RESIZE);
   });
 
@@ -760,7 +760,7 @@ describe("useFluxionCanvas resize forwarding", () => {
     // Unmount PARKS the host (alive, not disposed) — unlike the dispose path,
     // a stale resize here would really post and reallocate a parked backing.
     unmount();
-    flushMountScheduler();
+    flushLifecycleScheduler();
     expect(ops(posts)).not.toContain(Op.RESIZE);
     pool.dispose();
   });
@@ -768,7 +768,7 @@ describe("useFluxionCanvas resize forwarding", () => {
   it("N charts' simultaneous resize applies at most resizePerFrame per frame", () => {
     vi.useFakeTimers();
     try {
-      configureMountScheduler({ resizePerFrame: 1 });
+      configureLifecycleScheduler({ resizePerFrame: 1 });
       // Local RO stub that collects EVERY chart's callback (the describe-level
       // stub keeps only the last), so one layout change can hit all charts.
       const cbs: Array<(entries: unknown[]) => void> = [];
@@ -808,7 +808,7 @@ describe("useFluxionCanvas resize forwarding", () => {
       expect(resizeCount()).toBe(3); // all settle, none dropped
     } finally {
       vi.useRealTimers();
-      configureMountScheduler({ resizePerFrame: 8 });
+      configureLifecycleScheduler({ resizePerFrame: 8 });
     }
   });
 });

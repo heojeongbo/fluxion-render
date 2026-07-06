@@ -1,5 +1,5 @@
 export {
-  configureMountScheduler,
+  configureLifecycleScheduler,
   getLifecycleStats,
   type LifecycleSchedulerStats,
 } from "../../shared/lib/lifecycle-scheduler";

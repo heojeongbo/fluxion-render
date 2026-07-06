@@ -1,3 +1,6 @@
+// Framework-agnostic core entry. Zero React — the engine, worker pool, layer
+// factories, host, and protocol types. React hooks and components live in
+// `@heojeongbo/fluxion-render/react`, which re-exports everything here.
 export { createFluxionWorkerFactory } from "./app/worker/create-worker-factory";
 export type { AreaChartConfig } from "./entities/area-chart-layer";
 export type { AxisGridConfig } from "./entities/axis-grid-layer";
@@ -20,31 +23,10 @@ export type { ScatterColoredConfig } from "./entities/scatter-colored-layer";
 export type { StackedAreaConfig } from "./entities/stacked-area-layer";
 export type { StepChartConfig } from "./entities/step-chart-layer";
 export type { TrajectoryConfig } from "./entities/trajectory-layer";
-export {
-  type BrushSelection,
-  FluxionBrush,
-  type FluxionBrushProps,
-  type UseFluxionBrushOptions,
-  type UseFluxionBrushResult,
-  useFluxionBrush,
-} from "./features/brush";
 export type { CachedLayerOptions } from "./features/crosshair";
-export { HoverDataCache } from "./features/crosshair";
-export {
-  type UseFluxionExportOptions,
-  type UseFluxionExportResult,
-  useFluxionExport,
-} from "./features/export";
-export {
-  FluxionGauge,
-  type FluxionGaugeClassNames,
-  type FluxionGaugeProps,
-  type GaugeThreshold,
-  type UseFluxionGaugeOptions,
-  type UseFluxionGaugeResult,
-  useFluxionGauge,
-} from "./features/gauge";
+export { HoverDataCache, pushPacketToCache } from "./features/crosshair";
 export type {
+  BoundsChangeListener,
   BoxPlotStat,
   CandlestickSample,
   EventSeverity,
@@ -101,16 +83,7 @@ export {
   StepLayerHandle,
   TrajectoryHandle,
 } from "./features/host";
-export {
-  FluxionPieChart,
-  type FluxionPieChartClassNames,
-  type FluxionPieChartProps,
-  type PieSlice,
-} from "./features/pie";
-export {
-  type UseSyncedTimeWindowResult,
-  useSyncedTimeWindow,
-} from "./features/synced-time";
+export { FluxionWorkerHandle } from "./features/worker-pool";
 export type {
   AxisTick,
   AxisTickSet,
@@ -124,7 +97,13 @@ export { computeAxisTicks, formatTick, formatYTick } from "./shared/lib/axis-tic
 export { DASH_PATTERNS, dashPatternFor } from "./shared/lib/dash-patterns";
 export type { TickFormatter } from "./shared/lib/time-format";
 export { formatClock, makeClockFormatter } from "./shared/lib/time-format";
-export type { DType, FluxionPoolStreamMsg, HostMsg, LayerKind } from "./shared/protocol";
+export type {
+  AxisStyle,
+  DType,
+  FluxionPoolStreamMsg,
+  HostMsg,
+  LayerKind,
+} from "./shared/protocol";
 export {
   areaLayer,
   axisGridLayer,

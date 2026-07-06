@@ -1,3 +1,8 @@
+// React entry. A superset of the framework-agnostic core (`export *` below) plus
+// the React hooks and components. Everything importable from
+// `@heojeongbo/fluxion-render` is also importable here, so `/react` consumers can
+// name core types (layer configs, protocol messages, etc.) without a second import.
+
 export {
   type BrushSelection,
   FluxionBrush,
@@ -7,15 +12,12 @@ export {
   useFluxionBrush,
 } from "./features/brush";
 export {
-  type CachedLayerOptions,
   type CrosshairPoint,
   type CrosshairState,
   FluxionCrosshair,
   FluxionCrosshairOverlay,
   type FluxionCrosshairOverlayProps,
   type FluxionCrosshairProps,
-  HoverDataCache,
-  pushPacketToCache,
   type UseBroadcastCrosshairCacheOptions,
   type UseBroadcastCrosshairCacheResult,
   type UseFluxionCrosshairFromLayersOptions,
@@ -44,20 +46,6 @@ export {
   useFluxionGauge,
 } from "./features/gauge";
 export {
-  configureDefaultPool,
-  createHostRecyclePool,
-  FluxionHost,
-  FluxionWorkerPool,
-  type FluxionWorkerPoolOptions,
-  getDefaultPool,
-  type HostBundle,
-  type HostRecyclePool,
-  type HostRecyclePoolOptions,
-  type RecycleKeyParams,
-  type RenderStats,
-  type RenderStatsListener,
-} from "./features/host";
-export {
   FluxionPieChart,
   type FluxionPieChartClassNames,
   type FluxionPieChartProps,
@@ -68,23 +56,15 @@ export {
   useSyncedTimeWindow,
   useTimeOrigin,
 } from "./features/synced-time";
-export { DASH_PATTERNS, dashPatternFor } from "./shared/lib/dash-patterns";
-export type { LayerKind } from "./shared/protocol";
+export * from "./index";
 export {
-  areaLayer,
-  axisGridLayer,
   type BadgeTone,
-  barLayer,
-  boxPlotLayer,
   type CapacityAdvisory,
-  candlestickLayer,
   checkCapacity,
-  configureMountScheduler,
-  eventMarkerLayer,
+  configureLifecycleScheduler,
   FluxionCanvas,
   type FluxionCanvasHandle,
   type FluxionCanvasProps,
-  type FluxionLayerSpec,
   FluxionLegend,
   type FluxionLegendClassNames,
   type FluxionLegendProps,
@@ -93,32 +73,15 @@ export {
   type FluxionTableColumn,
   type FluxionTableProps,
   getLifecycleStats,
-  heatmapLayer,
-  heatmapStreamLayer,
-  histogramLayer,
   type LegendItem,
   type LifecycleSchedulerStats,
   legendFromLayers,
-  lidarLayer,
-  lineLayer,
-  lineStaticLayer,
-  occupancyGridLayer,
-  polarLayer,
-  poseArrowLayer,
   type ResizeInfo,
-  referenceLineLayer,
   Sparkline,
   type SparklineProps,
-  type SpectrogramConfig,
-  scatterColoredLayer,
-  scatterLayer,
-  spectrogramLayer,
-  stackedAreaLayer,
-  stepLayer,
   subscribeTicker,
   TableCellBadge,
   type TableCellBadgeProps,
-  trajectoryLayer,
   type UseFluxionCanvasOptions,
   type UseFluxionCanvasResult,
   type UseFluxionHistoricalOptions,

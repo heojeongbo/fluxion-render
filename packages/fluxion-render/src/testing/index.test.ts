@@ -8,8 +8,8 @@ describe("/testing barrel", () => {
     expect(typeof testing.createSineSynth).toBe("function");
     expect(typeof testing.createLinearRamp).toBe("function");
     // Lifecycle-scheduler test helpers (deterministic mount/unmount)
-    expect(typeof testing.flushMountScheduler).toBe("function");
-    expect(typeof testing.resetMountScheduler).toBe("function");
-    expect(typeof testing.configureMountScheduler).toBe("function");
+    expect(typeof testing.flushLifecycleScheduler).toBe("function");
+    expect(typeof testing.resetLifecycleScheduler).toBe("function");
+    expect(typeof testing.configureLifecycleScheduler).toBe("function");
   });
 });

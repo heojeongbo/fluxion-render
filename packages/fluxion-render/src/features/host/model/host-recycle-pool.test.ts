@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  configureMountScheduler,
-  flushMountScheduler,
-  resetMountScheduler,
+  configureLifecycleScheduler,
+  flushLifecycleScheduler,
+  resetLifecycleScheduler,
 } from "../../../shared/lib/lifecycle-scheduler";
 import type { FluxionWorkerPool } from "../../worker-pool";
 import type { FluxionHost } from "./fluxion-host";
@@ -29,7 +29,7 @@ describe("createHostRecyclePool", () => {
   afterEach(() => {
     // Teardowns are deferred through the module-global lifecycle queue — don't
     // leak a pending dispose into the next test.
-    resetMountScheduler();
+    resetLifecycleScheduler();
   });
 
   describe("keyFor", () => {
@@ -144,7 +144,7 @@ describe("createHostRecyclePool", () => {
     // can't burst-free GPU backings inside one commit.
     expect(b3.host.dispose).not.toHaveBeenCalled();
     expect(pool.size).toBe(2);
-    flushMountScheduler();
+    flushLifecycleScheduler();
     expect(b3.host.dispose).toHaveBeenCalledTimes(1);
     expect(b1.host.dispose).not.toHaveBeenCalled();
     expect(pool.size).toBe(2);
@@ -160,7 +160,7 @@ describe("createHostRecyclePool", () => {
     pool.release(overflow); // dispose queued, never parked
     expect(pool.acquire(params)).toBe(parked); // only the parked one is handed out
     expect(pool.acquire(params)).toBeNull();
-    flushMountScheduler();
+    flushLifecycleScheduler();
     expect(overflow.host.dispose).toHaveBeenCalledTimes(1);
     expect(parked.host.dispose).not.toHaveBeenCalled();
   });
@@ -168,7 +168,7 @@ describe("createHostRecyclePool", () => {
   it("spreads overflow disposes across frames on the shared perFrame budget", () => {
     vi.useFakeTimers();
     try {
-      configureMountScheduler({ perFrame: 2 });
+      configureLifecycleScheduler({ perFrame: 2 });
       const pool = createHostRecyclePool({ max: 0 }); // every release overflows
       const bundles = Array.from({ length: 4 }, () => makeBundle("k"));
       for (const b of bundles) pool.release(b);
@@ -181,7 +181,7 @@ describe("createHostRecyclePool", () => {
       expect(disposed()).toBe(4);
     } finally {
       vi.useRealTimers();
-      configureMountScheduler({ perFrame: 4 });
+      configureLifecycleScheduler({ perFrame: 4 });
     }
   });
 
@@ -195,7 +195,7 @@ describe("createHostRecyclePool", () => {
     const ok = makeBundle("k");
     pool.release(bad);
     pool.release(ok);
-    flushMountScheduler();
+    flushLifecycleScheduler();
     expect(ok.host.dispose).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
@@ -473,7 +473,7 @@ describe("createHostRecyclePool", () => {
     // dispose() call itself (a route change must not burst-free all backings).
     expect(b1.host.dispose).not.toHaveBeenCalled();
     expect(b2.host.dispose).not.toHaveBeenCalled();
-    flushMountScheduler();
+    flushLifecycleScheduler();
     expect(b1.host.dispose).toHaveBeenCalledTimes(1);
     expect(b2.host.dispose).toHaveBeenCalledTimes(1);
 
@@ -481,11 +481,11 @@ describe("createHostRecyclePool", () => {
     const b3 = makeBundle(key);
     pool.release(b3);
     expect(b3.host.dispose).not.toHaveBeenCalled();
-    flushMountScheduler();
+    flushLifecycleScheduler();
     expect(b3.host.dispose).toHaveBeenCalledTimes(1);
 
     pool.dispose(); // idempotent — no throw, no double-dispose
-    flushMountScheduler();
+    flushLifecycleScheduler();
     expect(b1.host.dispose).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,7 +1,7 @@
 import { act, render } from "@testing-library/react";
 import { createRef, StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { resetMountScheduler } from "../../../shared/lib/lifecycle-scheduler";
+import { resetLifecycleScheduler } from "../../../shared/lib/lifecycle-scheduler";
 import { Op } from "../../../shared/protocol";
 import { FluxionCanvas, type FluxionCanvasHandle } from "./fluxion-canvas";
 
@@ -96,7 +96,7 @@ describe("FluxionCanvas", () => {
 
   it("defers host creation by default (staggerMount on) until a frame passes", () => {
     vi.useFakeTimers();
-    resetMountScheduler();
+    resetLifecycleScheduler();
     const { factory } = makeFakeWorkerFactory();
     const onReady = vi.fn();
     render(
@@ -109,7 +109,7 @@ describe("FluxionCanvas", () => {
     expect(onReady).not.toHaveBeenCalled(); // queued, not yet created
     act(() => vi.advanceTimersByTime(20));
     expect(onReady).toHaveBeenCalledTimes(1);
-    resetMountScheduler();
+    resetLifecycleScheduler();
     vi.useRealTimers();
   });
 
@@ -164,6 +164,6 @@ describe("FluxionCanvas", () => {
     expect((axis!.msg as { color: string }).color).toBe("#e6e6e6");
     // No new INIT — a theme flip must not tear the chart down.
     expect(posts.map((p) => (p.msg as { op: number }).op)).not.toContain(Op.INIT);
-    resetMountScheduler();
+    resetLifecycleScheduler();
   });
 });

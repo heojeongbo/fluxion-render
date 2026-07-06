@@ -19,7 +19,7 @@
  * axis canvases) in the worker. `scheduleResize` coalesces those into a
  * latest-wins-per-host lane drained at most `resizePerFrame` per frame, so a
  * grid-wide resize spreads across frames instead of spiking one. Tune both
- * rates with `configureMountScheduler({ perFrame, resizePerFrame })`.
+ * rates with `configureLifecycleScheduler({ perFrame, resizePerFrame })`.
  */
 
 type LifecycleTask = { run: () => void; cancelled: boolean; kind: "mount" | "dispose" };
@@ -58,7 +58,7 @@ const queue: LifecycleTask[] = [];
 // repeatedly neither queues stale sizes nor jumps the FIFO line.
 const resizeQueue = new Map<Resizable, ResizeRequest>();
 let scheduled = false;
-// Burst observability — read via getLifecycleStats(), zeroed by resetMountScheduler().
+// Burst observability — read via getLifecycleStats(), zeroed by resetLifecycleScheduler().
 let mountsRun = 0;
 let disposesRun = 0;
 let resizesApplied = 0;
@@ -187,7 +187,7 @@ export function cancelResize(target: Resizable): void {
  * slower. Values below 1 (and missing/NaN) are ignored — a budget can never
  * be configured to 0, which would starve the lane forever.
  */
-export function configureMountScheduler(opts: {
+export function configureLifecycleScheduler(opts: {
   perFrame?: number;
   resizePerFrame?: number;
 }): void {
@@ -207,12 +207,12 @@ export function configureMountScheduler(opts: {
  * ignoring the per-frame budgets and the animation frame — then clear the
  * pending-frame flag. For tests: makes the deferred (default) mount/dispose and
  * scheduled resizes deterministic without fake timers. Render,
- * `flushMountScheduler()`, then assert the host is ready; unmount,
- * `flushMountScheduler()` again, then assert teardown ran. Wrap the call in
+ * `flushLifecycleScheduler()`, then assert the host is ready; unmount,
+ * `flushLifecycleScheduler()` again, then assert teardown ran. Wrap the call in
  * `act()` when asserting React state, since a flushed mount calls `setHost`.
  * Cancelled tasks are skipped and a throwing task is isolated (logged).
  */
-export function flushMountScheduler(): void {
+export function flushLifecycleScheduler(): void {
   while (queue.length > 0) {
     const task = queue.shift() as LifecycleTask;
     if (task.cancelled) continue;
@@ -230,7 +230,7 @@ export function flushMountScheduler(): void {
  * of a burst investigation. Pair with the recycle pool's `stats` (cold creates
  * vs warm reuses vs overflow disposes) to see WHERE a mount/resize storm comes
  * from and how fast the queues are draining. Counters accumulate until
- * {@link resetMountScheduler}; the two `pending*` fields are live gauges.
+ * {@link resetLifecycleScheduler}; the two `pending*` fields are live gauges.
  */
 export function getLifecycleStats(): LifecycleSchedulerStats {
   let pendingTasks = 0;
@@ -252,7 +252,7 @@ export function getLifecycleStats(): LifecycleSchedulerStats {
  * `afterEach` so the module-global queues can't leak pending
  * mounts/disposes/resizes across tests.
  */
-export function resetMountScheduler(): void {
+export function resetLifecycleScheduler(): void {
   queue.length = 0;
   resizeQueue.clear();
   scheduled = false;

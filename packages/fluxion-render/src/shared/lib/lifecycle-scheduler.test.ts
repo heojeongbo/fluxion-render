@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cancelResize,
-  configureMountScheduler,
+  configureLifecycleScheduler,
   enqueueDispose,
   enqueueMount,
-  flushMountScheduler,
+  flushLifecycleScheduler,
   getLifecycleStats,
-  resetMountScheduler,
+  resetLifecycleScheduler,
   scheduleResize,
 } from "./lifecycle-scheduler";
 
@@ -22,12 +22,12 @@ describe("lifecycle-scheduler", () => {
   afterEach(() => {
     vi.useRealTimers();
     // reset module defaults + stats counters for the next test
-    configureMountScheduler({ perFrame: 4, resizePerFrame: 8 });
-    resetMountScheduler();
+    configureLifecycleScheduler({ perFrame: 4, resizePerFrame: 8 });
+    resetLifecycleScheduler();
   });
 
   it("runs at most perFrame tasks per frame, rescheduling until drained", () => {
-    configureMountScheduler({ perFrame: 2 });
+    configureLifecycleScheduler({ perFrame: 2 });
     const order: number[] = [];
     for (let i = 0; i < 5; i++) enqueueMount(() => order.push(i));
     // Nothing runs synchronously — the burst is deferred.
@@ -43,7 +43,7 @@ describe("lifecycle-scheduler", () => {
   });
 
   it("dedupes the scheduled frame while one is already pending", () => {
-    configureMountScheduler({ perFrame: 1 });
+    configureLifecycleScheduler({ perFrame: 1 });
     const order: number[] = [];
     enqueueMount(() => order.push(0));
     enqueueMount(() => order.push(1)); // second enqueue: a frame is already scheduled
@@ -54,7 +54,7 @@ describe("lifecycle-scheduler", () => {
   });
 
   it("enqueueDispose defers teardown and shares the perFrame budget with mounts", () => {
-    configureMountScheduler({ perFrame: 2 });
+    configureLifecycleScheduler({ perFrame: 2 });
     const order: string[] = [];
     enqueueMount(() => order.push("mount"));
     enqueueDispose(() => order.push("dispose1"));
@@ -67,7 +67,7 @@ describe("lifecycle-scheduler", () => {
   });
 
   it("cancelled tasks are skipped for free (don't consume the perFrame budget)", () => {
-    configureMountScheduler({ perFrame: 2 });
+    configureLifecycleScheduler({ perFrame: 2 });
     const ran: number[] = [];
     const cancels = Array.from({ length: 6 }, (_, i) => enqueueMount(() => ran.push(i)));
     cancels[0]!(); // cancel tasks 0..3 → only 4 and 5 are live
@@ -89,11 +89,11 @@ describe("lifecycle-scheduler", () => {
     expect(ran).toEqual(["b"]);
   });
 
-  it("flushMountScheduler runs every queued task now, ignoring perFrame", () => {
-    configureMountScheduler({ perFrame: 2 });
+  it("flushLifecycleScheduler runs every queued task now, ignoring perFrame", () => {
+    configureLifecycleScheduler({ perFrame: 2 });
     const order: number[] = [];
     for (let i = 0; i < 5; i++) enqueueMount(() => order.push(i));
-    flushMountScheduler(); // no fake-timer advance — all 5 run synchronously
+    flushLifecycleScheduler(); // no fake-timer advance — all 5 run synchronously
     expect(order).toEqual([0, 1, 2, 3, 4]);
     // Reusable afterwards: a fresh enqueue schedules a real frame again.
     enqueueDispose(() => order.push(99));
@@ -101,7 +101,7 @@ describe("lifecycle-scheduler", () => {
     expect(order).toEqual([0, 1, 2, 3, 4, 99]);
   });
 
-  it("flushMountScheduler skips cancelled tasks and isolates a throwing one", () => {
+  it("flushLifecycleScheduler skips cancelled tasks and isolates a throwing one", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     const ran: string[] = [];
     enqueueMount(() => ran.push("a"));
@@ -111,17 +111,17 @@ describe("lifecycle-scheduler", () => {
     });
     enqueueMount(() => ran.push("c"));
     cancelB(); // tombstone — skipped by flush
-    flushMountScheduler();
+    flushLifecycleScheduler();
     expect(ran).toEqual(["a", "c"]); // b cancelled, the throw didn't strand c
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
   });
 
-  it("resetMountScheduler drops queued tasks and clears the pending frame", () => {
+  it("resetLifecycleScheduler drops queued tasks and clears the pending frame", () => {
     const ran: string[] = [];
     enqueueMount(() => ran.push("a"));
     enqueueMount(() => ran.push("b"));
-    resetMountScheduler(); // queue cleared, scheduled flag reset
+    resetLifecycleScheduler(); // queue cleared, scheduled flag reset
     frame();
     expect(ran).toEqual([]); // nothing drains
     // Scheduler is reusable afterwards (a fresh frame is scheduled).
@@ -144,12 +144,12 @@ describe("lifecycle-scheduler", () => {
   });
 
   it("ignores non-positive / fractional-below-1 / missing perFrame", () => {
-    configureMountScheduler({ perFrame: 3 });
-    configureMountScheduler({ perFrame: 0 }); // ignored
-    configureMountScheduler({ perFrame: -1 }); // ignored
-    configureMountScheduler({ perFrame: 0.5 }); // ignored — must NOT floor to a 0 budget
-    configureMountScheduler({ perFrame: Number.NaN }); // ignored
-    configureMountScheduler({}); // ignored (undefined)
+    configureLifecycleScheduler({ perFrame: 3 });
+    configureLifecycleScheduler({ perFrame: 0 }); // ignored
+    configureLifecycleScheduler({ perFrame: -1 }); // ignored
+    configureLifecycleScheduler({ perFrame: 0.5 }); // ignored — must NOT floor to a 0 budget
+    configureLifecycleScheduler({ perFrame: Number.NaN }); // ignored
+    configureLifecycleScheduler({}); // ignored (undefined)
     const order: number[] = [];
     for (let i = 0; i < 4; i++) enqueueMount(() => order.push(i));
     frame();
@@ -182,7 +182,7 @@ describe("lifecycle-scheduler", () => {
     });
 
     it("applies at most resizePerFrame targets per frame, FIFO", () => {
-      configureMountScheduler({ resizePerFrame: 2 });
+      configureLifecycleScheduler({ resizePerFrame: 2 });
       const targets = Array.from({ length: 5 }, makeTarget);
       for (const t of targets) scheduleResize(t, { width: 10, height: 10, dpr: 1 });
       frame();
@@ -194,7 +194,7 @@ describe("lifecycle-scheduler", () => {
     });
 
     it("a re-scheduled target keeps its original queue position", () => {
-      configureMountScheduler({ resizePerFrame: 1 });
+      configureLifecycleScheduler({ resizePerFrame: 1 });
       const a = makeTarget();
       const b = makeTarget();
       scheduleResize(a, { width: 1, height: 1, dpr: 1 });
@@ -220,7 +220,7 @@ describe("lifecycle-scheduler", () => {
     });
 
     it("task and resize lanes drain in the same frame with independent budgets", () => {
-      configureMountScheduler({ perFrame: 1, resizePerFrame: 1 });
+      configureLifecycleScheduler({ perFrame: 1, resizePerFrame: 1 });
       const order: string[] = [];
       enqueueMount(() => order.push("m1"));
       enqueueMount(() => order.push("m2"));
@@ -253,18 +253,18 @@ describe("lifecycle-scheduler", () => {
       spy.mockRestore();
     });
 
-    it("flushMountScheduler applies every pending resize, ignoring the budget", () => {
-      configureMountScheduler({ resizePerFrame: 1 });
+    it("flushLifecycleScheduler applies every pending resize, ignoring the budget", () => {
+      configureLifecycleScheduler({ resizePerFrame: 1 });
       const targets = Array.from({ length: 3 }, makeTarget);
       for (const t of targets) scheduleResize(t, { width: 7, height: 7, dpr: 1 });
-      flushMountScheduler();
+      flushLifecycleScheduler();
       expect(targets.map((t) => t.calls.length)).toEqual([1, 1, 1]);
     });
 
-    it("resetMountScheduler drops pending resizes without applying them", () => {
+    it("resetLifecycleScheduler drops pending resizes without applying them", () => {
       const t = makeTarget();
       scheduleResize(t, { width: 1, height: 1, dpr: 1 });
-      resetMountScheduler();
+      resetLifecycleScheduler();
       frame();
       expect(t.calls).toEqual([]);
       // Reusable afterwards.
@@ -274,11 +274,11 @@ describe("lifecycle-scheduler", () => {
     });
 
     it("ignores non-positive / fractional-below-1 / missing resizePerFrame", () => {
-      configureMountScheduler({ resizePerFrame: 2 });
-      configureMountScheduler({ resizePerFrame: 0 }); // ignored
-      configureMountScheduler({ resizePerFrame: -3 }); // ignored
-      configureMountScheduler({ resizePerFrame: 0.9 }); // ignored — not floored to 0
-      configureMountScheduler({}); // ignored (undefined)
+      configureLifecycleScheduler({ resizePerFrame: 2 });
+      configureLifecycleScheduler({ resizePerFrame: 0 }); // ignored
+      configureLifecycleScheduler({ resizePerFrame: -3 }); // ignored
+      configureLifecycleScheduler({ resizePerFrame: 0.9 }); // ignored — not floored to 0
+      configureLifecycleScheduler({}); // ignored (undefined)
       const targets = Array.from({ length: 3 }, makeTarget);
       for (const t of targets) scheduleResize(t, { width: 1, height: 1, dpr: 1 });
       frame();
@@ -317,17 +317,17 @@ describe("lifecycle-scheduler", () => {
       });
     });
 
-    it("counts a flushed queue and is zeroed by resetMountScheduler", () => {
+    it("counts a flushed queue and is zeroed by resetLifecycleScheduler", () => {
       enqueueMount(() => {});
       enqueueDispose(() => {});
       scheduleResize({ resize() {} }, { width: 1, height: 1, dpr: 1 });
-      flushMountScheduler();
+      flushLifecycleScheduler();
       expect(getLifecycleStats()).toMatchObject({
         mountsRun: 1,
         disposesRun: 1,
         resizesApplied: 1,
       });
-      resetMountScheduler();
+      resetLifecycleScheduler();
       expect(getLifecycleStats()).toEqual({
         mountsRun: 0,
         disposesRun: 0,
