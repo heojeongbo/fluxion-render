@@ -1,5 +1,12 @@
 # Changelog
 
+# [1.0.0](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v0.24.0...fluxion-render-v1.0.0) (2026-07-06)
+
+
+### Bug Fixes
+
+* **render:** declare @heojeongbo/fluxion-worker as a runtime dependency ([056391c](https://github.com/HeoJeongBo/fluxion-render/commit/056391ccddb81792a7423c83fbd4da4a2a1a3555))
+
 # [0.24.0](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v0.23.0...fluxion-render-v0.24.0) (2026-07-06)
 
 
