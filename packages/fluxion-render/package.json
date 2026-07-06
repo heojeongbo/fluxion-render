@@ -75,20 +75,18 @@
   "publishConfig": {
     "access": "public"
   },
+  "dependencies": {
+    "@heojeongbo/fluxion-worker": "workspace:^"
+  },
   "peerDependencies": {
-    "@heojeongbo/fluxion-worker": ">=0.5.0 <1",
     "react": ">=18"
   },
   "peerDependenciesMeta": {
-    "@heojeongbo/fluxion-worker": {
-      "optional": true
-    },
     "react": {
       "optional": true
     }
   },
   "devDependencies": {
-    "@heojeongbo/fluxion-worker": "workspace:*",
     "@release-it/conventional-changelog": "^10.0.6",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
