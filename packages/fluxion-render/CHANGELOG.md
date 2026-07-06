@@ -1,5 +1,25 @@
 # Changelog
 
+# [0.24.0](https://github-personal/HeoJeongBo/fluxion-render/compare/fluxion-render-v0.23.0...fluxion-render-v0.24.0) (2026-07-06)
+
+
+### Bug Fixes
+
+* **render:** defer recycle-overflow and pool-teardown disposes through the frame queue ([0946ce2](https://github-personal/HeoJeongBo/fluxion-render/commit/0946ce23af6ab71b85baf4112e24fb6ead2c9e7c))
+* **render:** forward emitRenderStats in pool mode; add getLifecycleStats ([95dded1](https://github-personal/HeoJeongBo/fluxion-render/commit/95dded1fb15d771c5fb8d9435c1fc8bc0dbaf10d))
+* **render:** harden burst fixes — recycle key emitRenderStats, budget validation, idle-shrink clamps, hidden-tab drain ([6ed299b](https://github-personal/HeoJeongBo/fluxion-render/commit/6ed299b80e3667a8b5aaaec4436a359362ffab2f))
+
+
+### Features
+
+* **examples:** light/dark Theme Switch demo showing live chart re-theming ([f3a1583](https://github-personal/HeoJeongBo/fluxion-render/commit/f3a15831f1b707eac639b1e2576db2e2a396a540))
+* **examples:** surface replay video-write errors as a storage-full badge ([cb80dc4](https://github-personal/HeoJeongBo/fluxion-render/commit/cb80dc44f91e6b8c81b7187ba13e3edc0194c591))
+* **render:** frame-budgeted, latest-wins resize scheduling ([f455a1f](https://github-personal/HeoJeongBo/fluxion-render/commit/f455a1fbca0be5a250b8bbf73d2cb38c55dd0516))
+* **render:** idle shrink of parked host backings ([3f632e9](https://github-personal/HeoJeongBo/fluxion-render/commit/3f632e9990394ce75f861e027934c8c0f5aae226))
+* **render:** recycle-pool overflow stats + working-set warning ([252e18d](https://github-personal/HeoJeongBo/fluxion-render/commit/252e18d905886e1e8bc412c489934fc4bb610765)), closes [hi#water](https://github-personal/hi/issues/water)
+* **render:** runtime setAxisStyle + declarative bg/axis reconcile for live theming ([e8d6448](https://github-personal/HeoJeongBo/fluxion-render/commit/e8d6448155eeed343d954b65620a9cd32d1f161d))
+* **replay:** OPFS-aware eviction with graceful quota handling ([c4c0f45](https://github-personal/HeoJeongBo/fluxion-render/commit/c4c0f450e78343e2b56a36bf4d80e2e5ca151ce2))
+
 # [0.23.0](https://github-personal/HeoJeongBo/fluxion-render/compare/fluxion-render-v0.22.0...fluxion-render-v0.23.0) (2026-06-29)
 
 
