@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v1.0.0...fluxion-render-v1.0.1) (2026-07-24)
+
+
+### Bug Fixes
+
+* **render:** send Op.DISPOSE before flipping `disposed` so pool hosts tear down ([37394c9](https://github.com/HeoJeongBo/fluxion-render/commit/37394c962a422628b4ea8dc8e9e8f0ec6dbefeca))
+
 # [1.0.0](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v0.24.0...fluxion-render-v1.0.0) (2026-07-06)
 
 
