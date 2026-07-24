@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { _resetArityGuard } from "../../../shared/lib/arity-guard";
 import { Op, WorkerOp } from "../../../shared/protocol";
+import { FluxionWorkerHandle, type FluxionWorkerPool } from "../../worker-pool";
 import { FluxionHost } from "./fluxion-host";
 
 interface RecordedPost {
@@ -27,6 +28,24 @@ function makeCanvas(width = 400, height = 300) {
   canvas.width = width;
   canvas.height = height;
   return canvas;
+}
+
+// A pool-backed handle wrapping a fake raw worker. `FluxionWorkerHandle` rewrites
+// INIT→POOL_INIT and DISPOSE→POOL_DISPOSE and releases the slot via `onRelease`,
+// so this exercises the real pool teardown path (the one the freeze lived on).
+function makeFakePoolHandle(hostId = "host-0") {
+  const posts: RecordedPost[] = [];
+  const onRelease = vi.fn();
+  const rawWorker = {
+    postMessage: vi.fn((msg: unknown, transfer?: Transferable[]) => {
+      posts.push({ msg, transfer });
+    }),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    terminate: vi.fn(),
+  } as unknown as Worker;
+  const handle = new FluxionWorkerHandle(rawWorker, hostId, onRelease);
+  return { handle, posts, onRelease };
 }
 
 describe("FluxionHost", () => {
@@ -110,17 +129,39 @@ describe("FluxionHost", () => {
     host.dispose();
   });
 
-  it("dispose terminates the worker and becomes a no-op afterwards", () => {
+  it("dispose posts Op.DISPOSE, terminates the worker, and becomes a no-op afterwards", () => {
     const { worker, posts, terminate } = makeFakeWorker();
     const host = new FluxionHost(makeCanvas(), {
       workerFactory: () => worker,
     });
     host.dispose();
+    // Regression: the worker-teardown message MUST actually go out. It used to be
+    // posted AFTER `disposed` flipped, so post() swallowed it and the worker-side
+    // engine (+ its GPU backing) leaked — the root of the bulk-dispose freeze.
+    expect(posts.map((p) => (p.msg as { op: number }).op)).toContain(Op.DISPOSE);
     expect(terminate).toHaveBeenCalledTimes(1);
     posts.length = 0;
     host.addLayer("x", "line");
     host.pushData("x", new Float32Array([1]));
     expect(posts).toHaveLength(0);
+  });
+
+  it("dispose posts POOL_DISPOSE and releases the pool slot (pool mode)", () => {
+    const { handle, posts, onRelease } = makeFakePoolHandle("host-7");
+    const pool = { acquire: () => handle } as unknown as FluxionWorkerPool;
+    const host = new FluxionHost(makeCanvas(), { pool });
+    posts.length = 0; // drop the POOL_INIT posted on construction
+    host.dispose();
+    // The handle rewrites Op.DISPOSE → POOL_DISPOSE (per-host worker teardown) and
+    // releases the pooled slot. Both were dead before the ordering fix — in pool
+    // mode `terminate()` is a no-op, so the dropped DISPOSE meant the worker engine
+    // and its OffscreenCanvas GPU backing leaked on every unmount.
+    const disposeMsg = posts.find(
+      (p) => (p.msg as { op: number }).op === Op.POOL_DISPOSE,
+    );
+    expect(disposeMsg).toBeDefined();
+    expect((disposeMsg?.msg as { hostId: string }).hostId).toBe("host-7");
+    expect(onRelease).toHaveBeenCalledTimes(1);
   });
 
   it("dispose is idempotent (second call no-ops, worker terminated once)", () => {

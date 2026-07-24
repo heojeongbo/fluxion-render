@@ -948,14 +948,24 @@ export class FluxionHost {
     // this.post, still allowed until `disposed` is set).
     this.cancelScheduledFlush();
     // A throwing final flush (e.g. a detached buffer) must NOT abort teardown —
-    // otherwise `disposed` never flips, the `Op.DISPOSE` message never goes out,
-    // and a pool host leaks its slot + worker-side engine. Best-effort flush.
+    // the DISPOSE post below still tears the worker layer down. Best-effort flush.
     try {
       this.flushAll();
     } catch {
       // ignore — the DISPOSE below tears the layer down regardless
     }
     this.pending.clear();
+    // Post the worker teardown BEFORE flipping `disposed` — `post()` drops any
+    // message once `disposed` is set, and in pool mode this DISPOSE is the ONLY
+    // thing that tears the worker engine down (→ POOL_DISPOSE → Engine.dispose →
+    // scheduler.stop + releaseBacking) and frees the pool slot; `terminate()`
+    // below is a no-op for a pooled handle. Sent after the final flush so any
+    // staged DATA still ships first. Best-effort — the worker may already be gone.
+    try {
+      this.post({ op: Op.DISPOSE });
+    } catch {
+      // worker may already be gone
+    }
     this.disposed = true;
     // Remove worker→main message listener
     if (this.workerMsgHandler && this.worker.removeEventListener) {
@@ -971,11 +981,6 @@ export class FluxionHost {
     this.boundsEmitter.clear();
     this.tickEmitter.clear();
     this.renderStatsEmitter.clear();
-    try {
-      this.post({ op: Op.DISPOSE });
-    } catch {
-      // worker may already be gone
-    }
     this.worker.terminate();
   }
 

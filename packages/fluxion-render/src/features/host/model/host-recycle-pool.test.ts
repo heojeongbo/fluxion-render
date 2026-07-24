@@ -4,8 +4,9 @@ import {
   flushLifecycleScheduler,
   resetLifecycleScheduler,
 } from "../../../shared/lib/lifecycle-scheduler";
-import type { FluxionWorkerPool } from "../../worker-pool";
-import type { FluxionHost } from "./fluxion-host";
+import { Op } from "../../../shared/protocol";
+import { FluxionWorkerHandle, type FluxionWorkerPool } from "../../worker-pool";
+import { FluxionHost } from "./fluxion-host";
 import { createHostRecyclePool, type HostBundle } from "./host-recycle-pool";
 
 type FakeBundle = HostBundle & {
@@ -24,6 +25,33 @@ function makeBundle(key: string): FakeBundle {
 }
 
 const fakePool = () => ({}) as unknown as FluxionWorkerPool;
+
+// A bundle around a REAL pool-mode FluxionHost, so `bundle.host.dispose()` runs the
+// genuine worker-teardown chain (post → handle → POOL_DISPOSE + slot release). Used
+// to prove overflow disposes actually reach the worker — the freeze lived here.
+function makePoolHostBundle(key: string) {
+  const posts: { msg: unknown }[] = [];
+  const onRelease = vi.fn();
+  const rawWorker = {
+    postMessage: vi.fn((msg: unknown) => {
+      posts.push({ msg });
+    }),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    terminate: vi.fn(),
+  } as unknown as Worker;
+  const handle = new FluxionWorkerHandle(rawWorker, key, onRelease);
+  const pool = { acquire: () => handle } as unknown as FluxionWorkerPool;
+  const canvas = document.createElement("canvas");
+  canvas.width = 400;
+  canvas.height = 300;
+  const host = new FluxionHost(canvas, { pool });
+  posts.length = 0; // drop the POOL_INIT posted on construction
+  return { bundle: { host, canvas, key } as HostBundle, posts, onRelease };
+}
+
+const hasOp = (posts: { msg: unknown }[], op: number) =>
+  posts.some((p) => (p.msg as { op: number }).op === op);
 
 describe("createHostRecyclePool", () => {
   afterEach(() => {
@@ -163,6 +191,27 @@ describe("createHostRecyclePool", () => {
     flushLifecycleScheduler();
     expect(overflow.host.dispose).toHaveBeenCalledTimes(1);
     expect(parked.host.dispose).not.toHaveBeenCalled();
+  });
+
+  it("overflow tears the host's worker engine down for real (posts POOL_DISPOSE)", () => {
+    // The user's actual freeze path: a bulk unmount into a recycle pool parks `max`
+    // hosts and OVERFLOW-disposes the rest. Before the dispose ordering fix, those
+    // overflow disposes silently dropped their worker teardown, leaking a live engine
+    // + GPU backing every cycle until the context was lost and the app froze. This
+    // asserts the overflow host's dispose actually reaches the worker (POOL_DISPOSE).
+    const pool = createHostRecyclePool({ max: 1 });
+    const parked = makePoolHostBundle("k");
+    const overflow = makePoolHostBundle("k");
+    pool.release(parked.bundle); // bucket now holds `max` (1)
+    pool.release(overflow.bundle); // full → deferred host.dispose()
+    expect(hasOp(overflow.posts, Op.POOL_DISPOSE)).toBe(false); // deferred, not yet
+    flushLifecycleScheduler();
+    expect(hasOp(overflow.posts, Op.POOL_DISPOSE)).toBe(true);
+    expect(overflow.onRelease).toHaveBeenCalledTimes(1);
+    // Tidy the parked host so its metrics interval / listeners don't outlive the test.
+    pool.dispose();
+    flushLifecycleScheduler();
+    expect(parked.onRelease).toHaveBeenCalledTimes(1);
   });
 
   it("spreads overflow disposes across frames on the shared perFrame budget", () => {
