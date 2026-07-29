@@ -44,6 +44,12 @@ const PARAMS = {
   // the library defaults (uncapped / on) so the base bench stays "untuned".
   maxFps: numParam("maxFps", 0) || undefined,
   emitBounds: new URLSearchParams(window.location.search).get("emitBounds") !== "0",
+  // Cost-attribution levers (default on = the untuned worst case):
+  // `axes=0` drops the external axis canvases, `labels=0` turns off in-plot
+  // tick labels, `grid=0` turns off grid lines.
+  axes: new URLSearchParams(window.location.search).get("axes") !== "0",
+  labels: new URLSearchParams(window.location.search).get("labels") !== "0",
+  grid: new URLSearchParams(window.location.search).get("grid") !== "0",
 };
 
 const COLORS = ["#4fc3f7", "#80ffa0", "#ffb060", "#f48fb1", "#ce93d8", "#80cbc4"];
@@ -97,6 +103,10 @@ const BenchChart = memo(function BenchChart({
         gridColor: THEME.chart.gridColor,
         axisColor: THEME.chart.axisColor,
         labelColor: THEME.chart.labelColor,
+        showXLabels: PARAMS.labels,
+        showYLabels: PARAMS.labels,
+        showXGrid: PARAMS.grid,
+        showYGrid: PARAMS.grid,
       }),
       lineLayer("line", { color, lineWidth: 1, capacity: 1024 }),
     ],
@@ -134,6 +144,7 @@ const BenchChart = memo(function BenchChart({
       }}
     >
       <FluxionCanvas
+        externalAxes={PARAMS.axes}
         layers={layers}
         hostOptions={{
           bgColor: THEME.chart.canvasBg,

@@ -35,6 +35,9 @@ const opts = {
   port: Number(arg("port", "4361")),
   maxFps: Number(arg("maxFps", "0")), // 0 = library default (uncapped)
   emitBounds: arg("emitBounds", "1"), // "0" silences BOUNDS_UPDATE traffic
+  axes: arg("axes", "1"), // "0" drops the external axis canvases
+  labels: arg("labels", "1"), // "0" turns off tick labels
+  grid: arg("grid", "1"), // "0" turns off grid lines
 };
 
 const browserType = { firefox, chromium }[opts.browser];
@@ -77,7 +80,8 @@ const { child: preview, url } = await startPreview();
 const benchUrl =
   `${url}/bench?charts=${opts.charts}&rate=${opts.rate}` +
   `&duration=${opts.duration}&warmup=${opts.warmup}` +
-  `&maxFps=${opts.maxFps}&emitBounds=${opts.emitBounds}`;
+  `&maxFps=${opts.maxFps}&emitBounds=${opts.emitBounds}` +
+  `&axes=${opts.axes}&labels=${opts.labels}&grid=${opts.grid}`;
 
 const results = [];
 try {
