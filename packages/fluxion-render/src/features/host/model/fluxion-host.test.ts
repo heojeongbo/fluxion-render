@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { _resetArityGuard } from "../../../shared/lib/arity-guard";
+import { resetFlushScheduler } from "../../../shared/lib/flush-scheduler";
 import { Op, WorkerOp } from "../../../shared/protocol";
 import { FluxionWorkerHandle, type FluxionWorkerPool } from "../../worker-pool";
 import { FluxionHost } from "./fluxion-host";
@@ -1115,6 +1116,9 @@ describe("FluxionHost", () => {
 
 describe("FluxionHost push coalescing", () => {
   afterEach(() => {
+    // The flush frame is module-shared across hosts; reset it BEFORE unstubbing
+    // rAF so a frame armed via the stub is cancelled with the same stub.
+    resetFlushScheduler();
     vi.unstubAllGlobals();
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -1290,6 +1294,85 @@ describe("FluxionHost push coalescing", () => {
     line.push({ t: 9, y: 9 }); // stage() after dispose is a no-op
     runFrame(); // the captured callback after dispose posts nothing
     expect(dataPosts(posts)).toHaveLength(1);
+  });
+
+  it("two hosts staging in one frame share ONE rAF; the drain flushes both", () => {
+    const wA = makeFakeWorker();
+    const wB = makeFakeWorker();
+    const { raf, runFrame } = captureRaf();
+    const hostA = new FluxionHost(makeCanvas(), { workerFactory: () => wA.worker });
+    const hostB = new FluxionHost(makeCanvas(), { workerFactory: () => wB.worker });
+    const lineA = hostA.addLineLayer("a");
+    const lineB = hostB.addLineLayer("b");
+    wA.posts.length = 0;
+    wB.posts.length = 0;
+
+    lineA.push({ t: 1, y: 1 });
+    lineB.push({ t: 2, y: 2 });
+    expect(raf).toHaveBeenCalledTimes(1); // shared frame, not one per host
+
+    runFrame();
+    expect(dataPosts(wA.posts)).toHaveLength(1);
+    expect(dataPosts(wB.posts)).toHaveLength(1);
+    hostA.dispose();
+    hostB.dispose();
+  });
+
+  it("disposing one host does not cancel the other's pending flush", () => {
+    const wA = makeFakeWorker();
+    const wB = makeFakeWorker();
+    const { caf, runFrame } = captureRaf();
+    const hostA = new FluxionHost(makeCanvas(), { workerFactory: () => wA.worker });
+    const hostB = new FluxionHost(makeCanvas(), { workerFactory: () => wB.worker });
+    const lineA = hostA.addLineLayer("a");
+    const lineB = hostB.addLineLayer("b");
+    wA.posts.length = 0;
+    wB.posts.length = 0;
+
+    lineA.push({ t: 1, y: 1 });
+    lineB.push({ t: 2, y: 2 });
+    hostA.dispose(); // drains A synchronously, unregisters it from the frame
+    expect(caf).not.toHaveBeenCalled(); // B is still pending → frame stays armed
+
+    runFrame();
+    expect(dataPosts(wA.posts)).toHaveLength(1); // only the dispose-time drain
+    expect(dataPosts(wB.posts)).toHaveLength(1); // B still flushed by the frame
+    hostB.dispose();
+  });
+
+  it("one host's throwing flush does not starve the other host in the frame", () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    let throwOnPost = false;
+    const postsA: RecordedPost[] = [];
+    const workerA = {
+      postMessage: vi.fn((msg: unknown, transfer?: Transferable[]) => {
+        if (throwOnPost) throw new Error("worker gone");
+        postsA.push({ msg, transfer });
+      }),
+      terminate: vi.fn(),
+      onmessage: null,
+      onerror: null,
+    } as unknown as Worker;
+    const wB = makeFakeWorker();
+    const { runFrame } = captureRaf();
+    const hostA = new FluxionHost(makeCanvas(), { workerFactory: () => workerA });
+    const hostB = new FluxionHost(makeCanvas(), { workerFactory: () => wB.worker });
+    const lineA = hostA.addLineLayer("a");
+    const lineB = hostB.addLineLayer("b");
+    postsA.length = 0;
+    wB.posts.length = 0;
+
+    lineA.push({ t: 1, y: 1 });
+    lineB.push({ t: 2, y: 2 });
+    throwOnPost = true; // A's frame flush will now throw inside postMessage
+    runFrame();
+    expect(errSpy).toHaveBeenCalled();
+    expect(dataPosts(wB.posts)).toHaveLength(1); // B unaffected
+
+    throwOnPost = false;
+    hostA.dispose();
+    hostB.dispose();
+    errSpy.mockRestore();
   });
 
   it("flushes staged data when the page becomes hidden, before SET_VISIBLE", () => {

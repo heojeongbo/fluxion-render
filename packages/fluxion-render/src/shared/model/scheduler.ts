@@ -1,13 +1,16 @@
+import { type FrameDriver, type FrameSubscriber, getFrameDriver } from "./frame-driver";
+
 /**
- * rAF-based render scheduler. Only calls `tick` on frames where dirty is set.
- * Uses the worker-global requestAnimationFrame when available; otherwise falls
- * back to setTimeout(16ms).
+ * Per-engine render scheduler. Only calls `tick` on frames where dirty is set.
+ * Frames are delivered by the shared per-global {@link FrameDriver} (one rAF
+ * loop per worker, shared by every engine multiplexed onto it) rather than a
+ * private loop, and the driver idles entirely while no scheduler needs frames.
  */
-export class Scheduler {
+export class Scheduler implements FrameSubscriber {
   private dirty = false;
   private continuous = false;
   private running = false;
-  private raf: number | null = null;
+  private readonly driver: FrameDriver;
   private readonly tick: (dirty: boolean) => void;
   // Render-rate cap. 0 = uncapped (render on every dirty/continuous frame, the
   // default). When > 0, renders are throttled to at most `1000 / minFrameMs`
@@ -22,8 +25,9 @@ export class Scheduler {
    * The engine uses this to skip redundant work — e.g. re-rendering the y-axis
    * canvas — on continuous frames where nothing y-related changed.
    */
-  constructor(tick: (dirty: boolean) => void) {
+  constructor(tick: (dirty: boolean) => void, driver: FrameDriver = getFrameDriver()) {
     this.tick = tick;
+    this.driver = driver;
   }
 
   /**
@@ -35,29 +39,27 @@ export class Scheduler {
     this.continuous = on;
     // Wake the loop immediately so the first continuous frame doesn't wait for
     // an external markDirty.
-    if (on) this.dirty = true;
+    if (on) {
+      this.dirty = true;
+      if (this.running) this.driver.wake();
+    }
   }
 
   start() {
     if (this.running) return;
     this.running = true;
-    this.loop();
+    this.driver.add(this);
+    this.driver.wake();
   }
 
   stop() {
     this.running = false;
-    if (this.raf != null) {
-      if (typeof cancelAnimationFrame !== "undefined") {
-        cancelAnimationFrame(this.raf);
-      } else {
-        clearTimeout(this.raf);
-      }
-      this.raf = null;
-    }
+    this.driver.remove(this);
   }
 
   markDirty() {
     this.dirty = true;
+    if (this.running) this.driver.wake();
   }
 
   /**
@@ -86,26 +88,28 @@ export class Scheduler {
     return true;
   }
 
-  private loop = () => {
-    if (!this.running) return;
+  /**
+   * Driver contract ({@link FrameSubscriber}) — not part of the scheduler's
+   * public semantics. Returns whether this scheduler still needs frames.
+   */
+  onFrame(): boolean {
     if ((this.continuous || this.dirty) && this.shouldRender()) {
       const wasDirty = this.dirty;
       this.dirty = false;
       try {
         this.tick(wasDirty);
       } catch (err) {
-        // A render error must NOT kill the loop. Because the rAF reschedule
-        // below sits after tick(), an uncaught throw here would permanently
-        // stop this engine — freezing every chart that shares the worker and
-        // leaving newly-mounted charts unable to draw their first frame. Log
-        // and keep looping so a transient bad frame self-recovers.
+        // A render error must NOT stall this engine. The driver also isolates
+        // subscriber throws, but catching here preserves this scheduler's own
+        // keep-alive answer below (a throwing continuous engine keeps
+        // animating next frame) and keeps the log message engine-specific.
         console.error("[fluxion] render error (frame skipped):", err);
       }
     }
-    if (typeof requestAnimationFrame !== "undefined") {
-      this.raf = requestAnimationFrame(this.loop);
-    } else {
-      this.raf = setTimeout(this.loop, 16) as unknown as number;
-    }
-  };
+    // dirty stays latched when shouldRender() skipped under the fps cap —
+    // returning true keeps the shared loop alive until the latched frame
+    // renders, with no external markDirty. `running` covers stop() called
+    // from inside tick: report no further need instead of one extra frame.
+    return this.running && (this.continuous || this.dirty);
+  }
 }

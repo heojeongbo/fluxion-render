@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetFrameDriver } from "../../../shared/model/frame-driver";
 import { Scheduler } from "../../../shared/model/scheduler";
 import { Op, WorkerOp } from "../../../shared/protocol";
 import type { FakeCtx } from "../../../test/setup";
@@ -26,6 +27,10 @@ describe("Engine", () => {
     vi.useFakeTimers();
   });
   afterEach(() => {
+    // Reset BEFORE restoring real timers: a scheduler leaked into the shared
+    // driver would leave a stale fake-timer rAF handle that wedges wake()
+    // for every later test in this file.
+    resetFrameDriver();
     vi.useRealTimers();
   });
 

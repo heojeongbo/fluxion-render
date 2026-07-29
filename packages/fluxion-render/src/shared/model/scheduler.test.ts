@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FrameDriver, resetFrameDriver } from "./frame-driver";
 import { Scheduler } from "./scheduler";
 
 describe("Scheduler", () => {
@@ -7,6 +8,9 @@ describe("Scheduler", () => {
   });
 
   afterEach(() => {
+    // Reset the shared driver BEFORE restoring real timers so its pending
+    // frame is cancelled with the fake-timer API that scheduled it.
+    resetFrameDriver();
     vi.useRealTimers();
   });
 
@@ -242,6 +246,93 @@ describe("Scheduler", () => {
 
     s.stop();
     errSpy.mockRestore();
+  });
+
+  it("idle-stop: after a dirty frame renders, no further frames are scheduled", () => {
+    const rafSpy = vi.spyOn(globalThis, "requestAnimationFrame");
+    const tick = vi.fn();
+    const s = new Scheduler(tick);
+    s.start();
+    s.markDirty();
+    vi.advanceTimersByTime(40); // render + the trailing frame that observes idle
+    expect(tick).toHaveBeenCalledTimes(1);
+
+    const settled = rafSpy.mock.calls.length;
+    vi.advanceTimersByTime(200); // idle: the shared loop must be stopped
+    expect(rafSpy.mock.calls.length).toBe(settled);
+
+    s.markDirty(); // wakes the loop again
+    vi.advanceTimersByTime(20);
+    expect(tick).toHaveBeenCalledTimes(2);
+    s.stop();
+    rafSpy.mockRestore();
+  });
+
+  it("accepts an explicitly injected driver", () => {
+    const driver = new FrameDriver();
+    const tick = vi.fn();
+    const s = new Scheduler(tick, driver);
+    s.start();
+    s.markDirty();
+    vi.advanceTimersByTime(20);
+    expect(tick).toHaveBeenCalledTimes(1);
+    s.stop();
+    driver.dispose();
+  });
+
+  it("two schedulers share one driver: continuous ticks every frame, dirty-gated only when marked, and a throwing tick never starves the sibling", () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const continuousTick = vi.fn(() => {
+      throw new Error("render boom");
+    });
+    const cont = new Scheduler(continuousTick);
+    const gatedTick = vi.fn();
+    const gated = new Scheduler(gatedTick);
+    cont.start();
+    gated.start();
+    cont.setContinuous(true);
+
+    vi.advanceTimersByTime(40);
+    expect(continuousTick.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(gatedTick).not.toHaveBeenCalled(); // never marked dirty
+    expect(errSpy).toHaveBeenCalled();
+
+    gated.markDirty();
+    vi.advanceTimersByTime(20);
+    expect(gatedTick).toHaveBeenCalledTimes(1); // sibling unaffected by throws
+
+    cont.stop();
+    gated.stop();
+    errSpy.mockRestore();
+  });
+
+  it("setContinuous(true) before start() does not schedule; start() then renders", () => {
+    const tick = vi.fn();
+    const s = new Scheduler(tick);
+    s.setContinuous(true); // not running → must not wake the driver
+    vi.advanceTimersByTime(100);
+    expect(tick).not.toHaveBeenCalled();
+
+    s.start();
+    vi.advanceTimersByTime(20);
+    expect(tick).toHaveBeenCalled();
+    s.stop();
+  });
+
+  it("stop() from inside a continuous tick idles the driver", () => {
+    const rafSpy = vi.spyOn(globalThis, "requestAnimationFrame");
+    const tick = vi.fn(() => s.stop());
+    const s = new Scheduler(tick);
+    s.start();
+    s.setContinuous(true);
+    vi.advanceTimersByTime(20);
+    expect(tick).toHaveBeenCalledTimes(1);
+
+    const settled = rafSpy.mock.calls.length;
+    vi.advanceTimersByTime(200);
+    expect(tick).toHaveBeenCalledTimes(1);
+    expect(rafSpy.mock.calls.length).toBe(settled); // no extra keep-alive frame
+    rafSpy.mockRestore();
   });
 
   it("setMaxFps(undefined) / non-positive restores uncapped rendering", () => {

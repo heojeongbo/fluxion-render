@@ -5,6 +5,20 @@
  * exercise the host/worker/react surface without a real browser.
  */
 
+import { afterEach } from "vitest";
+import { resetFlushScheduler } from "../shared/lib/flush-scheduler";
+import { resetFrameDriver } from "../shared/model/frame-driver";
+
+// The frame singletons (shared flush scheduler, shared frame driver) hold
+// module-level scheduling state. A test that leaves a frame armed — especially
+// under a stubbed/fake-timer rAF that never fires — would wedge every later
+// test in the process, so always reset them. Registered in setup so it runs
+// AFTER each file's own afterEach hooks (vitest 'stack' hook order).
+afterEach(() => {
+  resetFlushScheduler();
+  resetFrameDriver();
+});
+
 export interface CtxCall {
   name: string;
   args: unknown[];

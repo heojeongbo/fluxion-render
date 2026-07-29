@@ -6,6 +6,7 @@ import type { FluxionWorkerPool } from "../../../features/worker-pool";
 import { getDefaultPool } from "../../../features/worker-pool";
 import { warnArityMismatch } from "../../../shared/lib/arity-guard";
 import { Emitter } from "../../../shared/lib/emitter";
+import { cancelHostFlush, requestHostFlush } from "../../../shared/lib/flush-scheduler";
 import {
   type AxisStyle,
   type BoundsUpdateMsg,
@@ -275,9 +276,10 @@ export class FluxionHost {
   // lidar stride), recorded from add/config so handles can warn on a mismatched
   // push. See `expectedArity` + `arity-guard`.
   private readonly layerArity = new Map<string, number>();
+  // Cheap per-host guard so a high-rate stage() loop doesn't touch the shared
+  // flush scheduler's Map on every sample. The actual frame scheduling is
+  // shared across all hosts — see `shared/lib/flush-scheduler`.
   private flushScheduled = false;
-  private flushHandle: number | null = null;
-  private flushUsesRaf = false;
 
   constructor(canvas: HTMLCanvasElement, opts: FluxionHostOptions = {}) {
     this.coalesce = opts.coalesce ?? true;
@@ -800,23 +802,19 @@ export class FluxionHost {
     }
   }
 
-  /** Schedule a one-shot flush of all pending layers on the next frame. */
+  /**
+   * Schedule a one-shot flush of all pending layers on the next frame — the
+   * SHARED flush frame (one rAF drains every pending host), not a per-host rAF.
+   */
   private scheduleFlush(): void {
     if (this.flushScheduled || this.disposed) return;
     this.flushScheduled = true;
-    if (typeof requestAnimationFrame !== "undefined") {
-      this.flushUsesRaf = true;
-      this.flushHandle = requestAnimationFrame(() => this.flushAll());
-    } else {
-      this.flushUsesRaf = false;
-      this.flushHandle = setTimeout(() => this.flushAll(), 0) as unknown as number;
-    }
+    requestHostFlush(this, () => this.flushAll());
   }
 
   /** Flush every layer's staged samples as one `Op.DATA` message each. */
   private flushAll(): void {
     this.flushScheduled = false;
-    this.flushHandle = null;
     for (const id of [...this.pending.keys()]) this.flushLayer(id);
   }
 
@@ -928,16 +926,12 @@ export class FluxionHost {
   }
 
   /**
-   * Cancel a pending coalesce flush (rAF or timeout) and clear the scheduled
-   * flag. Shared by `dispose` and `reset` — `flushUsesRaf` records which API
-   * scheduled it, so the matching canceller is always the right one.
+   * Cancel a pending coalesce flush and clear the scheduled flag. Shared by
+   * `dispose` and `reset` — unregisters this host from the shared flush frame
+   * so a disposed/parked host is never drained by it.
    */
   private cancelScheduledFlush(): void {
-    if (this.flushHandle != null) {
-      if (this.flushUsesRaf) cancelAnimationFrame(this.flushHandle);
-      else clearTimeout(this.flushHandle);
-      this.flushHandle = null;
-    }
+    cancelHostFlush(this);
     this.flushScheduled = false;
   }
 
