@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.3](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v1.0.2...fluxion-render-v1.0.3) (2026-07-29)
+
+
+### Features
+
+* **examples:** bench cost-attribution params (axes/labels/grid) ([6faa83e](https://github.com/HeoJeongBo/fluxion-render/commit/6faa83ed606ab3392addf63166c8111127c0ebe5))
+
+
+### Performance Improvements
+
+* **render:** label-sprite cache — raster each label once, blit per frame ([439b66f](https://github.com/HeoJeongBo/fluxion-render/commit/439b66fa438457eed6a9a3aff52001bac12a7ce6))
+* **render:** x-tick cache, external-axis label dedupe, draw-path allocs ([be42a3a](https://github.com/HeoJeongBo/fluxion-render/commit/be42a3a4bed77ced94b96993be8e7c1b5b23db98))
+
 ## [1.0.2](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v1.0.1...fluxion-render-v1.0.2) (2026-07-29)
 
 
