@@ -620,6 +620,21 @@ describe("LineChartLayer (streaming)", () => {
       expect(ys.some((y) => Math.abs(y - spikePy) < 0.5)).toBe(true);
     });
 
+    it("two consecutive decimated draws emit identical call sequences (scratch reset)", () => {
+      // Guards the persistent-sink state (`_dFirst` and scratch reuse): a
+      // second draw must not be affected by the first one's leftover state.
+      const layer = new LineChartLayer("l");
+      const vp = makeViewport();
+      layer.setConfig({ decimate: true });
+      fill5000(layer, vp);
+
+      const ctxA = createFakeCtx();
+      layer.draw(ctxA as unknown as OffscreenCanvasRenderingContext2D, vp);
+      const ctxB = createFakeCtx();
+      layer.draw(ctxB as unknown as OffscreenCanvasRenderingContext2D, vp);
+      expect(ctxB.calls).toEqual(ctxA.calls);
+    });
+
     it("decimate does NOT change the ring — scan still sees full-resolution y extremes", () => {
       const layer = new LineChartLayer("l");
       const vp = makeViewport();

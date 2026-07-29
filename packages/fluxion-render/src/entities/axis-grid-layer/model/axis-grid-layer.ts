@@ -4,7 +4,7 @@ import {
   type XTickFormat,
   type YTickFormat,
 } from "../../../shared/lib/axis-ticks";
-import { intervalTicks, niceTicks } from "../../../shared/lib/math";
+import { intervalTicks, niceStep, niceTicks } from "../../../shared/lib/math";
 import type { Layer } from "../../../shared/model/layer";
 import type { Bounds, Viewport } from "../../../shared/model/viewport";
 import type { AxisStyle } from "../../../shared/protocol";
@@ -199,8 +199,63 @@ export class AxisGridLayer implements Layer {
     labels: string[];
   } | null = null;
 
+  // Cache of x-tick values + formatted labels. A scrolling time axis moves
+  // xMin/xMax every frame but the tick VALUE SET only changes when a step
+  // boundary is crossed (tick leaves left / enters right) — so the key is the
+  // derived (step, start, count) triple, not the raw bounds. While it matches,
+  // draw()/drawXAxis()/computeTicksForExport() all reuse one tick array and
+  // one formatted-label array instead of re-running niceTicks/intervalTicks
+  // (with its per-tick toFixed) and formatTick (Date + regex) every frame.
+  // `setConfig` clears it (xMode/timeOrigin/format/targetTicks/interval…).
+  private xTickCache: {
+    step: number;
+    start: number;
+    count: number;
+    ticks: number[];
+    labels: string[];
+  } | null = null;
+
+  private static readonly EMPTY_TICKS: { ticks: number[]; labels: string[] } = {
+    ticks: [],
+    labels: [],
+  };
+
   constructor(id: string) {
     this.id = id;
+  }
+
+  /**
+   * x-tick values and their formatted labels for the current x-bounds, reusing
+   * the cached result while the tick set is unchanged (steady scroll). The
+   * (step, start, count) key is exact at step crossings: both generators
+   * accumulate the identical float `start` by the identical float `step`, so
+   * an equal key implies a bit-identical tick sequence. (The arithmetic
+   * `count` can disagree with the generator's accumulated loop within ~1 ulp
+   * of the right edge — worst case a right-edge tick appears one frame
+   * early/late; transient and visually invisible.)
+   */
+  private xTicksFor(): { ticks: number[]; labels: string[] } {
+    const { xMin, xMax } = this.bounds;
+    if (!Number.isFinite(xMin) || !Number.isFinite(xMax) || xMax <= xMin) {
+      return AxisGridLayer.EMPTY_TICKS;
+    }
+    const step = this.xTickIntervalMs ?? niceStep(xMax - xMin, this.targetTicks);
+    if (step <= 0) return AxisGridLayer.EMPTY_TICKS;
+    const start = Math.ceil(xMin / step) * step;
+    const limit = xMax + step * 1e-6;
+    const count = start > limit ? 0 : Math.floor((limit - start) / step) + 1;
+    const c = this.xTickCache;
+    if (c && c.step === step && c.start === start && c.count === count) return c;
+    const ticks =
+      this.xTickIntervalMs != null
+        ? intervalTicks(xMin, xMax, this.xTickIntervalMs)
+        : niceTicks(xMin, xMax, this.targetTicks);
+    const labels = new Array<string>(ticks.length);
+    for (let i = 0; i < ticks.length; i++) {
+      labels[i] = formatTick(ticks[i]!, this.xMode, this.timeOrigin, this.xTickFormat);
+    }
+    this.xTickCache = { step, start, count, ticks, labels };
+    return this.xTickCache;
   }
 
   /**
@@ -270,9 +325,11 @@ export class AxisGridLayer implements Layer {
       );
     }
 
-    // Any config change can affect tick values/labels (targetTicks, yTickFormat,
-    // yRange); drop the cache so the next draw recomputes.
+    // Any config change can affect tick values/labels (targetTicks, formats,
+    // ranges, xMode/timeOrigin/interval); drop both caches so the next draw
+    // recomputes.
     this.yTickCache = null;
+    this.xTickCache = null;
   }
 
   setData(_buffer: ArrayBuffer, _length: number, _viewport: Viewport): void {}
@@ -381,10 +438,7 @@ export class AxisGridLayer implements Layer {
     }
 
     const { widthPx: w, heightPx: h } = viewport;
-    const xTicks =
-      this.xTickIntervalMs != null
-        ? intervalTicks(this.bounds.xMin, this.bounds.xMax, this.xTickIntervalMs)
-        : niceTicks(this.bounds.xMin, this.bounds.xMax, this.targetTicks);
+    const { ticks: xTicks, labels: xLabels } = this.xTicksFor();
     const { ticks: yTicks, labels: yLabels } = this.yTicksFor();
 
     // ── Grid lines ──
@@ -429,21 +483,22 @@ export class AxisGridLayer implements Layer {
     }
 
     // ── Labels ──
-    if (this.showXLabels || this.showYLabels) {
+    // When the engine renders an external axis canvas for a side, skip that
+    // side's in-plot labels: they'd be formatted and drawn twice per frame
+    // (and visually duplicated). Grid lines above are unaffected.
+    const drawXLabels = this.showXLabels && !viewport.externalXAxis;
+    const drawYLabels = this.showYLabels && !viewport.externalYAxis;
+    if (drawXLabels || drawYLabels) {
       ctx.fillStyle = this.labelColor;
       ctx.font = this.font;
-      if (this.showXLabels) {
+      if (drawXLabels) {
         ctx.textBaseline = "top";
         for (let i = 0; i < xTicks.length; i++) {
           const x = viewport.xToPx(xTicks[i]);
-          ctx.fillText(
-            formatTick(xTicks[i], this.xMode, this.timeOrigin, this.xTickFormat),
-            x + 2,
-            h - 12,
-          );
+          ctx.fillText(xLabels[i], x + 2, h - 12);
         }
       }
-      if (this.showYLabels) {
+      if (drawYLabels) {
         ctx.textBaseline = "middle";
         for (let i = 0; i < yTicks.length; i++) {
           const y = viewport.yToPx(yTicks[i]);
@@ -464,21 +519,16 @@ export class AxisGridLayer implements Layer {
     yTicks: { value: number; label: string; fraction: number }[];
     xRawValues: number[];
   } {
-    const xRaw =
-      this.xTickIntervalMs != null
-        ? intervalTicks(this.bounds.xMin, this.bounds.xMax, this.xTickIntervalMs)
-        : niceTicks(this.bounds.xMin, this.bounds.xMax, this.targetTicks);
+    const { ticks: xRaw, labels: xLabels } = this.xTicksFor();
     const yRaw = niceTicks(this.bounds.yMin, this.bounds.yMax, this.targetTicks);
     const xSpan = this.bounds.xMax - this.bounds.xMin;
     const ySpan = this.bounds.yMax - this.bounds.yMin;
     const isFnFormat = typeof this.xTickFormat === "function";
     return {
-      xTicks: xRaw.map((v) => ({
+      xTicks: xRaw.map((v, i) => ({
         value: v,
-        label: isFnFormat
-          ? ""
-          : formatTick(v, this.xMode, this.timeOrigin, this.xTickFormat),
-        /* v8 ignore next -- empty span ⟹ niceTicks returns [], so this map body never runs */
+        label: isFnFormat ? "" : xLabels[i]!,
+        /* v8 ignore next -- empty span ⟹ xTicksFor returns [], so this map body never runs */
         fraction: xSpan > 0 ? (v - this.bounds.xMin) / xSpan : 0,
       })),
       yTicks: yRaw.map((v) => ({
@@ -513,15 +563,12 @@ export class AxisGridLayer implements Layer {
 
     ctx.clearRect(0, 0, canvasW, canvasH);
 
-    const xRaw =
-      this.xTickIntervalMs != null
-        ? intervalTicks(this.bounds.xMin, this.bounds.xMax, this.xTickIntervalMs)
-        : niceTicks(this.bounds.xMin, this.bounds.xMax, this.targetTicks);
+    const { ticks: xRaw, labels: xLabels } = this.xTicksFor();
     const xSpan = this.bounds.xMax - this.bounds.xMin;
 
-    // Inline the fraction + label per tick — no intermediate arrays per frame.
-    // The loops only run when `xRaw` is non-empty, which (niceTicks/intervalTicks)
-    // implies `xSpan > 0`, so the division is always safe here.
+    // Ticks and labels come from the shared x-tick cache — no per-frame
+    // regeneration or re-formatting. The loops only run when `xRaw` is
+    // non-empty, which implies `xSpan > 0`, so the division is always safe.
     if (tickSize > 0) {
       ctx.strokeStyle = color;
       ctx.lineWidth = 1;
@@ -539,9 +586,9 @@ export class AxisGridLayer implements Layer {
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     const labelY = tickSize + tickMargin;
-    for (const v of xRaw) {
-      const label = formatTick(v, this.xMode, this.timeOrigin, this.xTickFormat);
-      ctx.fillText(label, ((v - this.bounds.xMin) / xSpan) * canvasW, labelY);
+    for (let i = 0; i < xRaw.length; i++) {
+      const v = xRaw[i]!;
+      ctx.fillText(xLabels[i]!, ((v - this.bounds.xMin) / xSpan) * canvasW, labelY);
     }
   }
 

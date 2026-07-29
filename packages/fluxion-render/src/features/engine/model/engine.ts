@@ -80,6 +80,11 @@ function createLayer(id: string, kind: LayerKind): Layer {
   }
 }
 
+/** Type guard hoisted to module scope so render() doesn't allocate it per frame. */
+function isAxisGrid(l: Layer): l is AxisGridLayer {
+  return l instanceof AxisGridLayer;
+}
+
 /**
  * Worker-side engine. Owns the OffscreenCanvas, layer stack, viewport,
  * and render scheduler. All state lives here; main thread just pushes messages.
@@ -97,6 +102,10 @@ export class Engine {
   private readonly viewport = new Viewport();
   private readonly stack = new LayerStack();
   private readonly scheduler: Scheduler;
+  // Cached first AxisGridLayer of the stack (insertion order), refreshed on
+  // layer add/remove/reset — render() and friends read it every frame and must
+  // not re-scan the stack (or allocate a type-guard closure) per frame.
+  private axisLayer: AxisGridLayer | null = null;
   private bgColor = "#0b0d12";
   // Page visibility, driven by the host's `visibilitychange`. While false, the
   // follow-clock continuous render loop is suspended (CPU/battery), regardless
@@ -149,12 +158,14 @@ export class Engine {
         if (msg.config !== undefined) layer.setConfig(msg.config);
         layer.resize(this.viewport);
         this.stack.add(layer);
+        this.refreshAxisLayerRef();
         this.syncContinuousMode();
         this.scheduler.markDirty();
         break;
       }
       case Op.REMOVE_LAYER:
         this.stack.remove(msg.id);
+        this.refreshAxisLayerRef();
         this.syncContinuousMode();
         this.scheduler.markDirty();
         break;
@@ -230,9 +241,7 @@ export class Engine {
           // Re-anchor the follow-clock window to the current wall clock so it
           // jumps once to true "now" (elapsed hidden time is real) instead of
           // resuming from a stale anchor.
-          this.stack
-            .findFirst((l): l is AxisGridLayer => l instanceof AxisGridLayer)
-            ?.resetClockAnchor();
+          this.axisLayer?.resetClockAnchor();
           this.scheduler.markDirty();
         }
         this.syncContinuousMode();
@@ -272,8 +281,14 @@ export class Engine {
    * canvas context, page-visibility) are intentionally preserved — they form
    * the recycle key, so a reused engine already matches the requesting mount.
    */
+  /** Re-resolve the cached first AxisGridLayer after any stack mutation. */
+  private refreshAxisLayerRef(): void {
+    this.axisLayer = this.stack.findFirst(isAxisGrid) ?? null;
+  }
+
   private reset(): void {
     this.stack.disposeAll();
+    this.axisLayer = null;
     this.viewport.latestT = 0;
     this.viewport.setBounds({ xMin: -1, xMax: 1, yMin: -1, yMax: 1 });
     this.viewport.yPadPx = 0;
@@ -297,10 +312,14 @@ export class Engine {
     if (msg.xAxisCanvas) {
       this.xAxisCanvas = msg.xAxisCanvas;
       this.xAxisCtx = msg.xAxisCanvas.getContext("2d");
+      // Labels now render on the axis canvas — the grid layer must not also
+      // format + draw them in-plot (the double-label footgun).
+      this.viewport.externalXAxis = true;
     }
     if (msg.yAxisCanvas) {
       this.yAxisCanvas = msg.yAxisCanvas;
       this.yAxisCtx = msg.yAxisCanvas.getContext("2d");
+      this.viewport.externalYAxis = true;
     }
     // Size the axis canvases to match the current viewport.
     this.resizeAxisCanvases(
@@ -421,9 +440,7 @@ export class Engine {
     }
 
     // Draw axis canvases synchronously in the same rAF cycle (zero lag).
-    const axisLayer = this.stack.findFirst(
-      (l): l is AxisGridLayer => l instanceof AxisGridLayer,
-    );
+    const axisLayer = this.axisLayer;
     if (axisLayer) {
       if (this.xAxisCtx && this.xAxisCanvas) {
         this.xAxisCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -488,9 +505,7 @@ export class Engine {
   }
 
   private maybeSendTickUpdate(boundsChanged: boolean): void {
-    const axisLayer = this.stack.findFirst(
-      (l): l is AxisGridLayer => l instanceof AxisGridLayer,
-    );
+    const axisLayer = this.axisLayer;
     if (!axisLayer) return;
 
     const now = Date.now();
@@ -527,10 +542,7 @@ export class Engine {
    * Called after any op that can change layer presence or config.
    */
   private syncContinuousMode(): void {
-    const follow =
-      this.stack
-        .findFirst((l): l is AxisGridLayer => l instanceof AxisGridLayer)
-        ?.isFollowingClock() ?? false;
+    const follow = this.axisLayer?.isFollowingClock() ?? false;
     // Suspend the continuous loop while the page is hidden — no point scrolling
     // an axis nobody can see, and it saves CPU/battery.
     this.scheduler.setContinuous(this.visible && follow);
@@ -546,6 +558,7 @@ export class Engine {
   private dispose() {
     this.scheduler.stop();
     this.stack.disposeAll();
+    this.axisLayer = null;
     // Release each OffscreenCanvas's GPU backing store NOW instead of waiting for
     // GC. A `transferControlToOffscreen()` canvas keeps its GPU surface alive
     // until the OffscreenCanvas is garbage-collected; under rapid mount/unmount

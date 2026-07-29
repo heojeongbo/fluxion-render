@@ -1,4 +1,4 @@
-import { forEachColumn } from "../../../shared/lib/column-reduce";
+import { type ColumnSink, forEachColumn } from "../../../shared/lib/column-reduce";
 import { pushSamples } from "../../../shared/lib/push-samples";
 import { computeRingCapacity } from "../../../shared/lib/ring-capacity";
 import type { Layer } from "../../../shared/model/layer";
@@ -292,37 +292,54 @@ export class LineChartLayer implements Layer {
    * within the column) — preserving every visible peak/trough at display
    * resolution while bounding the path to ~2–4 points per pixel.
    */
+  // Decimated-draw scratch, persistent across frames so the hot path allocates
+  // nothing per draw or per pixel column (the sink object, its closures, and
+  // the 4-point scratch used to be rebuilt every frame — O(width) allocs).
+  // `_dCtx`/`_dViewport` use definite assignment: `_drawDecimated` sets them
+  // before `forEachColumn` can invoke the sink.
+  private readonly _pts = [0, 0, 0, 0];
+  private _dCtx!: OffscreenCanvasRenderingContext2D;
+  private _dViewport!: Viewport;
+  private _dLane = false;
+  private _dFirst = true;
+  private readonly _sink: ColumnSink = {
+    // Emit first → min → max → last (skipping duplicates) so the column's
+    // vertical extent is drawn without redundant points.
+    onColumn: (colPx, firstY, minY, maxY, lastY) => {
+      const pts = this._pts;
+      pts[0] = firstY;
+      pts[1] = minY;
+      pts[2] = maxY;
+      pts[3] = lastY;
+      for (let k = 0; k < pts.length; k++) {
+        if (k > 0 && pts[k] === pts[k - 1]) continue;
+        const py = this._dLane
+          ? this.yToBandPx(pts[k]!, this._dViewport)
+          : this._dViewport.yToPx(pts[k]! + this.yOffset);
+        if (this._dFirst) {
+          this._dCtx.moveTo(colPx, py);
+          this._dFirst = false;
+        } else {
+          this._dCtx.lineTo(colPx, py);
+        }
+      }
+    },
+    // A gap forces the next emitted point to start a new subpath.
+    onGapBreak: () => {
+      this._dFirst = true;
+    },
+  };
+
   private _drawDecimated(
     ctx: OffscreenCanvasRenderingContext2D,
     viewport: Viewport,
     xMin: number,
   ): void {
-    const lane = this.laneActive();
-    let first = true;
-
-    forEachColumn(this.ring, viewport, xMin, this.maxGapMs, {
-      // Emit first → min → max → last (skipping duplicates) so the column's
-      // vertical extent is drawn without redundant points.
-      onColumn: (colPx, firstY, minY, maxY, lastY) => {
-        const pts = [firstY, minY, maxY, lastY];
-        for (let k = 0; k < pts.length; k++) {
-          if (k > 0 && pts[k] === pts[k - 1]) continue;
-          const py = lane
-            ? this.yToBandPx(pts[k]!, viewport)
-            : viewport.yToPx(pts[k]! + this.yOffset);
-          if (first) {
-            ctx.moveTo(colPx, py);
-            first = false;
-          } else {
-            ctx.lineTo(colPx, py);
-          }
-        }
-      },
-      // A gap forces the next emitted point to start a new subpath.
-      onGapBreak: () => {
-        first = true;
-      },
-    });
+    this._dCtx = ctx;
+    this._dViewport = viewport;
+    this._dLane = this.laneActive();
+    this._dFirst = true;
+    forEachColumn(this.ring, viewport, xMin, this.maxGapMs, this._sink);
   }
 
   clearData(): void {

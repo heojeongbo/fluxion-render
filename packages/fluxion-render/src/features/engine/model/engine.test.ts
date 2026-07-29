@@ -627,6 +627,62 @@ describe("Engine", () => {
       engine.dispatch({ op: Op.DISPOSE });
     });
 
+    it("suppresses in-plot labels when axis canvases render them (double-label footgun)", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(100, 100);
+      engine.dispatch({ op: Op.INIT, canvas, width: 100, height: 100, dpr: 1 });
+      const xAxisCanvas = newCanvas(100, 30);
+      const yAxisCanvas = newCanvas(60, 100);
+      engine.dispatch({
+        op: Op.SET_AXIS_CANVAS,
+        xAxisCanvas: xAxisCanvas as unknown as OffscreenCanvas,
+        yAxisCanvas: yAxisCanvas as unknown as OffscreenCanvas,
+        xAxisHeight: 30,
+        yAxisWidth: 60,
+      });
+      // Layer added AFTER the axis canvases — also exercises the cached
+      // axis-layer ref refresh on ADD_LAYER.
+      engine.dispatch({
+        op: Op.ADD_LAYER,
+        id: "axis",
+        kind: "axis-grid",
+        // Labels deliberately LEFT ON — the misconfigured default.
+        config: { xRange: [0, 10], yRange: [0, 10] },
+      });
+      flushFrame();
+      const mainCtx = (canvas as unknown as { getContext: () => FakeCtx }).getContext();
+      const xCtx = (xAxisCanvas as unknown as { getContext: () => FakeCtx }).getContext();
+      // In-plot labels skipped; axis-canvas labels drawn exactly once.
+      expect(mainCtx.calls.filter((c) => c.name === "fillText")).toHaveLength(0);
+      expect(xCtx.calls.some((c) => c.name === "fillText")).toBe(true);
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
+    it("keeps suppressing in-plot labels across RESET + re-ADD_LAYER (recycle)", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(100, 100);
+      engine.dispatch({ op: Op.INIT, canvas, width: 100, height: 100, dpr: 1 });
+      const xAxisCanvas = newCanvas(100, 30);
+      engine.dispatch({
+        op: Op.SET_AXIS_CANVAS,
+        xAxisCanvas: xAxisCanvas as unknown as OffscreenCanvas,
+        xAxisHeight: 30,
+        yAxisWidth: 60,
+      });
+      engine.dispatch({ op: Op.RESET });
+      engine.dispatch({
+        op: Op.ADD_LAYER,
+        id: "axis",
+        kind: "axis-grid",
+        config: { xRange: [0, 10], yRange: [0, 10], showYLabels: false },
+      });
+      flushFrame();
+      const mainCtx = (canvas as unknown as { getContext: () => FakeCtx }).getContext();
+      // The x-axis canvas binding survived the recycle → x labels stay skipped.
+      expect(mainCtx.calls.filter((c) => c.name === "fillText")).toHaveLength(0);
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
     it("resizes axis canvases when main canvas is resized", () => {
       const engine = new Engine();
       const canvas = newCanvas(100, 100);

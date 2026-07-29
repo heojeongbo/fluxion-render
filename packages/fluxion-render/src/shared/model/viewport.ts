@@ -37,6 +37,16 @@ export class Viewport {
    */
   yPadPx = 0;
 
+  /**
+   * True when the engine renders x/y tick labels onto a dedicated external
+   * axis canvas (SET_AXIS_CANVAS). `AxisGridLayer` then skips its in-plot
+   * LABELS (grid lines are unaffected) so labels aren't formatted and drawn
+   * twice per frame. Set by Engine when an axis canvas attaches; axis-canvas
+   * bindings survive host recycling, so these are not cleared on RESET.
+   */
+  externalXAxis = false;
+  externalYAxis = false;
+
   setSize(width: number, height: number, dpr: number) {
     this.widthPx = width;
     this.heightPx = height;

@@ -997,4 +997,193 @@ describe("AxisGridLayer", () => {
       expect(yctx.calls.some((c) => c.name === "fillText")).toBe(true);
     });
   });
+
+  describe("external axis label skip", () => {
+    function labelLayer() {
+      const layer = new AxisGridLayer("axis");
+      layer.setConfig({ xRange: [0, 10], yRange: [0, 10] }); // labels default on
+      return layer;
+    }
+
+    /** Classify fillText calls by their y coordinate: x labels all sit on the
+     *  fixed baseline y = h - 12 (= 188 on a 200px viewport); y labels never
+     *  land there for these bounds (they sit at yToPx(tick) - 6). */
+    function countLabels(ctx: FakeCtx) {
+      const fills = ctx.calls.filter((c) => c.name === "fillText");
+      return {
+        x: fills.filter((c) => c.args[2] === 188).length,
+        y: fills.filter((c) => c.args[2] !== 188).length,
+      };
+    }
+
+    it("skips x labels only when the viewport marks an external x-axis", () => {
+      const v = makeViewport();
+      v.externalXAxis = true;
+      const ctx = frame(labelLayer(), v);
+      const { x, y } = countLabels(ctx);
+      expect(x).toBe(0);
+      expect(y).toBeGreaterThan(0);
+      // Grid lines unaffected: both x and y grid lines still stroked.
+      expect(ctx.calls.filter((c) => c.name === "moveTo").length).toBeGreaterThan(4);
+    });
+
+    it("skips y labels only when the viewport marks an external y-axis", () => {
+      const v = makeViewport();
+      v.externalYAxis = true;
+      const ctx = frame(labelLayer(), v);
+      const { x, y } = countLabels(ctx);
+      expect(x).toBeGreaterThan(0);
+      expect(y).toBe(0);
+    });
+
+    it("skips all labels when both axes are external; none when neither is", () => {
+      const both = makeViewport();
+      both.externalXAxis = true;
+      both.externalYAxis = true;
+      const ctxBoth = frame(labelLayer(), both);
+      expect(ctxBoth.calls.filter((c) => c.name === "fillText")).toHaveLength(0);
+      expect(ctxBoth.calls.some((c) => c.name === "stroke")).toBe(true); // grid intact
+
+      const ctxNone = frame(labelLayer(), makeViewport());
+      const { x, y } = countLabels(ctxNone);
+      expect(x).toBeGreaterThan(0);
+      expect(y).toBeGreaterThan(0);
+    });
+  });
+
+  describe("x-tick cache", () => {
+    /** Time-mode layer with a function formatter spy to observe re-formats. */
+    function makeTimeLayer(fmt: (v: number) => string) {
+      const layer = new AxisGridLayer("axis");
+      layer.setConfig({
+        xMode: "time",
+        timeWindowMs: 5000,
+        xTickIntervalMs: 1000,
+        yRange: [0, 10],
+        xTickFormat: fmt,
+      });
+      return layer;
+    }
+
+    it("sub-step scroll reuses cached ticks/labels (no re-format)", () => {
+      const fmt = vi.fn((v: number) => `t${v}`);
+      const layer = makeTimeLayer(fmt);
+      const v = makeViewport();
+
+      v.latestT = 5400; // ticks [1000..5000]
+      frame(layer, v);
+      const callsAfterFirst = fmt.mock.calls.length;
+      expect(callsAfterFirst).toBeGreaterThan(0); // formatted once on miss
+
+      v.latestT = 5900; // window slides, but no tick enters/leaves
+      const ctx = frame(layer, v);
+      expect(fmt.mock.calls.length).toBe(callsAfterFirst); // cache hit
+      // Labels still drawn, from the cache.
+      expect(ctx.calls.some((c) => c.name === "fillText" && c.args[0] === "t1000")).toBe(
+        true,
+      );
+    });
+
+    it("invalidates exactly at step crossings (count and start changes)", () => {
+      const fmt = vi.fn((v: number) => `t${v}`);
+      const layer = makeTimeLayer(fmt);
+      const v = makeViewport();
+
+      v.latestT = 5400;
+      frame(layer, v);
+      expect(layer.computeTicksForExport().xRawValues).toEqual([
+        1000, 2000, 3000, 4000, 5000,
+      ]);
+      const afterFirst = fmt.mock.calls.length;
+
+      // xMax reaches 6000: a tick ENTERS on the right while `start` stays 1000
+      // (count-only key change).
+      v.latestT = 6000;
+      frame(layer, v);
+      expect(fmt.mock.calls.length).toBeGreaterThan(afterFirst);
+      expect(layer.computeTicksForExport().xRawValues).toEqual([
+        1000, 2000, 3000, 4000, 5000, 6000,
+      ]);
+
+      // xMin passes 1000: the left tick LEAVES (start key change).
+      const afterSecond = fmt.mock.calls.length;
+      v.latestT = 6500;
+      frame(layer, v);
+      expect(fmt.mock.calls.length).toBeGreaterThan(afterSecond);
+      expect(layer.computeTicksForExport().xRawValues).toEqual([
+        2000, 3000, 4000, 5000, 6000,
+      ]);
+    });
+
+    it("drawXAxis shares the cache with draw() — no second format pass", () => {
+      const fmt = vi.fn((v: number) => `t${v}`);
+      const layer = makeTimeLayer(fmt);
+      const v = makeViewport();
+      v.latestT = 5000;
+      frame(layer, v);
+      const afterFrame = fmt.mock.calls.length;
+
+      const xctx = createFakeCtx();
+      layer.drawXAxis(xctx as unknown as OffscreenCanvasRenderingContext2D, 400, 30, {});
+      expect(fmt.mock.calls.length).toBe(afterFrame); // reused, not re-formatted
+      expect(xctx.calls.some((c) => c.name === "fillText" && c.args[0] === "t1000")).toBe(
+        true,
+      );
+    });
+
+    it("setConfig invalidates the cache (formatter and targetTicks)", () => {
+      const fmt = vi.fn((v: number) => `t${v}`);
+      const layer = makeTimeLayer(fmt);
+      const v = makeViewport();
+      v.latestT = 5000;
+      frame(layer, v);
+
+      const fmt2 = vi.fn((v2: number) => `u${v2}`);
+      layer.setConfig({ xTickFormat: fmt2 });
+      const ctx = frame(layer, v);
+      expect(fmt2.mock.calls.length).toBeGreaterThan(0);
+      expect(ctx.calls.some((c) => c.name === "fillText" && c.args[0] === "u1000")).toBe(
+        true,
+      );
+
+      const before = fmt2.mock.calls.length;
+      layer.setConfig({ targetTicks: 4 });
+      frame(layer, v);
+      expect(fmt2.mock.calls.length).toBeGreaterThan(before); // reformatted
+    });
+
+    it("caches the niceTicks (fixed xMode) path too", () => {
+      const fmt = vi.fn((v: number) => `n${v}`);
+      const layer = new AxisGridLayer("axis");
+      layer.setConfig({ xRange: [0, 10], yRange: [0, 10], xTickFormat: fmt });
+      const v = makeViewport();
+      frame(layer, v);
+      const afterFirst = fmt.mock.calls.length;
+      expect(afterFirst).toBeGreaterThan(0);
+      frame(layer, v);
+      expect(fmt.mock.calls.length).toBe(afterFirst); // second frame: pure hit
+    });
+
+    it("degenerate or non-finite spans yield no x ticks and no throw", () => {
+      const layer = new AxisGridLayer("axis");
+      layer.setConfig({ xRange: [5, 5], yRange: [0, 10], showYGrid: false });
+      const ctx = frame(layer, makeViewport());
+      // No x grid lines (no ticks); y labels still render.
+      expect(ctx.calls.filter((c) => c.name === "moveTo")).toHaveLength(0);
+
+      layer.setConfig({ xRange: [0, Number.POSITIVE_INFINITY] });
+      expect(() => frame(layer, makeViewport())).not.toThrow();
+      expect(layer.computeTicksForExport().xTicks).toHaveLength(0);
+    });
+
+    it("xTickIntervalMs <= 0 and out-of-phase windows yield no ticks", () => {
+      const layer = new AxisGridLayer("axis");
+      layer.setConfig({ xRange: [0, 10], yRange: [0, 10], xTickIntervalMs: 0 });
+      expect(layer.computeTicksForExport().xTicks).toHaveLength(0); // step <= 0 arm
+
+      // A window that contains no interval multiple: start > limit (count 0).
+      layer.setConfig({ xRange: [0.5, 0.9], xTickIntervalMs: 1000 });
+      expect(layer.computeTicksForExport().xTicks).toHaveLength(0);
+    });
+  });
 });
