@@ -3,6 +3,7 @@ import { AllDemoPage } from "../pages/all-demo";
 import { AreaDemoPage } from "../pages/area-demo";
 import { AxisFormatDemoPage } from "../pages/axis-format-demo";
 import { BarDemoPage } from "../pages/bar-demo";
+import { BenchDemoPage } from "../pages/bench-demo";
 import { BoxPlotDemoPage } from "../pages/box-plot-demo";
 import { BroadcastStressDemoPage } from "../pages/broadcast-stress-demo";
 import { BrushDemoPage } from "../pages/brush-demo";
@@ -138,6 +139,7 @@ export const DEMO_GROUPS: readonly DemoGroup[] = [
         component: ChurnStressDemoPage,
       },
       { slug: "stress", label: "Stress (300@500Hz)", component: StressTestDemoPage },
+      { slug: "bench", label: "Bench (auto-measure)", component: BenchDemoPage },
       {
         slug: "broadcast-stress",
         label: "Broadcast (500Hz)",
