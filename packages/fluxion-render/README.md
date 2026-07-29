@@ -822,7 +822,12 @@ axisGridLayer('axis', {
 #### Tick formatters and `externalAxes`
 
 By default (`externalAxes`, the recommended path) tick labels are drawn by the
-worker on a dedicated axis canvas. A **function** formatter can't cross the
+worker on a dedicated axis canvas. In-plot labels (`showXLabels`/`showYLabels`)
+are **automatically suppressed** for a side whose external axis canvas is
+attached, so labels are never formatted and drawn twice per frame. Tick
+values/labels are cached between step crossings and label strings are
+rasterized once into a sprite cache, so a steadily scrolling axis costs a
+handful of bitmap blits per frame instead of per-label text rasterization. A **function** formatter can't cross the
 worker boundary — it's stripped before `postMessage` and only re-applied on the
 React side. Use the **string** or **object** form for worker-drawn labels:
 
