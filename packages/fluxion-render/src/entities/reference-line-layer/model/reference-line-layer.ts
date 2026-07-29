@@ -68,6 +68,7 @@ export class ReferenceLineLayer implements Layer {
 
     const py = viewport.yToPx(this.y);
     const w = viewport.widthPx;
+    const left = viewport.plotLeft;
 
     // Band
     if (this.bandMin !== undefined && this.bandMax !== undefined) {
@@ -76,7 +77,7 @@ export class ReferenceLineLayer implements Layer {
       ctx.save();
       ctx.globalAlpha = this.bandOpacity;
       ctx.fillStyle = this.color;
-      ctx.fillRect(0, pyMin, w, pyMax - pyMin);
+      ctx.fillRect(left, pyMin, w - left, pyMax - pyMin);
       ctx.restore();
     }
 
@@ -86,7 +87,7 @@ export class ReferenceLineLayer implements Layer {
     ctx.lineWidth = this.lineWidth;
     ctx.setLineDash([6, 4]);
     ctx.beginPath();
-    ctx.moveTo(0, py);
+    ctx.moveTo(left, py);
     ctx.lineTo(w, py);
     ctx.stroke();
     ctx.setLineDash([]);

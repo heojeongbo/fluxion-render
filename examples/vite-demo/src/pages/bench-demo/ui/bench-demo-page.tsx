@@ -45,9 +45,11 @@ const PARAMS = {
   maxFps: numParam("maxFps", 0) || undefined,
   emitBounds: new URLSearchParams(window.location.search).get("emitBounds") !== "0",
   // Cost-attribution levers (default on = the untuned worst case):
-  // `axes=0` drops the external axis canvases, `labels=0` turns off in-plot
+  // `axes=0` drops the external axis canvases, `axes=inline` draws axes into
+  // the main-canvas margins (single surface), `labels=0` turns off in-plot
   // tick labels, `grid=0` turns off grid lines.
   axes: new URLSearchParams(window.location.search).get("axes") !== "0",
+  inlineAxes: new URLSearchParams(window.location.search).get("axes") === "inline",
   labels: new URLSearchParams(window.location.search).get("labels") !== "0",
   grid: new URLSearchParams(window.location.search).get("grid") !== "0",
 };
@@ -145,6 +147,7 @@ const BenchChart = memo(function BenchChart({
     >
       <FluxionCanvas
         externalAxes={PARAMS.axes}
+        inlineAxes={PARAMS.inlineAxes}
         layers={layers}
         hostOptions={{
           bgColor: THEME.chart.canvasBg,

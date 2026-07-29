@@ -133,7 +133,7 @@ export class StepChartLayer implements Layer {
   /** Map a data `y` into this layer's lane band (own scanned range). */
   private yToBandPx(y: number, viewport: Viewport): number {
     const pad = viewport.yPadPx;
-    const usable = viewport.heightPx - pad * 2;
+    const usable = viewport.plotHeight - pad * 2;
     const bandH = usable / this.laneCount;
     const gap = this.laneGapPx;
     const top = pad + this.laneIndex * bandH + gap / 2;
@@ -163,7 +163,7 @@ export class StepChartLayer implements Layer {
     // Decimate when oversampled — at >2 samples/px the staircase and the
     // min/max-per-column path are visually identical. AUTO unless `decimate`
     // is explicitly set; `false` opts out.
-    const oversampled = this.ring.length > viewport.widthPx * 2;
+    const oversampled = this.ring.length > viewport.plotWidth * 2;
     if (this.decimate !== false && oversampled) {
       this._drawDecimated(ctx, viewport, xMin);
       ctx.stroke();

@@ -260,6 +260,10 @@ export function createHostRecyclePool(
       // Engine.reset(), never re-sent on warm reuse — so a stats-on chart must
       // never inherit a stats-off engine (or vice versa).
       o.emitRenderStats ? "r1" : "r0",
+      // Inline-axes margins are baked into the engine's viewport at INIT —
+      // a warm inline host (or one with different margins) must never be
+      // handed to a mount expecting a different plot rect.
+      o.inlineAxes ? `i${o.xAxisHeight ?? 30}x${o.yAxisWidth ?? 60}` : "-",
     ].join("|");
   };
 

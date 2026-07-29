@@ -70,6 +70,17 @@ export interface InitMsg {
   transparent?: boolean;
   /** Periodically post RENDER_STATS (render count + CPU time) for perf HUDs. Omitted = off. */
   emitRenderStats?: boolean;
+  /**
+   * Inline-axes mode: the engine reserves margins INSIDE the main canvas
+   * (`yAxisWidth` on the left, `xAxisHeight` at the bottom) and draws axis
+   * ticks/labels there itself — one canvas surface per chart instead of up to
+   * three. Omitted/false = plot spans the full canvas (unchanged).
+   */
+  inlineAxes?: boolean;
+  /** Inline-axes bottom margin in CSS px. Only read with `inlineAxes`. Default 30. */
+  xAxisHeight?: number;
+  /** Inline-axes left margin in CSS px. Only read with `inlineAxes`. Default 60. */
+  yAxisWidth?: number;
   hostId?: string;
 }
 
@@ -153,6 +164,9 @@ export interface PoolInitMsg {
   emitTicks?: boolean;
   transparent?: boolean;
   emitRenderStats?: boolean;
+  inlineAxes?: boolean;
+  xAxisHeight?: number;
+  yAxisWidth?: number;
 }
 
 /** Pool-only: tear down the engine for `hostId` without terminating the worker. */

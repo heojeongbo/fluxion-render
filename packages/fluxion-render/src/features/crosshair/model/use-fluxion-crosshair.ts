@@ -25,6 +25,12 @@ export interface UseFluxionCrosshairOptions {
   timeOrigin?: number;
   xRange?: [number, number];
   yPadPx?: number;
+  /**
+   * Left plot inset in CSS px. Set this to the chart's `yAxisWidth` when the
+   * capture element spans a chart rendered with `inlineAxes` (the plot area
+   * starts `insetLeft` px in from the element's left edge). Default 0.
+   */
+  insetLeft?: number;
   xFormat?: (t: number) => string;
   yFormat?: (y: number) => string;
   /**
@@ -54,6 +60,7 @@ export function useFluxionCrosshair(
     timeOrigin = 0,
     xRange,
     yPadPx = 0,
+    insetLeft = 0,
     xFormat,
     yFormat,
     throttleMs = 0,
@@ -69,6 +76,8 @@ export function useFluxionCrosshair(
   // Stable option refs
   const yPadPxRef = useRef(yPadPx);
   yPadPxRef.current = yPadPx;
+  const insetLeftRef = useRef(insetLeft);
+  insetLeftRef.current = insetLeft;
   const xFormatRef = useRef(xFormat);
   xFormatRef.current = xFormat;
   const yFormatRef = useRef(yFormat);
@@ -164,7 +173,11 @@ export function useFluxionCrosshair(
         xMax = boundsRef.current.xMax;
       }
 
-      const dataT = xMin + (pxX / width) * (xMax - xMin);
+      // Inline-axes charts inset the plot rect by `insetLeft` inside the same
+      // element — map pointer px over the plot span, not the element span.
+      const inset = insetLeftRef.current;
+      const plotW = width - inset || 1;
+      const dataT = xMin + ((pxX - inset) / plotW) * (xMax - xMin);
 
       const fmtX = xFormatRef.current ?? defaultXFormat;
       const fmtY = yFormatRef.current ?? defaultYFormat;

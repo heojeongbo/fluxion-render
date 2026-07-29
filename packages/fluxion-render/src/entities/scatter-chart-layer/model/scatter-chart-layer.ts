@@ -124,7 +124,7 @@ export class ScatterChartLayer implements Layer {
     // Thin to the column's min-y / max-y point when oversampled — bounds the
     // plotted points to O(width) while keeping the distribution envelope.
     // AUTO unless `decimate` is explicitly set; `false` opts out.
-    if (this.decimate !== false && this.ring.length > viewport.widthPx * 2) {
+    if (this.decimate !== false && this.ring.length > viewport.plotWidth * 2) {
       forEachColumn(this.ring, viewport, xMin, undefined, {
         onColumn: (colPx, _firstY, minY, maxY) => {
           plot(colPx, viewport.yToPx(minY));

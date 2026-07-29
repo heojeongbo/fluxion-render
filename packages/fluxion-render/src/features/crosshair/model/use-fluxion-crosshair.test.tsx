@@ -291,6 +291,29 @@ describe("default formatters and time-mode bounds", () => {
 // ─── xMode="fixed" — dataT calculation and nearest lookup ───────────────────
 
 describe('xMode="fixed"', () => {
+  it("maps pointer px over the inset plot span when insetLeft is set (inlineAxes)", () => {
+    const cache = makeCache();
+    cache.push("a", 100, 42);
+    const onState = vi.fn();
+    const { container } = render(
+      <Harness
+        host={null}
+        cache={cache}
+        xMode="fixed"
+        xRange={[0, 200]}
+        insetLeft={60}
+        onState={onState}
+      />,
+    );
+    const el = container.firstChild as HTMLElement;
+    stubRect(el, { left: 0, top: 0, width: 200, height: 100 });
+    // Plot spans [60, 200] → px 130 is (130-60)/140 = 0.5 → dataT 100.
+    firePointerMove(el, 130, 50);
+    const s = onState.mock.calls.at(-1)![0] as CrosshairState;
+    expect(s.points).toHaveLength(1);
+    expect(s.points[0]!.t).toBe(100);
+  });
+
   it("finds nearest point when mouse is at matching data t", () => {
     const cache = makeCache();
     cache.push("a", 100, 42);

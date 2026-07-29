@@ -819,6 +819,31 @@ axisGridLayer('axis', {
 })
 ```
 
+#### Inline axes (`inlineAxes`) — one canvas surface per chart
+
+`externalAxes` renders axes on **separate** canvases, so every frame of a
+scrolling chart presents two or three surfaces to the compositor (main +
+x-axis, + y-axis when bounds move). For large grids that per-surface present
+cost is the dominant axis expense. `inlineAxes` instead reserves margins
+INSIDE the main canvas (`yAxisWidth` left, `xAxisHeight` bottom) and has the
+worker draw ticks/labels there itself — **one** canvas surface per chart:
+
+```tsx
+<FluxionCanvas
+  inlineAxes                 // takes precedence over externalAxes
+  yAxisWidth={60}            // left margin (CSS px)
+  xAxisHeight={30}           // bottom margin
+  layers={[axisGridLayer('axis', { xMode: 'time', timeWindowMs: 5000, yMode: 'auto' }), …]}
+/>
+```
+
+Data and grid are clipped to the plot rect; in-plot labels are automatically
+suppressed; `axisColor`/`axisFont`/`axisTickSize`/`axisTickMargin` style the
+margin ticks exactly like external axes. Caveat: pointer→data overlays map px
+over the whole element, so pass the same left margin to the crosshair
+(`useFluxionCrosshair({ insetLeft: 60, … })`); the brush overlay currently
+assumes a full-width plot.
+
 #### Tick formatters and `externalAxes`
 
 By default (`externalAxes`, the recommended path) tick labels are drawn by the

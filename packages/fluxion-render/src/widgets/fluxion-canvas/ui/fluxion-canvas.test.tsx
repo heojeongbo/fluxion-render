@@ -125,6 +125,15 @@ describe("FluxionCanvas", () => {
     expect(container.querySelectorAll("div")).toHaveLength(1);
   });
 
+  it("renders a single div container in inlineAxes mode (no axis canvases)", () => {
+    const { factory } = makeFakeWorkerFactory();
+    const { container } = render(
+      <FluxionCanvas hostOptions={{ workerFactory: factory }} layers={[]} inlineAxes />,
+    );
+    expect(container.querySelectorAll("div")).toHaveLength(1);
+    expect(container.querySelectorAll("canvas")).toHaveLength(1);
+  });
+
   it("collapses the external-axes x-axis row when xAxisHeight is 0", () => {
     const { factory } = makeFakeWorkerFactory();
     const { container } = render(

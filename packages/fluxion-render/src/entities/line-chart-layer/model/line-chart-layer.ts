@@ -211,7 +211,7 @@ export class LineChartLayer implements Layer {
    */
   private yToBandPx(y: number, viewport: Viewport): number {
     const pad = viewport.yPadPx;
-    const usable = viewport.heightPx - pad * 2;
+    const usable = viewport.plotHeight - pad * 2;
     const bandH = usable / this.laneCount;
     const gap = this.laneGapPx;
     const top = pad + this.laneIndex * bandH + gap / 2;
@@ -251,7 +251,7 @@ export class LineChartLayer implements Layer {
     // than pixels — emit min/max per x-pixel column so the rendered shape is
     // identical but the path is O(width) instead of O(samples). AUTO (decimate
     // omitted) enables this whenever oversampled; `decimate:false` opts out.
-    const oversampled = this.ring.length > viewport.widthPx * 2;
+    const oversampled = this.ring.length > viewport.plotWidth * 2;
     if (this.decimate !== false && oversampled) {
       this._drawDecimated(ctx, viewport, xMin);
       ctx.stroke();

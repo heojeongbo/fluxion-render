@@ -144,6 +144,9 @@ export class Engine {
           emitTicks: msg.emitTicks,
           transparent: msg.transparent,
           emitRenderStats: msg.emitRenderStats,
+          inlineAxes: msg.inlineAxes,
+          xAxisHeight: msg.xAxisHeight,
+          yAxisWidth: msg.yAxisWidth,
         });
         break;
       case Op.SET_BG_COLOR:
@@ -342,9 +345,23 @@ export class Engine {
       emitTicks?: boolean;
       transparent?: boolean;
       emitRenderStats?: boolean;
+      inlineAxes?: boolean;
+      xAxisHeight?: number;
+      yAxisWidth?: number;
     },
   ) {
     this.canvas = canvas;
+    if (opts.inlineAxes) {
+      // Reserve in-canvas margins; the viewport maps data into the plot rect
+      // and drawInlineAxes renders ticks/labels into the strips. Construction-
+      // fixed (part of the recycle key) — RESET keeps them, like axis canvases.
+      this.viewport.insetLeft = opts.yAxisWidth ?? 60;
+      this.viewport.insetBottom = opts.xAxisHeight ?? 30;
+      // Margin labels replace in-plot labels — reuse the external-axis gates
+      // so the grid layer doesn't format/draw them twice.
+      this.viewport.externalXAxis = true;
+      this.viewport.externalYAxis = true;
+    }
     // Opaque context (alpha:false) composites faster — the engine fills `bgColor`
     // over the whole canvas every frame, so it's opaque regardless. `transparent`
     // opts back into an alpha channel for translucent backgrounds.
@@ -405,7 +422,26 @@ export class Engine {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = this.bgColor;
     ctx.fillRect(0, 0, this.viewport.widthPx, this.viewport.heightPx);
+    // Inline-axes mode: confine data/grid strokes to the plot rect so nothing
+    // bleeds into the reserved margins; axis ticks/labels are drawn AFTER the
+    // restore so they land in the margins unclipped.
+    const inline = this.viewport.insetLeft > 0 || this.viewport.insetBottom > 0;
+    if (inline) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(
+        this.viewport.plotLeft,
+        0,
+        this.viewport.plotWidth,
+        this.viewport.plotHeight,
+      );
+      ctx.clip();
+    }
     this.stack.drawAll(ctx, this.viewport);
+    if (inline) {
+      ctx.restore();
+      this.axisLayer?.drawInlineAxes(ctx, this.viewport, this.axisStyle);
+    }
 
     // Notify main thread when effective y bounds change (yMode:"auto").
     // Uses an epsilon gate so sub-pixel drift doesn't flood the main thread.

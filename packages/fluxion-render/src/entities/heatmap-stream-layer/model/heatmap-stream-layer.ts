@@ -170,7 +170,7 @@ export class HeatmapStreamLayer implements Layer {
     const range = vMax - vMin || 1;
 
     // Compute cell pixel dimensions.
-    const cellH = viewport.heightPx / bins;
+    const cellH = viewport.plotHeight / bins;
     const start = this.count < this.maxCols ? 0 : this.head;
 
     // Draw columns oldest→newest, clipped to visible x range.

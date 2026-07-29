@@ -51,6 +51,17 @@ export interface FluxionCanvasProps {
    */
   externalAxes?: boolean;
   /**
+   * Inline-axes mode: ONE canvas fills the whole container and the Worker
+   * draws axis ticks/labels into reserved margins inside it (`yAxisWidth`
+   * left, `xAxisHeight` bottom). Halves-to-thirds the per-frame canvas
+   * surface presents of a chart vs `externalAxes` — the preferred mode for
+   * large grids. Takes precedence over `externalAxes` when set. In-plot
+   * labels are automatically suppressed. Note: pointer→data overlays
+   * (crosshair) must account for the left margin — pass the same value as
+   * `insetLeft` to `useFluxionCrosshair`.
+   */
+  inlineAxes?: boolean;
+  /**
    * ID of the axis-grid layer used for external axis rendering.
    * Required when `externalAxes` is `true` (default).
    */
@@ -94,6 +105,7 @@ export const FluxionCanvas = forwardRef<FluxionCanvasHandle, FluxionCanvasProps>
       recyclePool,
       recycleKey,
       externalAxes = true,
+      inlineAxes = false,
       axisLayerId = "",
       yAxisWidth = 60,
       xAxisHeight = 30,
@@ -117,31 +129,42 @@ export const FluxionCanvas = forwardRef<FluxionCanvasHandle, FluxionCanvasProps>
       [axisColor, axisFont, axisTickSize, axisTickMargin],
     );
 
+    // Inline mode wins over externalAxes: one full-container canvas with
+    // in-canvas margins, no separate axis canvases/containers.
+    const useExternal = externalAxes && !inlineAxes;
     const { containerRef, host } = useFluxionCanvas({
       layers,
-      hostOptions: externalAxes
-        ? { ...hostOptions, xAxisHeight, yAxisWidth, axisStyle }
-        : hostOptions,
+      hostOptions: inlineAxes
+        ? { ...hostOptions, inlineAxes: true, xAxisHeight, yAxisWidth, axisStyle }
+        : useExternal
+          ? { ...hostOptions, xAxisHeight, yAxisWidth, axisStyle }
+          : hostOptions,
       onReady,
       staggerMount,
       recyclePool,
       recycleKey,
-      xAxisContainerRef: externalAxes ? xAxisContainerRef : undefined,
-      yAxisContainerRef: externalAxes ? yAxisContainerRef : undefined,
+      xAxisContainerRef: useExternal ? xAxisContainerRef : undefined,
+      yAxisContainerRef: useExternal ? yAxisContainerRef : undefined,
     });
 
     useImperativeHandle(ref, () => ({ getHost: () => host }), [host]);
 
     // Legacy React-side axis rendering path (externalAxes=false).
     // Hooks must be called unconditionally — they no-op when host/ticks are absent.
-    const tickSet = useAxisTicks(layers, axisLayerId, externalAxes ? null : host);
+    const tickSet = useAxisTicks(
+      layers,
+      axisLayerId,
+      useExternal || inlineAxes ? null : host,
+    );
     const legacyYCanvasRef = useYAxisCanvas(tickSet?.yTicks ?? [], axisStyle);
     const legacyXCanvasRef = useXAxisCanvas(
       xAxisHeight > 0 ? (tickSet?.xTicks ?? []) : [],
       axisStyle,
     );
 
-    if (!externalAxes) {
+    // Inline mode (and externalAxes=false): a single full-container div —
+    // the worker draws everything, including inline margins, on ONE canvas.
+    if (inlineAxes || !externalAxes) {
       void legacyYCanvasRef;
       void legacyXCanvasRef;
       return (

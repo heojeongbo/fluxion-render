@@ -86,6 +86,17 @@ describe("createHostRecyclePool", () => {
       );
     });
 
+    it("separates inline-axes hosts (and distinct margins) from plain ones", () => {
+      const pool = createHostRecyclePool();
+      const base = { hostOptions: {}, hasXAxis: false, hasYAxis: false };
+      const inline = { ...base, hostOptions: { inlineAxes: true } };
+      expect(pool.keyFor(base)).not.toBe(pool.keyFor(inline));
+      expect(pool.keyFor(inline)).toBe(pool.keyFor({ ...inline }));
+      expect(pool.keyFor(inline)).not.toBe(
+        pool.keyFor({ ...base, hostOptions: { inlineAxes: true, yAxisWidth: 40 } }),
+      );
+    });
+
     it("separates distinct worker pools / factories but is stable per object", () => {
       const pool = createHostRecyclePool();
       const poolA = fakePool();

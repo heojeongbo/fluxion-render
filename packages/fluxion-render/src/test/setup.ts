@@ -44,6 +44,7 @@ export interface FakeCtx {
   rect(...args: unknown[]): void;
   beginPath(): void;
   closePath(): void;
+  clip(): void;
   moveTo(...args: unknown[]): void;
   lineTo(...args: unknown[]): void;
   stroke(): void;
@@ -83,6 +84,7 @@ export function createFakeCtx(): FakeCtx {
     rect: rec("rect"),
     beginPath: rec("beginPath") as () => void,
     closePath: rec("closePath") as () => void,
+    clip: rec("clip") as () => void,
     moveTo: rec("moveTo"),
     lineTo: rec("lineTo"),
     stroke: rec("stroke") as () => void,

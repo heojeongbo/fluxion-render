@@ -95,6 +95,14 @@ export interface FluxionHostOptions {
   /** Axis tick/label style. Defaults: color "#666", font "11px sans-serif", tickSize 6, tickMargin 4. */
   axisStyle?: AxisStyle;
   /**
+   * Inline-axes mode: the worker reserves `yAxisWidth`/`xAxisHeight` margins
+   * INSIDE the main canvas and draws ticks/labels there itself — ONE canvas
+   * surface per chart instead of up to three (main + two axis canvases),
+   * cutting per-frame surface presents for large grids. Mutually exclusive
+   * with `xAxisElement`/`yAxisElement`. Construction-fixed (recycle key).
+   */
+  inlineAxes?: boolean;
+  /**
    * Coalesce high-frequency per-sample pushes (the typed handles' `push()`)
    * into ONE `Op.DATA` message per layer per animation frame, instead of one
    * postMessage per sample. Cuts postMessage volume from O(samples/sec) to
@@ -315,6 +323,9 @@ export class FluxionHost {
         emitTicks: opts.emitTicks,
         transparent: opts.transparent,
         emitRenderStats: opts.emitRenderStats,
+        inlineAxes: opts.inlineAxes,
+        xAxisHeight: opts.inlineAxes ? (opts.xAxisHeight ?? 30) : undefined,
+        yAxisWidth: opts.inlineAxes ? (opts.yAxisWidth ?? 60) : undefined,
       },
       [offscreen],
     );

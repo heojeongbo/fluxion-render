@@ -72,7 +72,7 @@ export class EventMarkerLayer implements Layer {
     if (!this.visible || this.markers.length === 0) return;
 
     const { xMin, xMax } = viewport.bounds;
-    const h = viewport.heightPx;
+    const h = viewport.plotBottom;
     const ms = this.markerSize;
     ctx.lineWidth = this.lineWidth;
 

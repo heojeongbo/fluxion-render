@@ -452,13 +452,13 @@ export class AxisGridLayer implements Layer {
         for (let i = 0; i < xTicks.length; i++) {
           const x = Math.round(viewport.xToPx(xTicks[i])) + 0.5;
           ctx.moveTo(x, 0);
-          ctx.lineTo(x, h);
+          ctx.lineTo(x, viewport.plotBottom);
         }
       }
       if (this.showYGrid) {
         for (let i = 0; i < yTicks.length; i++) {
           const y = Math.round(viewport.yToPx(yTicks[i])) + 0.5;
-          ctx.moveTo(0, y);
+          ctx.moveTo(viewport.plotLeft, y);
           ctx.lineTo(w, y);
         }
       }
@@ -473,11 +473,11 @@ export class AxisGridLayer implements Layer {
       if (this.bounds.xMin < 0 && this.bounds.xMax > 0) {
         const x0 = Math.round(viewport.xToPx(0)) + 0.5;
         ctx.moveTo(x0, 0);
-        ctx.lineTo(x0, h);
+        ctx.lineTo(x0, viewport.plotBottom);
       }
       if (this.bounds.yMin < 0 && this.bounds.yMax > 0) {
         const y0 = Math.round(viewport.yToPx(0)) + 0.5;
-        ctx.moveTo(0, y0);
+        ctx.moveTo(viewport.plotLeft, y0);
         ctx.lineTo(w, y0);
       }
       ctx.stroke();
@@ -503,7 +503,7 @@ export class AxisGridLayer implements Layer {
         } as const;
         for (let i = 0; i < xTicks.length; i++) {
           const x = viewport.xToPx(xTicks[i]);
-          drawLabel(ctx, xLabels[i]!, x + 2, h - 12, xOpts);
+          drawLabel(ctx, xLabels[i]!, x + 2, viewport.plotBottom - 12, xOpts);
         }
       }
       if (drawYLabels) {
@@ -517,7 +517,7 @@ export class AxisGridLayer implements Layer {
         } as const;
         for (let i = 0; i < yTicks.length; i++) {
           const y = viewport.yToPx(yTicks[i]);
-          drawLabel(ctx, yLabels[i]!, 2, y - 6, yOpts);
+          drawLabel(ctx, yLabels[i]!, viewport.plotLeft + 2, y - 6, yOpts);
         }
       }
     }
@@ -558,6 +558,77 @@ export class AxisGridLayer implements Layer {
 
   getXTickIntervalMs(): number | undefined {
     return this.xTickIntervalMs;
+  }
+
+  /**
+   * Inline-axes mode: draw x/y tick marks and labels into the MAIN canvas
+   * margins reserved by `viewport.insetLeft`/`insetBottom`. Called by the
+   * engine AFTER the clipped data/grid pass (so labels land in the margins
+   * unclipped) — must run after `draw()` so yMode:"auto" bounds are final.
+   * Styling comes from the same `AxisStyle` the external axis canvases use.
+   */
+  drawInlineAxes(
+    ctx: OffscreenCanvasRenderingContext2D,
+    viewport: Viewport,
+    style: AxisStyle,
+  ): void {
+    const color = style.color ?? "#666";
+    const font = style.font ?? "11px sans-serif";
+    const tickSize = style.tickSize ?? 6;
+    const tickMargin = style.tickMargin ?? 4;
+    const dpr = viewport.dpr;
+    const plotBottom = viewport.plotBottom;
+    const left = viewport.insetLeft;
+
+    // ── Bottom strip: x ticks + labels ──
+    if (viewport.insetBottom > 0) {
+      const { ticks: xRaw, labels: xLabels } = this.xTicksFor();
+      if (tickSize > 0 && xRaw.length > 0) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (const v of xRaw) {
+          const x = Math.round(viewport.xToPx(v)) + 0.5;
+          ctx.moveTo(x, plotBottom);
+          ctx.lineTo(x, plotBottom + tickSize);
+        }
+        ctx.stroke();
+      }
+      ctx.fillStyle = color;
+      ctx.font = font;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      const labelY = plotBottom + tickSize + tickMargin;
+      const xOpts = { font, color, align: "center", baseline: "top", dpr } as const;
+      for (let i = 0; i < xRaw.length; i++) {
+        drawLabel(ctx, xLabels[i]!, viewport.xToPx(xRaw[i]!), labelY, xOpts);
+      }
+    }
+
+    // ── Left strip: y ticks + labels ──
+    if (left > 0) {
+      const { ticks: yRaw, labels: yLabels } = this.yTicksFor();
+      if (tickSize > 0 && yRaw.length > 0) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (const v of yRaw) {
+          const y = Math.round(viewport.yToPx(v)) + 0.5;
+          ctx.moveTo(left - tickSize, y);
+          ctx.lineTo(left, y);
+        }
+        ctx.stroke();
+      }
+      ctx.fillStyle = color;
+      ctx.font = font;
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      const labelX = left - tickSize - tickMargin;
+      const yOpts = { font, color, align: "right", baseline: "middle", dpr } as const;
+      for (let i = 0; i < yRaw.length; i++) {
+        drawLabel(ctx, yLabels[i]!, labelX, viewport.yToPx(yRaw[i]!), yOpts);
+      }
+    }
   }
 
   /**

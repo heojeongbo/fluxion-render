@@ -599,6 +599,84 @@ describe("Engine", () => {
     });
   });
 
+  describe("inlineAxes", () => {
+    it("clips data to the plot rect and draws margin labels on the MAIN canvas", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(200, 130);
+      engine.dispatch({
+        op: Op.INIT,
+        canvas,
+        width: 200,
+        height: 130,
+        dpr: 1,
+        inlineAxes: true,
+        xAxisHeight: 30,
+        yAxisWidth: 60,
+      });
+      engine.dispatch({
+        op: Op.ADD_LAYER,
+        id: "axis",
+        kind: "axis-grid",
+        config: { xRange: [0, 10], yRange: [0, 10] }, // labels default ON
+      });
+      flushFrame();
+      const ctx = (canvas as unknown as { getContext: () => FakeCtx }).getContext();
+      expect(ctx.calls.some((c) => c.name === "save")).toBe(true);
+      expect(ctx.calls.some((c) => c.name === "restore")).toBe(true);
+      // 6 x + 6 y margin labels, and NO in-plot duplicates (would be 24).
+      expect(labelDraws(ctx)).toHaveLength(12);
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
+    it("defaults the margins to 30/60 when sizes are omitted", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(200, 130);
+      engine.dispatch({
+        op: Op.INIT,
+        canvas,
+        width: 200,
+        height: 130,
+        dpr: 1,
+        inlineAxes: true,
+      });
+      engine.dispatch({
+        op: Op.ADD_LAYER,
+        id: "axis",
+        kind: "axis-grid",
+        config: { xRange: [0, 10], yRange: [0, 10] },
+      });
+      flushFrame();
+      const ctx = (canvas as unknown as { getContext: () => FakeCtx }).getContext();
+      expect(labelDraws(ctx).length).toBeGreaterThan(0);
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
+    it("keeps the inline margins across RESET (recycle)", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(200, 130);
+      engine.dispatch({
+        op: Op.INIT,
+        canvas,
+        width: 200,
+        height: 130,
+        dpr: 1,
+        inlineAxes: true,
+      });
+      engine.dispatch({ op: Op.RESET });
+      engine.dispatch({
+        op: Op.ADD_LAYER,
+        id: "axis",
+        kind: "axis-grid",
+        config: { xRange: [0, 10], yRange: [0, 10] },
+      });
+      flushFrame();
+      const ctx = (canvas as unknown as { getContext: () => FakeCtx }).getContext();
+      expect(ctx.calls.some((c) => c.name === "clip")).toBe(true);
+      expect(labelDraws(ctx).length).toBeGreaterThan(0);
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+  });
+
   describe("SET_AXIS_CANVAS", () => {
     it("renders onto xAxisCanvas and yAxisCanvas after set", () => {
       const engine = new Engine();

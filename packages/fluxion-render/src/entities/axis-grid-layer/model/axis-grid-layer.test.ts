@@ -1159,4 +1159,89 @@ describe("AxisGridLayer", () => {
       expect(layer.computeTicksForExport().xTicks).toHaveLength(0);
     });
   });
+
+  describe("drawInlineAxes", () => {
+    function inlineViewport() {
+      const v = new Viewport();
+      v.setSize(200, 130, 1);
+      v.insetLeft = 60;
+      v.insetBottom = 30; // plotBottom = 100
+      return v;
+    }
+
+    function readyLayer(v: Viewport, cfg: object = {}) {
+      const layer = new AxisGridLayer("axis");
+      layer.setConfig({ xRange: [0, 10], yRange: [0, 10], ...cfg });
+      frame(layer, v); // finalize bounds
+      return layer;
+    }
+
+    it("draws x labels in the bottom strip and y labels in the left strip", () => {
+      const v = inlineViewport();
+      const layer = readyLayer(v);
+      const ctx = createFakeCtx();
+      layer.drawInlineAxes(ctx as unknown as OffscreenCanvasRenderingContext2D, v, {});
+
+      const labels = labelDraws(ctx);
+      // x labels sit at plotBottom + tickSize(6) + tickMargin(4) = 110.
+      const xLabels = labels.filter((l) => l.y === 110);
+      const yLabels = labels.filter((l) => l.y !== 110);
+      expect(xLabels.length).toBe(6); // ticks 0,2,…,10
+      expect(yLabels.length).toBe(6);
+      expect(xLabels.some((l) => l.text === "0")).toBe(true);
+      // y labels anchor inside the plot's vertical range [0, 100].
+      for (const l of yLabels) {
+        expect(l.y).toBeGreaterThanOrEqual(0);
+        expect(l.y).toBeLessThanOrEqual(100);
+      }
+      // Two tick-mark strokes: one per strip.
+      expect(ctx.calls.filter((c) => c.name === "stroke")).toHaveLength(2);
+    });
+
+    it("tickSize 0 skips tick strokes but keeps labels", () => {
+      const v = inlineViewport();
+      const layer = readyLayer(v);
+      const ctx = createFakeCtx();
+      layer.drawInlineAxes(ctx as unknown as OffscreenCanvasRenderingContext2D, v, {
+        tickSize: 0,
+      });
+      expect(ctx.calls.filter((c) => c.name === "stroke")).toHaveLength(0);
+      expect(labelDraws(ctx).length).toBeGreaterThan(0);
+    });
+
+    it("draws only the strip whose inset is reserved", () => {
+      const onlyX = new Viewport();
+      onlyX.setSize(200, 130, 1);
+      onlyX.insetBottom = 30;
+      const layerX = readyLayer(onlyX);
+      const ctxX = createFakeCtx();
+      layerX.drawInlineAxes(
+        ctxX as unknown as OffscreenCanvasRenderingContext2D,
+        onlyX,
+        {},
+      );
+      expect(labelDraws(ctxX).every((l) => l.y === 110)).toBe(true);
+
+      const onlyY = new Viewport();
+      onlyY.setSize(200, 130, 1);
+      onlyY.insetLeft = 60;
+      const layerY = readyLayer(onlyY);
+      const ctxY = createFakeCtx();
+      layerY.drawInlineAxes(
+        ctxY as unknown as OffscreenCanvasRenderingContext2D,
+        onlyY,
+        {},
+      );
+      expect(labelDraws(ctxY).length).toBeGreaterThan(0);
+      expect(labelDraws(ctxY).every((l) => l.y !== 110)).toBe(true);
+    });
+
+    it("an empty x tick set draws no bottom strip content and does not throw", () => {
+      const v = inlineViewport();
+      const layer = readyLayer(v, { xRange: [5, 5] }); // degenerate → no x ticks
+      const ctx = createFakeCtx();
+      layer.drawInlineAxes(ctx as unknown as OffscreenCanvasRenderingContext2D, v, {});
+      expect(labelDraws(ctx).every((l) => l.y !== 110)).toBe(true); // y strip only
+    });
+  });
 });

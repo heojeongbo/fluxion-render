@@ -79,4 +79,42 @@ describe("Viewport", () => {
     expect(Number.isFinite(v.yToPx(5))).toBe(true);
     expect(v.xToPx(5)).toBe(0); // (5-5)/1 * 100 = 0
   });
+
+  describe("inline-axes plot insets", () => {
+    it("defaults keep the plot rect equal to the full canvas", () => {
+      const v = new Viewport();
+      v.setSize(200, 100, 1);
+      expect(v.plotLeft).toBe(0);
+      expect(v.plotBottom).toBe(100);
+      expect(v.plotWidth).toBe(200);
+      expect(v.plotHeight).toBe(100);
+    });
+
+    it("xToPx maps into [insetLeft, widthPx]", () => {
+      const v = new Viewport();
+      v.setSize(200, 100, 1);
+      v.insetLeft = 60;
+      v.setBounds({ xMin: 0, xMax: 10, yMin: 0, yMax: 10 });
+      expect(v.xToPx(0)).toBe(60);
+      expect(v.xToPx(10)).toBe(200);
+      expect(v.xToPx(5)).toBe(130);
+      expect(v.plotLeft).toBe(60);
+      expect(v.plotWidth).toBe(140);
+    });
+
+    it("yToPx maps into [0, heightPx - insetBottom], with yPadPx nested inside", () => {
+      const v = new Viewport();
+      v.setSize(200, 130, 1);
+      v.insetBottom = 30;
+      v.setBounds({ xMin: 0, xMax: 10, yMin: 0, yMax: 10 });
+      expect(v.yToPx(0)).toBe(100); // plot bottom
+      expect(v.yToPx(10)).toBe(0); // plot top
+      expect(v.plotBottom).toBe(100);
+      expect(v.plotHeight).toBe(100);
+
+      v.yPadPx = 10; // breathing room INSIDE the plot rect
+      expect(v.yToPx(0)).toBe(90);
+      expect(v.yToPx(10)).toBe(10);
+    });
+  });
 });

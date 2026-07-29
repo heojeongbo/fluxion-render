@@ -50,6 +50,30 @@ function makeFakePoolHandle(hostId = "host-0") {
 }
 
 describe("FluxionHost", () => {
+  it("INIT carries inline-axes margins only when inlineAxes is set", () => {
+    const a = makeFakeWorker();
+    const inlineHost = new FluxionHost(makeCanvas(), {
+      workerFactory: () => a.worker,
+      inlineAxes: true,
+    });
+    const inlineInit = a.posts[0]!.msg as {
+      inlineAxes?: boolean;
+      xAxisHeight?: number;
+      yAxisWidth?: number;
+    };
+    expect(inlineInit.inlineAxes).toBe(true);
+    expect(inlineInit.xAxisHeight).toBe(30);
+    expect(inlineInit.yAxisWidth).toBe(60);
+    inlineHost.dispose();
+
+    const b = makeFakeWorker();
+    const plainHost = new FluxionHost(makeCanvas(), { workerFactory: () => b.worker });
+    const plainInit = b.posts[0]!.msg as { inlineAxes?: boolean; xAxisHeight?: number };
+    expect(plainInit.inlineAxes).toBeUndefined();
+    expect(plainInit.xAxisHeight).toBeUndefined();
+    plainHost.dispose();
+  });
+
   it("sends INIT with OffscreenCanvas in the transfer list on construction", () => {
     const { worker, posts } = makeFakeWorker();
     const host = new FluxionHost(makeCanvas(400, 300), {

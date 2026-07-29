@@ -133,7 +133,7 @@ export class AreaChartLayer implements Layer {
   /** Map a data `y` into this layer's lane band (own scanned range). */
   private yToBandPx(y: number, viewport: Viewport): number {
     const pad = viewport.yPadPx;
-    const usable = viewport.heightPx - pad * 2;
+    const usable = viewport.plotHeight - pad * 2;
     const bandH = usable / this.laneCount;
     const gap = this.laneGapPx;
     const top = pad + this.laneIndex * bandH + gap / 2;
@@ -151,7 +151,7 @@ export class AreaChartLayer implements Layer {
   /** Pixel y of this lane's bottom (fill baseline in lane mode). */
   private laneBottomPx(viewport: Viewport): number {
     const pad = viewport.yPadPx;
-    const usable = viewport.heightPx - pad * 2;
+    const usable = viewport.plotHeight - pad * 2;
     const bandH = usable / this.laneCount;
     return pad + (this.laneIndex + 1) * bandH - this.laneGapPx / 2;
   }
@@ -164,7 +164,7 @@ export class AreaChartLayer implements Layer {
     const xMin = viewport.bounds.xMin;
     // Decimate when oversampled — min/max-per-column envelope for both fill and
     // stroke. AUTO unless `decimate` is explicitly set; `false` opts out.
-    if (this.decimate !== false && this.ring.length > viewport.widthPx * 2) {
+    if (this.decimate !== false && this.ring.length > viewport.plotWidth * 2) {
       this._drawDecimated(ctx, viewport, xMin);
       return;
     }

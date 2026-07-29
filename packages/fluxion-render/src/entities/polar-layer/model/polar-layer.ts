@@ -91,8 +91,8 @@ export class PolarLayer implements Layer {
   draw(ctx: OffscreenCanvasRenderingContext2D, viewport: Viewport): void {
     if (!this.visible || this.dataLength < 2) return;
 
-    const cx = viewport.widthPx / 2;
-    const cy = viewport.heightPx / 2;
+    const cx = viewport.plotLeft + viewport.plotWidth / 2;
+    const cy = viewport.plotHeight / 2;
     const radiusPx = Math.max(0, Math.min(cx, cy) - this.insetPx);
 
     // Determine the r normalization (auto = max r in data).
