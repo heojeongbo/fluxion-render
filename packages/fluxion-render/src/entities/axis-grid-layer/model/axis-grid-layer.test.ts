@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Viewport } from "../../../shared/model/viewport";
-import { createFakeCtx, type FakeCtx } from "../../../test/setup";
+import { createFakeCtx, type FakeCtx, labelDraws } from "../../../test/setup";
 import { AxisGridLayer } from "./axis-grid-layer";
 
 function makeViewport() {
@@ -45,7 +45,7 @@ describe("AxisGridLayer", () => {
     layer.setConfig({ xRange: [-10, 10], yRange: [-10, 10] });
     const ctx = frame(layer, makeViewport());
     expect(ctx.calls.filter((c) => c.name === "stroke").length).toBeGreaterThanOrEqual(2);
-    expect(ctx.calls.filter((c) => c.name === "fillText").length).toBeGreaterThan(0);
+    expect(labelDraws(ctx).length).toBeGreaterThan(0);
   });
 
   it("uses gridLineWidth for the grid stroke (default 1, configurable)", () => {
@@ -352,9 +352,7 @@ describe("AxisGridLayer", () => {
       const v = makeViewport();
       v.latestT = 0;
       const ctx = frame(layer, v);
-      const labels = ctx.calls
-        .filter((c) => c.name === "fillText" && typeof c.args[0] === "string")
-        .map((c) => c.args[0] as string);
+      const labels = labelDraws(ctx).map((l) => l.text);
       expect(labels.some((l) => /^\d{2}:\d{2}:\d{2}\.\d{3}$/.test(l))).toBe(true);
     });
 
@@ -370,9 +368,7 @@ describe("AxisGridLayer", () => {
       const v = makeViewport();
       v.latestT = 0;
       const ctx = frame(layer, v);
-      const labels = ctx.calls
-        .filter((c) => c.name === "fillText" && typeof c.args[0] === "string")
-        .map((c) => c.args[0] as string);
+      const labels = labelDraws(ctx).map((l) => l.text);
       expect(labels.some((l) => /^\d{2}:\d{2}:\d{2}$/.test(l))).toBe(true);
     });
 
@@ -382,12 +378,7 @@ describe("AxisGridLayer", () => {
       const v = makeViewport();
       v.latestT = 5000;
       const ctx = frame(layer, v);
-      const labels = ctx.calls.filter(
-        (c) =>
-          c.name === "fillText" &&
-          typeof c.args[0] === "string" &&
-          (c.args[0] as string).endsWith("s"),
-      );
+      const labels = labelDraws(ctx).filter((l) => l.text.endsWith("s"));
       expect(labels.length).toBeGreaterThan(0);
     });
 
@@ -400,9 +391,7 @@ describe("AxisGridLayer", () => {
         xTickFormat: { suffix: "ms" },
       });
       const ctx = frame(layer, makeViewport());
-      const labels = ctx.calls
-        .filter((c) => c.name === "fillText" && typeof c.args[0] === "string")
-        .map((c) => c.args[0] as string);
+      const labels = labelDraws(ctx).map((l) => l.text);
       expect(labels.some((l) => l.endsWith("ms"))).toBe(true);
     });
 
@@ -604,7 +593,7 @@ describe("AxisGridLayer", () => {
 
       // Visual output is entirely suppressed
       expect(ctx.calls.filter((c) => c.name === "stroke").length).toBe(0);
-      expect(ctx.calls.filter((c) => c.name === "fillText").length).toBe(0);
+      expect(labelDraws(ctx)).toHaveLength(0);
 
       // But orchestration still ran — bounds reflect the time window + auto y
       expect(v.bounds.xMin).toBe(0);
@@ -633,7 +622,7 @@ describe("AxisGridLayer", () => {
       // Only one stroke call (grid)
       expect(ctx.calls.filter((c) => c.name === "stroke").length).toBe(1);
       // No labels
-      expect(ctx.calls.filter((c) => c.name === "fillText").length).toBe(0);
+      expect(labelDraws(ctx)).toHaveLength(0);
     });
 
     it("showAxes=false -> no zero-axis stroke even when 0 is inside range", () => {
@@ -663,7 +652,7 @@ describe("AxisGridLayer", () => {
         showYLabels: true,
       });
       const ctx = frame(layer, makeViewport());
-      expect(ctx.calls.filter((c) => c.name === "fillText").length).toBeGreaterThan(0);
+      expect(labelDraws(ctx).length).toBeGreaterThan(0);
     });
   });
 
@@ -688,7 +677,7 @@ describe("AxisGridLayer", () => {
       layer.drawXAxis(ctx as unknown as OffscreenCanvasRenderingContext2D, 200, 30, {});
       expect(ctx.calls.some((c) => c.name === "clearRect")).toBe(true);
       expect(ctx.calls.some((c) => c.name === "stroke")).toBe(true);
-      expect(ctx.calls.some((c) => c.name === "fillText")).toBe(true);
+      expect(labelDraws(ctx).length).toBeGreaterThan(0);
     });
 
     it("skips tick strokes when tickSize=0", () => {
@@ -701,7 +690,7 @@ describe("AxisGridLayer", () => {
         tickSize: 0,
       });
       expect(ctx.calls.some((c) => c.name === "stroke")).toBe(false);
-      expect(ctx.calls.some((c) => c.name === "fillText")).toBe(true);
+      expect(labelDraws(ctx).length).toBeGreaterThan(0);
     });
 
     it("uses xTickIntervalMs for tick positions", () => {
@@ -711,7 +700,7 @@ describe("AxisGridLayer", () => {
       frame(layer, v);
       const ctx = createFakeCtx();
       layer.drawXAxis(ctx as unknown as OffscreenCanvasRenderingContext2D, 200, 30, {});
-      expect(ctx.calls.some((c) => c.name === "fillText")).toBe(true);
+      expect(labelDraws(ctx).length).toBeGreaterThan(0);
     });
 
     it("applies bgColor style override when provided", () => {
@@ -726,7 +715,7 @@ describe("AxisGridLayer", () => {
         tickSize: 4,
         tickMargin: 2,
       });
-      expect(ctx.calls.some((c) => c.name === "fillText")).toBe(true);
+      expect(labelDraws(ctx).length).toBeGreaterThan(0);
     });
   });
 
@@ -740,7 +729,7 @@ describe("AxisGridLayer", () => {
       layer.drawYAxis(ctx as unknown as OffscreenCanvasRenderingContext2D, 60, 200, {});
       expect(ctx.calls.some((c) => c.name === "clearRect")).toBe(true);
       expect(ctx.calls.some((c) => c.name === "stroke")).toBe(true);
-      expect(ctx.calls.some((c) => c.name === "fillText")).toBe(true);
+      expect(labelDraws(ctx).length).toBeGreaterThan(0);
     });
 
     it("skips tick strokes when tickSize=0", () => {
@@ -753,7 +742,7 @@ describe("AxisGridLayer", () => {
         tickSize: 0,
       });
       expect(ctx.calls.some((c) => c.name === "stroke")).toBe(false);
-      expect(ctx.calls.some((c) => c.name === "fillText")).toBe(true);
+      expect(labelDraws(ctx).length).toBeGreaterThan(0);
     });
 
     it("applies yPadPx to offset the usable area", () => {
@@ -777,12 +766,8 @@ describe("AxisGridLayer", () => {
         {},
         20,
       );
-      const yNoPad = ctxNoPad.calls
-        .filter((c) => c.name === "fillText")
-        .map((c) => c.args[2] as number);
-      const yPad = ctxPad.calls
-        .filter((c) => c.name === "fillText")
-        .map((c) => c.args[2] as number);
+      const yNoPad = labelDraws(ctxNoPad).map((l) => l.y);
+      const yPad = labelDraws(ctxPad).map((l) => l.y);
       expect(yNoPad.length).toBe(yPad.length);
       expect(yNoPad[0]).not.toBe(yPad[0]);
     });
@@ -847,9 +832,7 @@ describe("AxisGridLayer", () => {
         yTickFormat: { precision: 1, suffix: "V" },
       });
       const ctx = frame(layer, makeViewport());
-      const labels = ctx.calls
-        .filter((c) => c.name === "fillText" && typeof c.args[0] === "string")
-        .map((c) => c.args[0] as string);
+      const labels = labelDraws(ctx).map((l) => l.text);
       expect(labels.some((l) => /^\d+\.\dV$/.test(l))).toBe(true);
     });
 
@@ -861,9 +844,7 @@ describe("AxisGridLayer", () => {
         yTickFormat: (v: number) => `y=${v}`,
       });
       const ctx = frame(layer, makeViewport());
-      const labels = ctx.calls
-        .filter((c) => c.name === "fillText" && typeof c.args[0] === "string")
-        .map((c) => c.args[0] as string);
+      const labels = labelDraws(ctx).map((l) => l.text);
       expect(labels.some((l) => l.startsWith("y="))).toBe(true);
     });
 
@@ -878,9 +859,7 @@ describe("AxisGridLayer", () => {
       frame(layer, v); // finalize bounds
       const ctx = createFakeCtx();
       layer.drawYAxis(ctx as unknown as OffscreenCanvasRenderingContext2D, 60, 200, {});
-      const labels = ctx.calls
-        .filter((c) => c.name === "fillText" && typeof c.args[0] === "string")
-        .map((c) => c.args[0] as string);
+      const labels = labelDraws(ctx).map((l) => l.text);
       expect(labels.length).toBeGreaterThan(0);
       expect(labels.every((l) => /%$/.test(l))).toBe(true);
     });
@@ -965,7 +944,7 @@ describe("AxisGridLayer", () => {
         tickSize: 5,
         tickMargin: 3,
       });
-      expect(xctx.calls.some((c) => c.name === "fillText")).toBe(true);
+      expect(labelDraws(xctx).length).toBeGreaterThan(0);
 
       const yctx = createFakeCtx();
       layer.drawYAxis(
@@ -975,7 +954,7 @@ describe("AxisGridLayer", () => {
         {},
         8,
       );
-      expect(yctx.calls.some((c) => c.name === "fillText")).toBe(true);
+      expect(labelDraws(yctx).length).toBeGreaterThan(0);
     });
 
     it("drawXAxis / drawYAxis with tickSize 0 skip tick strokes but still draw labels", () => {
@@ -988,13 +967,13 @@ describe("AxisGridLayer", () => {
       layer.drawXAxis(xctx as unknown as OffscreenCanvasRenderingContext2D, 400, 30, {
         tickSize: 0,
       });
-      expect(xctx.calls.some((c) => c.name === "fillText")).toBe(true);
+      expect(labelDraws(xctx).length).toBeGreaterThan(0);
 
       const yctx = createFakeCtx();
       layer.drawYAxis(yctx as unknown as OffscreenCanvasRenderingContext2D, 60, 300, {
         tickSize: 0,
       });
-      expect(yctx.calls.some((c) => c.name === "fillText")).toBe(true);
+      expect(labelDraws(yctx).length).toBeGreaterThan(0);
     });
   });
 
@@ -1005,14 +984,14 @@ describe("AxisGridLayer", () => {
       return layer;
     }
 
-    /** Classify fillText calls by their y coordinate: x labels all sit on the
-     *  fixed baseline y = h - 12 (= 188 on a 200px viewport); y labels never
-     *  land there for these bounds (they sit at yToPx(tick) - 6). */
+    /** Classify label draws by their RECONSTRUCTED anchor y: x labels all sit
+     *  on the fixed baseline y = h - 12 (= 188 on a 200px viewport); y labels
+     *  never land there for these bounds (they sit at yToPx(tick) - 6). */
     function countLabels(ctx: FakeCtx) {
-      const fills = ctx.calls.filter((c) => c.name === "fillText");
+      const labels = labelDraws(ctx);
       return {
-        x: fills.filter((c) => c.args[2] === 188).length,
-        y: fills.filter((c) => c.args[2] !== 188).length,
+        x: labels.filter((l) => l.y === 188).length,
+        y: labels.filter((l) => l.y !== 188).length,
       };
     }
 
@@ -1041,7 +1020,7 @@ describe("AxisGridLayer", () => {
       both.externalXAxis = true;
       both.externalYAxis = true;
       const ctxBoth = frame(labelLayer(), both);
-      expect(ctxBoth.calls.filter((c) => c.name === "fillText")).toHaveLength(0);
+      expect(labelDraws(ctxBoth)).toHaveLength(0);
       expect(ctxBoth.calls.some((c) => c.name === "stroke")).toBe(true); // grid intact
 
       const ctxNone = frame(labelLayer(), makeViewport());
@@ -1079,9 +1058,7 @@ describe("AxisGridLayer", () => {
       const ctx = frame(layer, v);
       expect(fmt.mock.calls.length).toBe(callsAfterFirst); // cache hit
       // Labels still drawn, from the cache.
-      expect(ctx.calls.some((c) => c.name === "fillText" && c.args[0] === "t1000")).toBe(
-        true,
-      );
+      expect(labelDraws(ctx).some((l) => l.text === "t1000")).toBe(true);
     });
 
     it("invalidates exactly at step crossings (count and start changes)", () => {
@@ -1126,9 +1103,7 @@ describe("AxisGridLayer", () => {
       const xctx = createFakeCtx();
       layer.drawXAxis(xctx as unknown as OffscreenCanvasRenderingContext2D, 400, 30, {});
       expect(fmt.mock.calls.length).toBe(afterFrame); // reused, not re-formatted
-      expect(xctx.calls.some((c) => c.name === "fillText" && c.args[0] === "t1000")).toBe(
-        true,
-      );
+      expect(labelDraws(xctx).some((l) => l.text === "t1000")).toBe(true);
     });
 
     it("setConfig invalidates the cache (formatter and targetTicks)", () => {
@@ -1142,9 +1117,7 @@ describe("AxisGridLayer", () => {
       layer.setConfig({ xTickFormat: fmt2 });
       const ctx = frame(layer, v);
       expect(fmt2.mock.calls.length).toBeGreaterThan(0);
-      expect(ctx.calls.some((c) => c.name === "fillText" && c.args[0] === "u1000")).toBe(
-        true,
-      );
+      expect(labelDraws(ctx).some((l) => l.text === "u1000")).toBe(true);
 
       const before = fmt2.mock.calls.length;
       layer.setConfig({ targetTicks: 4 });

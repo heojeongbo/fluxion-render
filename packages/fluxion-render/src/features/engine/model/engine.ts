@@ -449,6 +449,7 @@ export class Engine {
           this.xAxisCanvas.width / dpr,
           this.xAxisHeight,
           this.axisStyle,
+          dpr,
         );
       }
       // The y-axis only changes when y bounds shift or a one-shot redraw was
@@ -462,6 +463,7 @@ export class Engine {
           this.yAxisCanvas.height / dpr,
           this.axisStyle,
           this.viewport.yPadPx,
+          dpr,
         );
       }
     }

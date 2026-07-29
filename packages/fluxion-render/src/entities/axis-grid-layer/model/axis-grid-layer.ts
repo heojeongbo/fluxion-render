@@ -4,6 +4,7 @@ import {
   type XTickFormat,
   type YTickFormat,
 } from "../../../shared/lib/axis-ticks";
+import { drawLabel } from "../../../shared/lib/label-cache";
 import { intervalTicks, niceStep, niceTicks } from "../../../shared/lib/math";
 import type { Layer } from "../../../shared/model/layer";
 import type { Bounds, Viewport } from "../../../shared/model/viewport";
@@ -493,16 +494,30 @@ export class AxisGridLayer implements Layer {
       ctx.font = this.font;
       if (drawXLabels) {
         ctx.textBaseline = "top";
+        const xOpts = {
+          font: this.font,
+          color: this.labelColor,
+          align: "left",
+          baseline: "top",
+          dpr: viewport.dpr,
+        } as const;
         for (let i = 0; i < xTicks.length; i++) {
           const x = viewport.xToPx(xTicks[i]);
-          ctx.fillText(xLabels[i], x + 2, h - 12);
+          drawLabel(ctx, xLabels[i]!, x + 2, h - 12, xOpts);
         }
       }
       if (drawYLabels) {
         ctx.textBaseline = "middle";
+        const yOpts = {
+          font: this.font,
+          color: this.labelColor,
+          align: "left",
+          baseline: "middle",
+          dpr: viewport.dpr,
+        } as const;
         for (let i = 0; i < yTicks.length; i++) {
           const y = viewport.yToPx(yTicks[i]);
-          ctx.fillText(yLabels[i], 2, y - 6);
+          drawLabel(ctx, yLabels[i]!, 2, y - 6, yOpts);
         }
       }
     }
@@ -555,6 +570,7 @@ export class AxisGridLayer implements Layer {
     canvasW: number,
     canvasH: number,
     style: AxisStyle,
+    dpr = 1,
   ): void {
     const color = style.color ?? "#666";
     const font = style.font ?? "11px sans-serif";
@@ -586,9 +602,16 @@ export class AxisGridLayer implements Layer {
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     const labelY = tickSize + tickMargin;
+    const opts = { font, color, align: "center", baseline: "top", dpr } as const;
     for (let i = 0; i < xRaw.length; i++) {
       const v = xRaw[i]!;
-      ctx.fillText(xLabels[i]!, ((v - this.bounds.xMin) / xSpan) * canvasW, labelY);
+      drawLabel(
+        ctx,
+        xLabels[i]!,
+        ((v - this.bounds.xMin) / xSpan) * canvasW,
+        labelY,
+        opts,
+      );
     }
   }
 
@@ -603,6 +626,7 @@ export class AxisGridLayer implements Layer {
     canvasH: number,
     style: AxisStyle,
     yPadPx = 0,
+    dpr = 1,
   ): void {
     const color = style.color ?? "#666";
     const font = style.font ?? "11px sans-serif";
@@ -637,9 +661,10 @@ export class AxisGridLayer implements Layer {
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
     const labelX = canvasW - tickSize - tickMargin;
+    const opts = { font, color, align: "right", baseline: "middle", dpr } as const;
     for (let i = 0; i < fractions.length; i++) {
       const y = yPadPx + (1 - fractions[i]!) * usableH;
-      ctx.fillText(labels[i]!, labelX, y);
+      drawLabel(ctx, labels[i]!, labelX, y, opts);
     }
   }
 

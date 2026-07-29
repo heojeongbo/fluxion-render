@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetFrameDriver } from "../../../shared/model/frame-driver";
 import { Scheduler } from "../../../shared/model/scheduler";
 import { Op, WorkerOp } from "../../../shared/protocol";
-import type { FakeCtx } from "../../../test/setup";
+import { type FakeCtx, labelDraws } from "../../../test/setup";
 import { Engine } from "./engine";
 
 /**
@@ -144,7 +144,7 @@ describe("Engine", () => {
     flushFrame();
     const ctx = (canvas as unknown as { getContext: () => FakeCtx }).getContext();
     expect(ctx.calls.some((c) => c.name === "stroke")).toBe(true);
-    expect(ctx.calls.some((c) => c.name === "fillText")).toBe(true);
+    expect(labelDraws(ctx).length).toBeGreaterThan(0);
     engine.dispatch({ op: Op.DISPOSE });
   });
 
@@ -190,12 +190,12 @@ describe("Engine", () => {
     });
     flushFrame();
     const ctx = (canvas as unknown as { getContext: () => FakeCtx }).getContext();
-    const before = ctx.calls.filter((c) => c.name === "fillText").length;
+    const before = labelDraws(ctx).length;
     expect(before).toBeGreaterThan(0);
     engine.dispatch({ op: Op.REMOVE_LAYER, id: "axis" });
     ctx.calls.length = 0;
     flushFrame();
-    expect(ctx.calls.filter((c) => c.name === "fillText").length).toBe(0);
+    expect(labelDraws(ctx)).toHaveLength(0);
     engine.dispatch({ op: Op.DISPOSE });
   });
 
@@ -239,7 +239,7 @@ describe("Engine", () => {
     flushFrame();
     // Every layer disposed → no line stroke, no axis labels; bg back to default.
     expect(ctx.calls.some((c) => c.name === "stroke")).toBe(false);
-    expect(ctx.calls.some((c) => c.name === "fillText")).toBe(false);
+    expect(labelDraws(ctx)).toHaveLength(0);
     expect(ctx.calls.some((c) => c.name === "fillRect")).toBe(true);
     expect(ctx.fillStyle).toBe("#0b0d12");
 
@@ -653,8 +653,8 @@ describe("Engine", () => {
       const mainCtx = (canvas as unknown as { getContext: () => FakeCtx }).getContext();
       const xCtx = (xAxisCanvas as unknown as { getContext: () => FakeCtx }).getContext();
       // In-plot labels skipped; axis-canvas labels drawn exactly once.
-      expect(mainCtx.calls.filter((c) => c.name === "fillText")).toHaveLength(0);
-      expect(xCtx.calls.some((c) => c.name === "fillText")).toBe(true);
+      expect(labelDraws(mainCtx)).toHaveLength(0);
+      expect(labelDraws(xCtx).length).toBeGreaterThan(0);
       engine.dispatch({ op: Op.DISPOSE });
     });
 
@@ -679,7 +679,35 @@ describe("Engine", () => {
       flushFrame();
       const mainCtx = (canvas as unknown as { getContext: () => FakeCtx }).getContext();
       // The x-axis canvas binding survived the recycle → x labels stay skipped.
-      expect(mainCtx.calls.filter((c) => c.name === "fillText")).toHaveLength(0);
+      expect(labelDraws(mainCtx)).toHaveLength(0);
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
+    it("threads viewport.dpr into the axis-canvas label sprites", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(100, 100);
+      engine.dispatch({ op: Op.INIT, canvas, width: 100, height: 100, dpr: 2 });
+      const xAxisCanvas = newCanvas(200, 60);
+      engine.dispatch({
+        op: Op.SET_AXIS_CANVAS,
+        xAxisCanvas: xAxisCanvas as unknown as OffscreenCanvas,
+        xAxisHeight: 30,
+        yAxisWidth: 60,
+      });
+      engine.dispatch({
+        op: Op.ADD_LAYER,
+        id: "axis",
+        kind: "axis-grid",
+        config: { xRange: [0, 10], yRange: [0, 10] },
+      });
+      flushFrame();
+      const xCtx = (xAxisCanvas as unknown as { getContext: () => FakeCtx }).getContext();
+      const blits = xCtx.calls.filter((c) => c.name === "drawImage");
+      expect(blits.length).toBeGreaterThan(0);
+      // Sprite rasterized at device resolution: cssW = 50 (stubbed measureText)
+      // + 2 * PAD, doubled by dpr 2 → proves dpr reached drawXAxis.
+      const sprite = blits[0]!.args[0] as { width: number };
+      expect(sprite.width).toBe(Math.ceil((50 + 2) * 2));
       engine.dispatch({ op: Op.DISPOSE });
     });
 

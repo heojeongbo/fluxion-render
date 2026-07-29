@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Viewport } from "../../../shared/model/viewport";
-import { createFakeCtx } from "../../../test/setup";
+import { createFakeCtx, labelDraws } from "../../../test/setup";
 import { ReferenceLineLayer } from "./reference-line-layer";
 
 function makeViewport() {
@@ -57,9 +57,9 @@ describe("ReferenceLineLayer", () => {
     const vp = makeViewport();
     const ctx = createFakeCtx();
     layer.draw(ctx as unknown as OffscreenCanvasRenderingContext2D, vp);
-    const fillTexts = ctx.calls.filter((c) => c.name === "fillText");
-    expect(fillTexts.length).toBeGreaterThan(0);
-    expect(fillTexts[0].args[0]).toBe("setpoint");
+    const labels = labelDraws(ctx);
+    expect(labels.length).toBeGreaterThan(0);
+    expect(labels[0]!.text).toBe("setpoint");
   });
 
   it("visible: false skips all drawing", () => {

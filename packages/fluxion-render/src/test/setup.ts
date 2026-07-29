@@ -7,16 +7,20 @@
 
 import { afterEach } from "vitest";
 import { resetFlushScheduler } from "../shared/lib/flush-scheduler";
+import { labelMetaOf, resetLabelCache } from "../shared/lib/label-cache";
 import { resetFrameDriver } from "../shared/model/frame-driver";
 
-// The frame singletons (shared flush scheduler, shared frame driver) hold
-// module-level scheduling state. A test that leaves a frame armed — especially
-// under a stubbed/fake-timer rAF that never fires — would wedge every later
-// test in the process, so always reset them. Registered in setup so it runs
-// AFTER each file's own afterEach hooks (vitest 'stack' hook order).
+// The frame singletons (shared flush scheduler, shared frame driver) and the
+// label-sprite cache hold module-level state. A test that leaves a frame armed
+// — especially under a stubbed/fake-timer rAF that never fires — would wedge
+// every later test in the process, and sprites cached in one test would
+// satisfy construction-count assertions in the next; always reset them.
+// Registered in setup so it runs AFTER each file's own afterEach hooks
+// (vitest 'stack' hook order).
 afterEach(() => {
   resetFlushScheduler();
   resetFrameDriver();
+  resetLabelCache();
 });
 
 export interface CtxCall {
@@ -134,3 +138,27 @@ class FakeResizeObserver {
 }
 // biome-ignore lint: installing global stub
 (globalThis as any).ResizeObserver = FakeResizeObserver;
+
+export interface LabelDraw {
+  text: string;
+  x: number;
+  y: number;
+}
+
+/**
+ * Label blits recorded on a FakeCtx. `x` is the raw blit dx (align-dependent;
+ * rarely asserted); `y` is the RECONSTRUCTED ANCHOR y (`dy + sprite yAnchor`)
+ * — exactly the y the call site passed, for integer anchors at dpr 1 (sprite
+ * cssH is forced even, so anchors are integral). Non-label drawImage calls
+ * (heatmap blits etc.) are filtered out via the sprite meta WeakMap.
+ */
+export function labelDraws(ctx: FakeCtx): LabelDraw[] {
+  return ctx.calls
+    .filter((c) => c.name === "drawImage")
+    .flatMap((c) => {
+      const m = labelMetaOf(c.args[0] as object);
+      return m
+        ? [{ text: m.text, x: c.args[1] as number, y: (c.args[2] as number) + m.yAnchor }]
+        : [];
+    });
+}

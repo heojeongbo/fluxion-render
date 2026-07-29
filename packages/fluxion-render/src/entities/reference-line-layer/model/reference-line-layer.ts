@@ -1,3 +1,4 @@
+import { drawLabel } from "../../../shared/lib/label-cache";
 import type { Layer } from "../../../shared/model/layer";
 import type { Viewport } from "../../../shared/model/viewport";
 
@@ -96,7 +97,13 @@ export class ReferenceLineLayer implements Layer {
       ctx.font = "11px monospace";
       ctx.textAlign = "right";
       ctx.textBaseline = "bottom";
-      ctx.fillText(this.label, w - 4, py - 2);
+      drawLabel(ctx, this.label, w - 4, py - 2, {
+        font: "11px monospace",
+        color: this.color,
+        align: "right",
+        baseline: "bottom",
+        dpr: viewport.dpr,
+      });
     }
     ctx.restore();
   }
