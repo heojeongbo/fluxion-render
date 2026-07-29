@@ -1309,7 +1309,9 @@ describe("FluxionHost push coalescing", () => {
 
     lineA.push({ t: 1, y: 1 });
     lineB.push({ t: 2, y: 2 });
-    expect(raf).toHaveBeenCalledTimes(1); // shared frame, not one per host
+    // Two rAFs: the flush scheduler's pressure monitor + the ONE shared drain
+    // frame — NOT one per host.
+    expect(raf).toHaveBeenCalledTimes(2);
 
     runFrame();
     expect(dataPosts(wA.posts)).toHaveLength(1);
