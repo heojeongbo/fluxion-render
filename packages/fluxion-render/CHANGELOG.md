@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.2](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v1.0.1...fluxion-render-v1.0.2) (2026-07-29)
+
+
+### Features
+
+* **examples:** automated many-chart bench page + playwright runner ([c7d4786](https://github.com/HeoJeongBo/fluxion-render/commit/c7d4786ac2720a134643d43e6c2d4ac5154f7ee9))
+
+
+### Performance Improvements
+
+* **render:** cadence-signal load shedding for compositor overload ([4bb2ebb](https://github.com/HeoJeongBo/fluxion-render/commit/4bb2ebb221fa7a1d1e26939f87a75e499f553cd5))
+* **render:** per-worker frame loop with load governor, shared flush ([69e27e7](https://github.com/HeoJeongBo/fluxion-render/commit/69e27e73ad859324c80953f63975ef75168caf83))
+
 ## [1.0.1](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v1.0.0...fluxion-render-v1.0.1) (2026-07-24)
 
 
