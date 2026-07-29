@@ -300,7 +300,15 @@ per-sample posts to one message per layer per frame; per-layer `decimate` (auto)
 makes each draw O(width) rather than O(samples); `yMode: 'auto'` tracks each
 layer's visible-window min/max with a sliding-window deque (O(log n) per frame)
 instead of rescanning the ring, so auto-scaling cost stays flat as the retained
-window grows; and `maxFps` caps the shared worker's frame rate. For a read-only
+window grows; and `maxFps` caps the shared worker's frame rate. On top of the
+explicit knobs, the engine **load-sheds automatically under saturation**: each
+worker's shared frame loop throttles itself when its per-frame render budget is
+exceeded or its rAF delivery degrades, and the main-thread flush frame sheds
+the data cadence when the page's own rAF slows under compositor pressure (the
+many-canvas present flood). Both engage only under overload, keep skipped
+frames' data latched (nothing is dropped), and back off in steps once the
+system recovers — `maxFps` remains the deterministic ceiling when you want a
+guaranteed rate. For a read-only
 thumbnail grid, also set
 `emitBounds: false` / `emitTicks: false` to drop the per-frame bookkeeping
 postMessages:
