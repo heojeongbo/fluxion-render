@@ -1,5 +1,12 @@
 # Changelog
 
+# [1.1.0](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v1.0.3...fluxion-render-v1.1.0) (2026-07-30)
+
+
+### Features
+
+* **render:** inlineAxes — worker-drawn axes inside the main canvas ([1b990ca](https://github.com/HeoJeongBo/fluxion-render/commit/1b990ca429b493058d19b2c5d388256e7fd8cc0a))
+
 ## [1.0.3](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v1.0.2...fluxion-render-v1.0.3) (2026-07-29)
 
 
