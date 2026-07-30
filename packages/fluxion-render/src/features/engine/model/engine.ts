@@ -404,6 +404,17 @@ export class Engine {
     this.scheduler.markDirty();
   }
 
+  /**
+   * A fresh (or just-resized) opaque WebGL drawing buffer composites as SOLID
+   * BLACK until the first presented frame — under mount/resize churn the
+   * scheduler's first frame can lag, flashing black on light themes. Clear to
+   * the background color synchronously so the first composite already matches.
+   * (canvas2d needs none of this: a fresh 2d backing is transparent.)
+   */
+  private clearGlBacking(): void {
+    if (this.glr) this.glr.beginFrame(this.bgColor);
+  }
+
   private resize(width: number, height: number, dpr: number) {
     if (!this.canvas) return;
     // Assigning width/height reallocates the GPU backing AND clears the canvas
@@ -413,6 +424,7 @@ export class Engine {
     const h = Math.max(1, Math.round(height * dpr));
     if (this.canvas.width !== w) this.canvas.width = w;
     if (this.canvas.height !== h) this.canvas.height = h;
+    this.clearGlBacking();
     this.viewport.setSize(width, height, dpr);
     this.stack.resizeAll(this.viewport);
     this.resizeAxisCanvases(width, height, dpr);

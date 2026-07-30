@@ -39,7 +39,13 @@ export class GlRenderer {
     // preventDefault is REQUIRED for the browser to attempt a restore.
     e.preventDefault();
     this.lost = true;
-    console.warn("[fluxion] webgl context lost — rendering suspended until restore");
+    console.warn(
+      "[fluxion] webgl context lost — rendering suspended until restore. " +
+        "If this fires while MANY charts are mounted, the browser's live-WebGL-" +
+        "context cap was likely hit (Chromium keeps ~16 — evicted contexts do " +
+        "NOT restore while over the cap). Use renderer:'2d' there, or fewer " +
+        "webgl charts; Firefox's cap is far higher (~300).",
+    );
   };
   private readonly onRestoredEvt = () => {
     this.lost = false;

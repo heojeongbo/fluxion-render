@@ -706,6 +706,27 @@ describe("Engine", () => {
       engine.dispatch({ op: Op.DISPOSE });
     });
 
+    it("clears the GL backing synchronously at init and on resize (no black flash)", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(200, 130);
+      glInit(engine, canvas, { bgColor: "#ffffff" });
+      const gl = (
+        canvas as unknown as {
+          getContext: (t: string) => { calls: { name: string; args: unknown[] }[] };
+        }
+      ).getContext("webgl");
+      // BEFORE any scheduled frame ran: init already cleared to the bg color.
+      const clears = gl.calls.filter((c) => c.name === "clearColor");
+      expect(clears.length).toBeGreaterThan(0);
+      expect(clears[0]!.args).toEqual([1, 1, 1, 1]); // white, not GL-default black
+
+      const before = gl.calls.filter((c) => c.name === "clear").length;
+      engine.dispatch({ op: Op.RESIZE, width: 300, height: 200, dpr: 2 });
+      // The resize reallocated the backing (black) — cleared again immediately.
+      expect(gl.calls.filter((c) => c.name === "clear").length).toBeGreaterThan(before);
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
     it("draws inline axes AFTER the scissor is lifted (ticks + label quads)", () => {
       const engine = new Engine();
       const canvas = newCanvas(200, 130);
