@@ -4,11 +4,13 @@ import {
   drawLabel,
   LABEL_PAD,
   type LabelOpts,
+  labelBlitPos,
   labelMetaOf,
   labelOf,
   MAX_LABELS_PER_STYLE,
   MAX_STYLE_BUCKETS,
   resetLabelCache,
+  spriteFor,
 } from "./label-cache";
 
 // Deterministic sprite geometry under the test stubs (measureText width = 50):
@@ -301,5 +303,100 @@ describe("label-cache", () => {
     drawLabel(ctx, "r", 0, 0, BASE);
     const [a, b] = drawImages(ctx as unknown as FakeCtx);
     expect(a!.args[0]).not.toBe(b!.args[0]);
+  });
+});
+
+describe("spriteFor / labelBlitPos (GL texture path)", () => {
+  it("returns the SAME cached sprite drawLabel rasterized (shared cache)", () => {
+    resetLabelCache();
+    const ctx = ctx2d();
+    drawLabel(ctx, "12:00:05", 10, 20, BASE);
+    const blitted = drawImages(ctx as unknown as FakeCtx)[0]!.args[0];
+    const sprite = spriteFor("12:00:05", BASE);
+    expect(sprite).not.toBeNull();
+    expect(sprite!.canvas).toBe(blitted); // identity: one raster for both paths
+  });
+
+  it("rasterizes via the lazy measuring scratch when no draw preceded it", () => {
+    resetLabelCache();
+    const sprite = spriteFor("3.5", { ...BASE, baseline: "middle" });
+    expect(sprite).not.toBeNull();
+    // Stub metrics: width 50 → cssW 52; "10px" → cssH 22, middle anchor 11.
+    expect(sprite!.cssW).toBe(52);
+    expect(sprite!.cssH).toBe(22);
+    expect(sprite!.yAnchor).toBe(11);
+    expect(labelOf(sprite!.canvas)).toBe("3.5");
+  });
+
+  it("labelBlitPos matches drawLabel's blit exactly (dpr snap, all aligns)", () => {
+    resetLabelCache();
+    const out = { dx: 0, dy: 0 };
+    for (const align of ["left", "center", "right"] as const) {
+      for (const dpr of [1, 2]) {
+        const opts = { ...BASE, align, dpr };
+        const ctx = ctx2d();
+        drawLabel(ctx, "x", 10.3, 20.7, opts);
+        const call = drawImages(ctx as unknown as FakeCtx)[0]!;
+        const sprite = spriteFor("x", opts)!;
+        labelBlitPos(sprite, 10.3, 20.7, align, dpr, out);
+        expect([out.dx, out.dy]).toEqual([call.args[1], call.args[2]]);
+      }
+    }
+  });
+
+  it("latches when sprite creation fails after the scratch was established", () => {
+    resetLabelCache();
+    expect(spriteFor("warm", BASE)).not.toBeNull(); // scratch + sprite OK
+    const g = globalThis as { OffscreenCanvas?: unknown };
+    const Real = g.OffscreenCanvas;
+    g.OffscreenCanvas = class {
+      constructor() {
+        throw new Error("no OffscreenCanvas");
+      }
+    };
+    try {
+      // New text → new sprite canvas → ctor throws → null + latch.
+      expect(spriteFor("fresh", BASE)).toBeNull();
+      g.OffscreenCanvas = Real;
+      expect(spriteFor("fresh", BASE)).toBeNull(); // latched
+    } finally {
+      g.OffscreenCanvas = Real;
+    }
+  });
+
+  it("returns null when the scratch canvas constructor throws", () => {
+    resetLabelCache();
+    const g = globalThis as { OffscreenCanvas?: unknown };
+    const Real = g.OffscreenCanvas;
+    g.OffscreenCanvas = class {
+      constructor() {
+        throw new Error("no OffscreenCanvas");
+      }
+    };
+    try {
+      expect(spriteFor("a", BASE)).toBeNull();
+    } finally {
+      g.OffscreenCanvas = Real;
+    }
+  });
+
+  it("returns null and latches when the scratch canvas cannot be created", () => {
+    resetLabelCache();
+    const g = globalThis as { OffscreenCanvas?: unknown };
+    const Real = g.OffscreenCanvas;
+    g.OffscreenCanvas = class {
+      getContext() {
+        return null;
+      }
+    };
+    try {
+      expect(spriteFor("a", BASE)).toBeNull();
+      g.OffscreenCanvas = Real; // restored, but the latch must hold
+      expect(spriteFor("a", BASE)).toBeNull();
+      resetLabelCache(); // re-arms latch AND scratch
+      expect(spriteFor("a", BASE)).not.toBeNull();
+    } finally {
+      g.OffscreenCanvas = Real;
+    }
   });
 });

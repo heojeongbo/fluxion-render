@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CtxCall, FakeGl } from "../../test/setup";
 import { resetParseColorCache } from "../lib/parse-color";
 import { Viewport } from "../model/viewport";
-import { GlRenderer } from "./gl-renderer";
+import { GlRenderer, MAX_SPRITE_TEXTURES } from "./gl-renderer";
 
 interface GlCanvasHarness {
   canvas: OffscreenCanvas;
@@ -228,6 +228,128 @@ describe("GlRenderer", () => {
       );
       expect(queries).toHaveLength(2);
       warnSpy.mockRestore();
+    });
+  });
+
+  describe("drawLineList / drawSprite (grid + label pipeline)", () => {
+    const TRANSFORM = new Float32Array([0, 0, 1, 1, 0, 0]);
+
+    function makeSprite(cssW = 52, cssH = 22) {
+      // biome-ignore lint: using global stub
+      const canvas = new (globalThis as any).OffscreenCanvas(cssW, cssH);
+      return { canvas, textW: cssW - 2, cssW, cssH, yAnchor: 4 };
+    }
+
+    it("draws a segment list as one gl.LINES call", () => {
+      const h = newGlCanvas();
+      const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
+      const gl = h.gl;
+      glr.drawLineList(new Float32Array(12), 6, TRANSFORM, [1, 1, 1, 1], 1, 2);
+      const draws = gl.calls.filter((c) => c.name === "drawArrays");
+      expect(draws).toHaveLength(1);
+      expect(draws[0]!.args).toEqual([gl.LINES, 0, 6]);
+    });
+
+    it("uploads sprite textures premultiplied, NEAREST, clamped — then quads them", () => {
+      const h = newGlCanvas();
+      const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
+      const gl = h.gl;
+      const sprite = makeSprite();
+      glr.drawSprite(sprite as never, 10.5, 20.5, TRANSFORM);
+
+      expect(
+        gl.calls.some(
+          (c) =>
+            c.name === "pixelStorei" &&
+            c.args[0] === gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL &&
+            c.args[1] === true,
+        ),
+      ).toBe(true);
+      const upload = gl.calls.find((c) => c.name === "texImage2D")!;
+      expect(upload.args[5]).toBe(sprite.canvas);
+      const params = gl.calls
+        .filter((c) => c.name === "texParameteri")
+        .map((c) => c.args.slice(1));
+      expect(params).toContainEqual([gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE]);
+      expect(params).toContainEqual([gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]);
+      expect(params).toContainEqual([gl.TEXTURE_MIN_FILTER, gl.NEAREST]);
+      expect(params).toContainEqual([gl.TEXTURE_MAG_FILTER, gl.NEAREST]);
+      const rect = gl.calls.find((c) => c.name === "uniform4f")!;
+      expect(rect.args.slice(1)).toEqual([10.5, 20.5, 52, 22]);
+      const draws = gl.calls.filter((c) => c.name === "drawArrays");
+      expect(draws).toHaveLength(1);
+      expect(draws[0]!.args).toEqual([gl.TRIANGLE_STRIP, 0, 4]);
+    });
+
+    it("caches the texture per sprite canvas (one upload across draws)", () => {
+      const h = newGlCanvas();
+      const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
+      const gl = h.gl;
+      const sprite = makeSprite();
+      glr.drawSprite(sprite as never, 0, 0, TRANSFORM);
+      glr.drawSprite(sprite as never, 5, 5, TRANSFORM);
+      expect(gl.calls.filter((c) => c.name === "texImage2D")).toHaveLength(1);
+      expect(gl.calls.filter((c) => c.name === "createBuffer")).toHaveLength(1); // static quad VBO
+      expect(gl.calls.filter((c) => c.name === "linkProgram")).toHaveLength(1);
+    });
+
+    it("evicts the least-recent texture (deleteTexture) at the LRU cap", () => {
+      const h = newGlCanvas();
+      const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
+      const gl = h.gl;
+      const first = makeSprite();
+      glr.drawSprite(first as never, 0, 0, TRANSFORM);
+      for (let i = 0; i < MAX_SPRITE_TEXTURES; i++) {
+        glr.drawSprite(makeSprite() as never, 0, 0, TRANSFORM);
+      }
+      expect(gl.calls.filter((c) => c.name === "deleteTexture")).toHaveLength(1);
+      // `first` was the oldest → re-drawing it must re-upload.
+      const before = gl.calls.filter((c) => c.name === "texImage2D").length;
+      glr.drawSprite(first as never, 0, 0, TRANSFORM);
+      expect(gl.calls.filter((c) => c.name === "texImage2D")).toHaveLength(before + 1);
+    });
+
+    it("skips sprite draws while lost; restore drops texture/program caches", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const h = newGlCanvas();
+      const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
+      const gl = h.gl;
+      const sprite = makeSprite();
+      glr.drawSprite(sprite as never, 0, 0, TRANSFORM);
+      h.dispatch({ type: "webglcontextlost", preventDefault: () => {} });
+      const before = gl.calls.length;
+      glr.drawSprite(sprite as never, 0, 0, TRANSFORM);
+      expect(gl.calls.length).toBe(before); // lost → untouched
+      h.dispatch({ type: "webglcontextrestored" });
+      glr.drawSprite(sprite as never, 0, 0, TRANSFORM);
+      // Same sprite re-uploaded and program relinked on the fresh context.
+      expect(gl.calls.filter((c) => c.name === "texImage2D")).toHaveLength(2);
+      expect(gl.calls.filter((c) => c.name === "linkProgram")).toHaveLength(2);
+      warnSpy.mockRestore();
+    });
+
+    it("no-ops when the quad program fails to build", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const h = newGlCanvas();
+      const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
+      const gl = h.gl;
+      gl.failCompile = true;
+      glr.drawSprite(makeSprite() as never, 0, 0, TRANSFORM);
+      expect(gl.calls.filter((c) => c.name === "drawArrays")).toHaveLength(0);
+      expect(gl.calls.filter((c) => c.name === "texImage2D")).toHaveLength(0);
+      warnSpy.mockRestore();
+    });
+
+    it("dispose deletes cached textures and the quad pipeline", () => {
+      const h = newGlCanvas();
+      const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
+      const gl = h.gl;
+      glr.drawSprite(makeSprite() as never, 0, 0, TRANSFORM);
+      glr.drawSprite(makeSprite() as never, 0, 0, TRANSFORM);
+      glr.dispose();
+      expect(gl.calls.filter((c) => c.name === "deleteTexture")).toHaveLength(2);
+      expect(gl.calls.filter((c) => c.name === "deleteProgram")).toHaveLength(1);
+      expect(gl.calls.filter((c) => c.name === "deleteBuffer")).toHaveLength(1);
     });
   });
 

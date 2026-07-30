@@ -680,15 +680,68 @@ describe("Engine", () => {
       flushFrame();
       const gl = (
         canvas as unknown as {
-          getContext: (t: string) => { calls: { name: string; args: unknown[] }[] };
+          getContext: (t: string) => {
+            calls: { name: string; args: unknown[] }[];
+            LINE_STRIP: number;
+          };
         }
       ).getContext("webgl");
-      const draws = gl.calls.filter((c) => c.name === "drawArrays");
+      // Filter to LINE_STRIP draws — the axis layer's grid emits LINES lists.
+      const draws = gl.calls.filter(
+        (c) => c.name === "drawArrays" && c.args[0] === gl.LINE_STRIP,
+      );
       expect(draws).toHaveLength(1);
       expect(draws[0]!.args[1]).toBe(0); // segment start
       expect(draws[0]!.args[2]).toBe(4); // all four samples in one strip
-      const upload = gl.calls.find((c) => c.name === "bufferData");
-      expect((upload!.args[1] as Float32Array).length).toBe(8); // 4 × (t, y)
+      // The upload feeding the strip is the last bufferData before its draw —
+      // and must carry the raw samples verbatim.
+      const stripIdx = gl.calls.findIndex(
+        (c) => c.name === "drawArrays" && c.args[0] === gl.LINE_STRIP,
+      );
+      const upload = gl.calls
+        .slice(0, stripIdx)
+        .reverse()
+        .find((c) => c.name === "bufferData")!;
+      expect(Array.from(upload.args[1] as Float32Array)).toEqual(Array.from(samples));
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
+    it("draws inline axes AFTER the scissor is lifted (ticks + label quads)", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(200, 130);
+      glInit(engine, canvas, { inlineAxes: true, xAxisHeight: 30, yAxisWidth: 60 });
+      engine.dispatch({
+        op: Op.ADD_LAYER,
+        id: "axis",
+        kind: "axis-grid",
+        config: { xRange: [0, 10], yRange: [0, 10] },
+      });
+      flushFrame();
+      const gl = (
+        canvas as unknown as {
+          getContext: (t: string) => {
+            calls: { name: string; args: unknown[] }[];
+            SCISSOR_TEST: number;
+            TRIANGLE_STRIP: number;
+            LINES: number;
+          };
+        }
+      ).getContext("webgl");
+      const lastScissorOff = gl.calls.reduce(
+        (last, c, i) =>
+          c.name === "disable" && c.args[0] === gl.SCISSOR_TEST ? i : last,
+        -1,
+      );
+      expect(lastScissorOff).toBeGreaterThan(-1);
+      const after = gl.calls.slice(lastScissorOff);
+      // Inline tick marks (LINES) and label sprites (TRIANGLE_STRIP quads)
+      // land in the margins, outside the scissor.
+      expect(after.some((c) => c.name === "drawArrays" && c.args[0] === gl.LINES)).toBe(
+        true,
+      );
+      expect(
+        after.some((c) => c.name === "drawArrays" && c.args[0] === gl.TRIANGLE_STRIP),
+      ).toBe(true);
       engine.dispatch({ op: Op.DISPOSE });
     });
 

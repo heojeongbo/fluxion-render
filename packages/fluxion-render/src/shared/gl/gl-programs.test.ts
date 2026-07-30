@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createFakeGl } from "../../test/setup";
-import { buildLineProgram } from "./gl-programs";
+import { buildLineProgram, buildQuadProgram } from "./gl-programs";
 
 describe("buildLineProgram", () => {
   it("links the affine program and resolves its locations", () => {
@@ -28,6 +28,23 @@ describe("buildLineProgram", () => {
     expect(buildLineProgram(gl as unknown as WebGLRenderingContext)).toBeNull();
     expect(String(warnSpy.mock.calls[0]![0])).toContain("program link failed");
     expect(gl.calls.some((c) => c.name === "deleteProgram")).toBe(true);
+    warnSpy.mockRestore();
+  });
+});
+
+describe("buildQuadProgram", () => {
+  it("links the sprite-quad program and resolves its locations", () => {
+    const gl = createFakeGl({ width: 100, height: 100 });
+    const prog = buildQuadProgram(gl as unknown as WebGLRenderingContext);
+    expect(prog).not.toBeNull();
+    expect(prog!.aUnit).toBe(0);
+  });
+
+  it("returns null (with a warn) when linking fails", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const gl = createFakeGl({ width: 100, height: 100 });
+    gl.failLink = true;
+    expect(buildQuadProgram(gl as unknown as WebGLRenderingContext)).toBeNull();
     warnSpy.mockRestore();
   });
 });

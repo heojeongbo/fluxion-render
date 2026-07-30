@@ -1,11 +1,20 @@
 import type { GlRenderer } from "../../../shared/gl/gl-renderer";
+import type { ClipTransform } from "../../../shared/gl/gl-transform";
+import { pxToClip } from "../../../shared/gl/gl-transform";
+import { LineListBuilder, snapCenter } from "../../../shared/gl/grid-geometry";
 import {
   formatTick,
   formatYTick,
   type XTickFormat,
   type YTickFormat,
 } from "../../../shared/lib/axis-ticks";
-import { drawLabel } from "../../../shared/lib/label-cache";
+import {
+  drawLabel,
+  type LabelOpts,
+  type LabelSprite,
+  labelBlitPos,
+  spriteFor,
+} from "../../../shared/lib/label-cache";
 import { intervalTicks, niceStep, niceTicks } from "../../../shared/lib/math";
 import type { Layer } from "../../../shared/model/layer";
 import type { Bounds, Viewport } from "../../../shared/model/viewport";
@@ -447,13 +456,221 @@ export class AxisGridLayer implements Layer {
     }
   }
 
+  // WebGL scratch: segment builder + px→clip transform + blit position — one
+  // allocation set per layer, reused every frame.
+  private readonly _glSegs = new LineListBuilder();
+  private readonly _glTransform: ClipTransform = new Float32Array(6);
+  private readonly _glBlit = { dx: 0, dy: 0 };
+  private _warnedGlDash = false;
+  private _warnedGlSprites = false;
+
+  /** Sprite lookup with the GL path's warn-once-and-skip failure mode. */
+  private glSprite(text: string, opts: LabelOpts): LabelSprite | null {
+    const sprite = spriteFor(text, opts);
+    if (!sprite && !this._warnedGlSprites) {
+      this._warnedGlSprites = true;
+      console.warn(
+        `[fluxion] axisGridLayer "${this.id}": label sprites are unavailable — ` +
+          "labels are skipped under renderer:'webgl' (no fillText fallback).",
+      );
+    }
+    return sprite;
+  }
+
   /**
-   * WebGL draw path. Stage 2: bounds finalization only (grid/axis visuals
-   * land in stage 3) — keeps yMode:auto, bounds emission, and tick export
-   * correct under renderer:"webgl".
+   * WebGL draw path: same frame structure as `draw()` — bounds finalization,
+   * grid lines, zero axes, in-plot labels — with lines as a gl.LINES list
+   * (snapped to the same `round(px)+0.5` centers as the 2d strokes) and
+   * labels as cached sprite textures. `gridDashArray` is unsupported
+   * (warned once, drawn solid).
    */
-  drawGl(_glr: GlRenderer, viewport: Viewport): void {
+  drawGl(glr: GlRenderer, viewport: Viewport): void {
     this.finalizeBounds(viewport);
+    const { widthPx: w } = viewport;
+    const { ticks: xTicks, labels: xLabels } = this.xTicksFor();
+    const { ticks: yTicks, labels: yLabels } = this.yTicksFor();
+    const segs = this._glSegs;
+    pxToClip(viewport, this._glTransform);
+    if (this.gridDashArray.length > 0 && !this._warnedGlDash) {
+      this._warnedGlDash = true;
+      console.warn(
+        `[fluxion] axisGridLayer "${this.id}": gridDashArray is not supported ` +
+          "under renderer:'webgl' — drawing solid.",
+      );
+    }
+
+    // ── Grid lines ──
+    if (this.showXGrid || this.showYGrid) {
+      segs.reset();
+      if (this.showXGrid) {
+        for (let i = 0; i < xTicks.length; i++) {
+          const x = snapCenter(viewport.xToPx(xTicks[i]));
+          segs.seg(x, 0, x, viewport.plotBottom);
+        }
+      }
+      if (this.showYGrid) {
+        for (let i = 0; i < yTicks.length; i++) {
+          const y = snapCenter(viewport.yToPx(yTicks[i]));
+          segs.seg(viewport.plotLeft, y, w, y);
+        }
+      }
+      glr.drawLineList(
+        segs.verts,
+        segs.count,
+        this._glTransform,
+        glr.resolveColor(this.gridColor),
+        1,
+        this.gridLineWidth * viewport.dpr,
+      );
+    }
+
+    // ── Zero axes ──
+    if (this.showAxes) {
+      segs.reset();
+      if (this.bounds.xMin < 0 && this.bounds.xMax > 0) {
+        const x0 = snapCenter(viewport.xToPx(0));
+        segs.seg(x0, 0, x0, viewport.plotBottom);
+      }
+      if (this.bounds.yMin < 0 && this.bounds.yMax > 0) {
+        const y0 = snapCenter(viewport.yToPx(0));
+        segs.seg(viewport.plotLeft, y0, w, y0);
+      }
+      glr.drawLineList(
+        segs.verts,
+        segs.count,
+        this._glTransform,
+        glr.resolveColor(this.axisColor),
+        1,
+        viewport.dpr,
+      );
+    }
+
+    // ── Labels ── (same external-axis gating as the 2d path)
+    const drawXLabels = this.showXLabels && !viewport.externalXAxis;
+    const drawYLabels = this.showYLabels && !viewport.externalYAxis;
+    const dpr = viewport.dpr;
+    if (drawXLabels) {
+      const xOpts = {
+        font: this.font,
+        color: this.labelColor,
+        align: "left",
+        baseline: "top",
+        dpr,
+      } as const;
+      for (let i = 0; i < xTicks.length; i++) {
+        const sprite = this.glSprite(xLabels[i]!, xOpts);
+        if (!sprite) break;
+        const x = viewport.xToPx(xTicks[i]);
+        const pos = labelBlitPos(
+          sprite,
+          x + 2,
+          viewport.plotBottom - 12,
+          "left",
+          dpr,
+          this._glBlit,
+        );
+        glr.drawSprite(sprite, pos.dx, pos.dy, this._glTransform);
+      }
+    }
+    if (drawYLabels) {
+      const yOpts = {
+        font: this.font,
+        color: this.labelColor,
+        align: "left",
+        baseline: "middle",
+        dpr,
+      } as const;
+      for (let i = 0; i < yTicks.length; i++) {
+        const sprite = this.glSprite(yLabels[i]!, yOpts);
+        if (!sprite) break;
+        const y = viewport.yToPx(yTicks[i]);
+        const pos = labelBlitPos(
+          sprite,
+          viewport.plotLeft + 2,
+          y - 6,
+          "left",
+          dpr,
+          this._glBlit,
+        );
+        glr.drawSprite(sprite, pos.dx, pos.dy, this._glTransform);
+      }
+    }
+  }
+
+  /**
+   * WebGL twin of `drawInlineAxes`: tick marks as a gl.LINES list and labels
+   * as sprite textures, in the margin strips reserved by
+   * `viewport.insetLeft`/`insetBottom`. Called by the engine AFTER the
+   * scissored data pass (so ticks/labels land in the margins unclipped);
+   * must run after `drawGl()` so yMode:"auto" bounds are final.
+   */
+  drawInlineAxesGl(glr: GlRenderer, viewport: Viewport, style: AxisStyle): void {
+    const color = style.color ?? "#666";
+    const font = style.font ?? "11px sans-serif";
+    const tickSize = style.tickSize ?? 6;
+    const tickMargin = style.tickMargin ?? 4;
+    const dpr = viewport.dpr;
+    const plotBottom = viewport.plotBottom;
+    const left = viewport.insetLeft;
+    const segs = this._glSegs;
+    pxToClip(viewport, this._glTransform);
+    const rgba = glr.resolveColor(color);
+
+    // ── Bottom strip: x ticks + labels ──
+    if (viewport.insetBottom > 0) {
+      const { ticks: xRaw, labels: xLabels } = this.xTicksFor();
+      if (tickSize > 0 && xRaw.length > 0) {
+        segs.reset();
+        for (const v of xRaw) {
+          const x = snapCenter(viewport.xToPx(v));
+          segs.seg(x, plotBottom, x, plotBottom + tickSize);
+        }
+        glr.drawLineList(segs.verts, segs.count, this._glTransform, rgba, 1, dpr);
+      }
+      const labelY = plotBottom + tickSize + tickMargin;
+      const xOpts = { font, color, align: "center", baseline: "top", dpr } as const;
+      for (let i = 0; i < xRaw.length; i++) {
+        const sprite = this.glSprite(xLabels[i]!, xOpts);
+        if (!sprite) break;
+        const pos = labelBlitPos(
+          sprite,
+          viewport.xToPx(xRaw[i]!),
+          labelY,
+          "center",
+          dpr,
+          this._glBlit,
+        );
+        glr.drawSprite(sprite, pos.dx, pos.dy, this._glTransform);
+      }
+    }
+
+    // ── Left strip: y ticks + labels ──
+    if (left > 0) {
+      const { ticks: yRaw, labels: yLabels } = this.yTicksFor();
+      if (tickSize > 0 && yRaw.length > 0) {
+        segs.reset();
+        for (const v of yRaw) {
+          const y = snapCenter(viewport.yToPx(v));
+          segs.seg(left - tickSize, y, left, y);
+        }
+        glr.drawLineList(segs.verts, segs.count, this._glTransform, rgba, 1, dpr);
+      }
+      const labelX = left - tickSize - tickMargin;
+      const yOpts = { font, color, align: "right", baseline: "middle", dpr } as const;
+      for (let i = 0; i < yRaw.length; i++) {
+        const sprite = this.glSprite(yLabels[i]!, yOpts);
+        if (!sprite) break;
+        const pos = labelBlitPos(
+          sprite,
+          labelX,
+          viewport.yToPx(yRaw[i]!),
+          "right",
+          dpr,
+          this._glBlit,
+        );
+        glr.drawSprite(sprite, pos.dx, pos.dy, this._glTransform);
+      }
+    }
   }
 
   draw(ctx: OffscreenCanvasRenderingContext2D, viewport: Viewport): void {

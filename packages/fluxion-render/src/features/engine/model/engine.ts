@@ -570,7 +570,7 @@ export class Engine {
     this.stack.drawGlAll(glr, this.viewport, (l) => this.warnGlUnsupported(l));
     if (inline) {
       glr.scissorOff();
-      // Stage 3: axisLayer?.drawInlineAxesGl(glr, viewport, axisStyle)
+      this.axisLayer?.drawInlineAxesGl(glr, this.viewport, this.axisStyle);
     }
   }
 

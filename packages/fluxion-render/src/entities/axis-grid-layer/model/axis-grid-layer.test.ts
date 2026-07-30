@@ -454,8 +454,12 @@ describe("AxisGridLayer", () => {
       const a = make();
       a.layer.draw(createFakeCtx() as unknown as OffscreenCanvasRenderingContext2D, a.v);
       const b = make();
-      // Stage 2 GL path: finalize only, no visuals — glr is never touched.
-      b.layer.drawGl(null as never, b.v);
+      const stubGlr = {
+        drawLineList: () => {},
+        drawSprite: () => {},
+        resolveColor: () => [1, 1, 1, 1] as const,
+      };
+      b.layer.drawGl(stubGlr as never, b.v);
       expect(b.v.bounds).toEqual(a.v.bounds);
       expect(b.v.bounds.yMin).toBeCloseTo(-5.6); // 20% padding on span 8
       expect(b.v.bounds.yMax).toBeCloseTo(5.6);
@@ -1264,5 +1268,199 @@ describe("AxisGridLayer", () => {
       layer.drawInlineAxes(ctx as unknown as OffscreenCanvasRenderingContext2D, v, {});
       expect(labelDraws(ctx).every((l) => l.y !== 110)).toBe(true); // y strip only
     });
+  });
+});
+
+describe("drawGl (WebGL grid + labels)", () => {
+  interface GlSpy {
+    glr: never;
+    lineLists: Array<{
+      verts: Float32Array;
+      count: number;
+      color: unknown;
+      width: number;
+    }>;
+    sprites: Array<{ dx: number; dy: number }>;
+  }
+  function makeGlr(): GlSpy {
+    const spy: GlSpy = { glr: undefined as never, lineLists: [], sprites: [] };
+    spy.glr = {
+      drawLineList: (
+        verts: Float32Array,
+        count: number,
+        _t: Float32Array,
+        color: unknown,
+        _o: number,
+        width: number,
+      ) => {
+        // Copy the live scratch — the builder reuses it across passes.
+        spy.lineLists.push({
+          verts: verts.slice(0, count * 2),
+          count,
+          color,
+          width,
+        });
+      },
+      drawSprite: (_s: unknown, dx: number, dy: number) => {
+        spy.sprites.push({ dx, dy });
+      },
+      resolveColor: (c: string) => [c.length, 0, 0, 1] as const,
+    } as never;
+    return spy;
+  }
+
+  it("emits the same line segments and label positions as the 2d draw", () => {
+    const make = () => {
+      const layer = new AxisGridLayer("axis");
+      layer.setConfig({ xRange: [-10, 10], yRange: [-10, 10] });
+      const v = makeViewport();
+      v.beginScan();
+      layer.scan?.(v);
+      return { layer, v };
+    };
+    // 2d reference: grid+axis segments arrive as moveTo/lineTo pairs; labels
+    // as drawImage blits.
+    const a = make();
+    const ctx = createFakeCtx();
+    a.layer.draw(ctx as unknown as OffscreenCanvasRenderingContext2D, a.v);
+    const moves = ctx.calls.filter((c) => c.name === "moveTo");
+    const blits = ctx.calls
+      .filter((c) => c.name === "drawImage")
+      .map((c) => ({ dx: c.args[1], dy: c.args[2] }));
+
+    const b = make();
+    const spy = makeGlr();
+    b.layer.drawGl(spy.glr, b.v);
+    const glSegs = spy.lineLists.reduce((n, l) => n + l.count / 2, 0);
+    expect(glSegs).toBe(moves.length);
+    // Segment endpoints carry the identical round(px)+0.5 centering.
+    const glStarts = spy.lineLists.flatMap((l) => {
+      const pts: Array<[number, number]> = [];
+      for (let i = 0; i < l.count; i += 2)
+        pts.push([l.verts[i * 2]!, l.verts[i * 2 + 1]!]);
+      return pts;
+    });
+    for (const m of moves) {
+      expect(glStarts).toContainEqual([m.args[0], m.args[1]]);
+    }
+    // Labels land on the exact 2d blit positions (shared labelBlitPos).
+    expect(spy.sprites).toEqual(blits);
+  });
+
+  it("skips zero axes outside the range and honors show* toggles", () => {
+    const layer = new AxisGridLayer("axis");
+    layer.setConfig({
+      xRange: [1, 10],
+      yRange: [1, 10],
+      showXGrid: false,
+      showYGrid: false,
+      showXLabels: false,
+      showYLabels: false,
+    });
+    const v = makeViewport();
+    v.beginScan();
+    layer.scan?.(v);
+    const spy = makeGlr();
+    layer.drawGl(spy.glr, v);
+    // Only the zero-axes pass ran, and 0 is outside both ranges → empty list.
+    expect(spy.lineLists).toHaveLength(1);
+    expect(spy.lineLists[0]!.count).toBe(0);
+    expect(spy.sprites).toHaveLength(0);
+  });
+
+  it("warns once for gridDashArray and draws solid", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const layer = new AxisGridLayer("axis");
+    layer.setConfig({ xRange: [-10, 10], yRange: [-10, 10], gridDashArray: [3, 3] });
+    const v = makeViewport();
+    v.beginScan();
+    layer.scan?.(v);
+    const spy = makeGlr();
+    layer.drawGl(spy.glr, v);
+    layer.drawGl(spy.glr, v);
+    const dashWarns = warnSpy.mock.calls.filter((c) =>
+      String(c[0]).includes("gridDashArray"),
+    );
+    expect(dashWarns).toHaveLength(1);
+    expect(spy.lineLists.length).toBeGreaterThan(0);
+    warnSpy.mockRestore();
+  });
+
+  it("warns once and skips labels when sprites are unavailable", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const g = globalThis as { OffscreenCanvas?: unknown };
+    const Real = g.OffscreenCanvas;
+    g.OffscreenCanvas = class {
+      getContext() {
+        return null;
+      }
+    };
+    try {
+      const layer = new AxisGridLayer("axis");
+      layer.setConfig({ xRange: [-10, 10], yRange: [-10, 10] });
+      const v = makeViewport();
+      v.beginScan();
+      layer.scan?.(v);
+      const spy = makeGlr();
+      layer.drawGl(spy.glr, v);
+      layer.drawGl(spy.glr, v);
+      // Inline margins hit the same warn-once path (ticks still drawn).
+      v.insetLeft = 44;
+      v.insetBottom = 26;
+      layer.drawInlineAxesGl(spy.glr, v, { color: "#666" });
+      expect(spy.sprites).toHaveLength(0);
+      const spriteWarns = warnSpy.mock.calls.filter((c) =>
+        String(c[0]).includes("label sprites are unavailable"),
+      );
+      expect(spriteWarns).toHaveLength(1);
+      // Grid lines still drawn — only labels are skipped.
+      expect(spy.lineLists.length).toBeGreaterThan(0);
+    } finally {
+      g.OffscreenCanvas = Real;
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("drawInlineAxesGl mirrors drawInlineAxes tick marks and label blits", () => {
+    const make = () => {
+      const layer = new AxisGridLayer("axis");
+      layer.setConfig({ xRange: [0, 10], yRange: [0, 10] });
+      const v = makeViewport();
+      v.insetLeft = 44;
+      v.insetBottom = 26;
+      v.beginScan();
+      layer.scan?.(v);
+      layer.finalizeBounds(v);
+      return { layer, v };
+    };
+    const style = { color: "#666", tickSize: 6, tickMargin: 4 };
+    const a = make();
+    const ctx = createFakeCtx();
+    a.layer.drawInlineAxes(
+      ctx as unknown as OffscreenCanvasRenderingContext2D,
+      a.v,
+      style,
+    );
+    const moves = ctx.calls.filter((c) => c.name === "moveTo");
+    const blits = ctx.calls
+      .filter((c) => c.name === "drawImage")
+      .map((c) => ({ dx: c.args[1], dy: c.args[2] }));
+
+    const b = make();
+    const spy = makeGlr();
+    b.layer.drawInlineAxesGl(spy.glr, b.v, style);
+    const glSegs = spy.lineLists.reduce((n, l) => n + l.count / 2, 0);
+    expect(glSegs).toBe(moves.length);
+    expect(spy.sprites).toEqual(blits);
+  });
+
+  it("drawInlineAxesGl no-ops without reserved margins", () => {
+    const layer = new AxisGridLayer("axis");
+    layer.setConfig({ xRange: [0, 10], yRange: [0, 10] });
+    const v = makeViewport();
+    const spy = makeGlr();
+    layer.drawInlineAxesGl(spy.glr, v, {});
+    expect(spy.lineLists).toHaveLength(0);
+    expect(spy.sprites).toHaveLength(0);
   });
 });

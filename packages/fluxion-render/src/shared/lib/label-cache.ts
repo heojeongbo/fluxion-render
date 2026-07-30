@@ -43,7 +43,7 @@ export interface LabelOpts {
   dpr: number;
 }
 
-interface Sprite {
+export interface LabelSprite {
   canvas: OffscreenCanvas;
   textW: number;
   cssW: number;
@@ -51,6 +51,8 @@ interface Sprite {
   /** y of the text anchor inside the sprite, in CSS px (baseline-dependent). */
   yAnchor: number;
 }
+
+type Sprite = LabelSprite;
 
 /** Horizontal/vertical outer padding around the glyphs, CSS px. */
 export const LABEL_PAD = 1;
@@ -111,24 +113,17 @@ function makeSprite(
 }
 
 /**
- * Draw `text` anchored at CSS-px (x, y) with fillText-equivalent placement.
- * Looks up (or rasterizes once) the sprite for (font, color, baseline, dpr,
- * text) and blits it; on sprite failure falls back to a verbatim
- * `ctx.fillText(text, x, y)` inheriting the caller's ctx state.
- * Never mutates the target ctx state.
+ * Bucket-LRU lookup (or one-time rasterization) of the sprite for
+ * (font, color, baseline, dpr, text). `measureCtx` is any 2d context whose
+ * `font` already equals `opts.font` — identical font strings yield identical
+ * metrics, so the 2d draw path and the GL texture path share one cache.
  */
-export function drawLabel(
-  ctx: OffscreenCanvasRenderingContext2D,
+function getSprite(
+  measureCtx: OffscreenCanvasRenderingContext2D,
   text: string,
-  x: number,
-  y: number,
   opts: LabelOpts,
-): void {
-  if (!spriteSupport) {
-    ctx.fillText(text, x, y);
-    return;
-  }
-  const dpr = opts.dpr > 0 ? opts.dpr : 1;
+  dpr: number,
+): Sprite | null {
   const styleKey = `${dpr}|${opts.baseline}|${opts.font}|${opts.color}`;
   let bucket = buckets.get(styleKey);
   if (bucket) {
@@ -148,30 +143,102 @@ export function drawLabel(
     bucket.delete(text);
     bucket.set(text, sprite);
   } else {
-    const made = makeSprite(ctx, text, opts, dpr);
-    if (!made) {
-      spriteSupport = false;
-      ctx.fillText(text, x, y);
-      return;
-    }
+    const made = makeSprite(measureCtx, text, opts, dpr);
+    if (!made) return null;
     sprite = made;
     if (bucket.size >= MAX_LABELS_PER_STYLE) {
       bucket.delete(bucket.keys().next().value as string);
     }
     bucket.set(text, sprite);
   }
+  return sprite;
+}
+
+/**
+ * Top-left blit position for `sprite` so its text anchor lands at CSS-px
+ * (x, y) — fillText-equivalent placement, snapped to the device-pixel grid
+ * for a 1:1 copy. Writes into `out` (zero-allocation hot path) and returns it.
+ * The single source of the snap math for BOTH the 2d `drawImage` blit and the
+ * GL textured-quad path — keeping them on identical pixels.
+ */
+export function labelBlitPos(
+  sprite: LabelSprite,
+  x: number,
+  y: number,
+  align: LabelOpts["align"],
+  dpr: number,
+  out: { dx: number; dy: number },
+): { dx: number; dy: number } {
   const dxRaw =
     x -
     LABEL_PAD -
-    (opts.align === "center"
-      ? sprite.textW / 2
-      : opts.align === "right"
-        ? sprite.textW
-        : 0);
+    (align === "center" ? sprite.textW / 2 : align === "right" ? sprite.textW : 0);
   const dyRaw = y - sprite.yAnchor;
   // Device-grid snap: a 1:1 device-pixel copy, crisper than a resampled blit.
-  const dx = Math.round(dxRaw * dpr) / dpr;
-  const dy = Math.round(dyRaw * dpr) / dpr;
+  out.dx = Math.round(dxRaw * dpr) / dpr;
+  out.dy = Math.round(dyRaw * dpr) / dpr;
+  return out;
+}
+
+// Reused across drawLabel calls (one label drawn at a time, single thread).
+const blitScratch = { dx: 0, dy: 0 };
+
+// Lazy 1×1 measuring context for `spriteFor` (GL path has no target 2d ctx).
+let measureScratch: OffscreenCanvasRenderingContext2D | null = null;
+
+/**
+ * Sprite lookup for consumers that RENDER the sprite themselves (the WebGL
+ * label-texture path). Uses a lazy 1×1 2d scratch canvas for `measureText`,
+ * so it shares the exact cache (and rasters) with `drawLabel`. Returns null
+ * when sprites are unsupported — callers must skip the label (GL has no
+ * fillText fallback); the latch also disables `drawLabel`'s sprite path.
+ */
+export function spriteFor(text: string, opts: LabelOpts): LabelSprite | null {
+  if (!spriteSupport) return null;
+  if (!measureScratch) {
+    try {
+      measureScratch = new OffscreenCanvas(1, 1).getContext("2d");
+    } catch {
+      measureScratch = null;
+    }
+    if (!measureScratch) {
+      spriteSupport = false;
+      return null;
+    }
+  }
+  measureScratch.font = opts.font;
+  const dpr = opts.dpr > 0 ? opts.dpr : 1;
+  const sprite = getSprite(measureScratch, text, opts, dpr);
+  if (!sprite) spriteSupport = false;
+  return sprite;
+}
+
+/**
+ * Draw `text` anchored at CSS-px (x, y) with fillText-equivalent placement.
+ * Looks up (or rasterizes once) the sprite for (font, color, baseline, dpr,
+ * text) and blits it; on sprite failure falls back to a verbatim
+ * `ctx.fillText(text, x, y)` inheriting the caller's ctx state.
+ * Never mutates the target ctx state.
+ */
+export function drawLabel(
+  ctx: OffscreenCanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  opts: LabelOpts,
+): void {
+  if (!spriteSupport) {
+    ctx.fillText(text, x, y);
+    return;
+  }
+  const dpr = opts.dpr > 0 ? opts.dpr : 1;
+  const sprite = getSprite(ctx, text, opts, dpr);
+  if (!sprite) {
+    spriteSupport = false;
+    ctx.fillText(text, x, y);
+    return;
+  }
+  const { dx, dy } = labelBlitPos(sprite, x, y, opts.align, dpr, blitScratch);
   ctx.drawImage(sprite.canvas, dx, dy, sprite.cssW, sprite.cssH);
 }
 
@@ -191,4 +258,6 @@ export function labelMetaOf(
 export function resetLabelCache(): void {
   buckets.clear();
   spriteSupport = true;
+  // Drop the measuring scratch too so a re-armed latch retries creation.
+  measureScratch = null;
 }

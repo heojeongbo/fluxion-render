@@ -29,6 +29,42 @@ export interface LineProgram {
   uColor: WebGLUniformLocation;
 }
 
+/**
+ * Textured quad for label sprites: a unit quad (aUnit ∈ [0,1]²) placed by the
+ * px-space rect uniform, then through the SAME affine as the line program.
+ * Texcoords are the unit coords directly (sprite textures are not atlased).
+ */
+export const QUAD_VS = `
+attribute vec2 aUnit;
+uniform vec4 uRect;
+uniform vec2 uOrigin;
+uniform vec2 uScale;
+uniform vec2 uOffset;
+varying vec2 vTex;
+void main() {
+  vec2 pos = uRect.xy + aUnit * uRect.zw;
+  gl_Position = vec4((pos - uOrigin) * uScale + uOffset, 0.0, 1.0);
+  vTex = aUnit;
+}
+`;
+
+export const QUAD_FS = `
+precision mediump float;
+uniform sampler2D uTex;
+varying vec2 vTex;
+void main() { gl_FragColor = texture2D(uTex, vTex); }
+`;
+
+export interface QuadProgram {
+  program: WebGLProgram;
+  aUnit: number;
+  uRect: WebGLUniformLocation;
+  uOrigin: WebGLUniformLocation;
+  uScale: WebGLUniformLocation;
+  uOffset: WebGLUniformLocation;
+  uTex: WebGLUniformLocation;
+}
+
 function compile(
   gl: WebGLRenderingContext,
   type: number,
@@ -48,10 +84,14 @@ function compile(
   return shader;
 }
 
-/** Compile+link the affine line program; null (with a warn) on failure. */
-export function buildLineProgram(gl: WebGLRenderingContext): LineProgram | null {
-  const vs = compile(gl, gl.VERTEX_SHADER, LINE_VS);
-  const fs = compile(gl, gl.FRAGMENT_SHADER, LINE_FS);
+/** Compile+link a program from sources; null (with a warn) on failure. */
+function link(
+  gl: WebGLRenderingContext,
+  vsSrc: string,
+  fsSrc: string,
+): WebGLProgram | null {
+  const vs = compile(gl, gl.VERTEX_SHADER, vsSrc);
+  const fs = compile(gl, gl.FRAGMENT_SHADER, fsSrc);
   if (!vs || !fs) return null;
   const program = gl.createProgram();
   /* v8 ignore start -- createProgram returns null only on a lost context */
@@ -68,6 +108,13 @@ export function buildLineProgram(gl: WebGLRenderingContext): LineProgram | null 
     gl.deleteProgram(program);
     return null;
   }
+  return program;
+}
+
+/** Compile+link the affine line program; null (with a warn) on failure. */
+export function buildLineProgram(gl: WebGLRenderingContext): LineProgram | null {
+  const program = link(gl, LINE_VS, LINE_FS);
+  if (!program) return null;
   const uOrigin = gl.getUniformLocation(program, "uOrigin");
   const uScale = gl.getUniformLocation(program, "uScale");
   const uOffset = gl.getUniformLocation(program, "uOffset");
@@ -82,5 +129,28 @@ export function buildLineProgram(gl: WebGLRenderingContext): LineProgram | null 
     uScale,
     uOffset,
     uColor,
+  };
+}
+
+/** Compile+link the label-sprite quad program; null (with a warn) on failure. */
+export function buildQuadProgram(gl: WebGLRenderingContext): QuadProgram | null {
+  const program = link(gl, QUAD_VS, QUAD_FS);
+  if (!program) return null;
+  const uRect = gl.getUniformLocation(program, "uRect");
+  const uOrigin = gl.getUniformLocation(program, "uOrigin");
+  const uScale = gl.getUniformLocation(program, "uScale");
+  const uOffset = gl.getUniformLocation(program, "uOffset");
+  const uTex = gl.getUniformLocation(program, "uTex");
+  /* v8 ignore start -- a linked program always exposes its active uniforms */
+  if (!uRect || !uOrigin || !uScale || !uOffset || !uTex) return null;
+  /* v8 ignore stop */
+  return {
+    program,
+    aUnit: gl.getAttribLocation(program, "aUnit"),
+    uRect,
+    uOrigin,
+    uScale,
+    uOffset,
+    uTex,
   };
 }

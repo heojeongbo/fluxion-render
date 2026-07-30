@@ -120,10 +120,23 @@ export interface FakeGl {
   LINK_STATUS: number;
   ARRAY_BUFFER: number;
   DYNAMIC_DRAW: number;
+  STATIC_DRAW: number;
   LINE_STRIP: number;
   LINES: number;
+  TRIANGLE_STRIP: number;
   FLOAT: number;
   ALIASED_LINE_WIDTH_RANGE: number;
+  TEXTURE_2D: number;
+  TEXTURE0: number;
+  RGBA: number;
+  UNSIGNED_BYTE: number;
+  TEXTURE_WRAP_S: number;
+  TEXTURE_WRAP_T: number;
+  TEXTURE_MIN_FILTER: number;
+  TEXTURE_MAG_FILTER: number;
+  CLAMP_TO_EDGE: number;
+  NEAREST: number;
+  UNPACK_PREMULTIPLY_ALPHA_WEBGL: number;
   viewport(...args: unknown[]): void;
   clearColor(...args: unknown[]): void;
   clear(...args: unknown[]): void;
@@ -152,10 +165,18 @@ export interface FakeGl {
   deleteBuffer(...args: unknown[]): void;
   enableVertexAttribArray(...args: unknown[]): void;
   vertexAttribPointer(...args: unknown[]): void;
+  uniform1i(...args: unknown[]): void;
   uniform2f(...args: unknown[]): void;
   uniform4f(...args: unknown[]): void;
   lineWidth(...args: unknown[]): void;
   drawArrays(...args: unknown[]): void;
+  createTexture(...args: unknown[]): object;
+  bindTexture(...args: unknown[]): void;
+  deleteTexture(...args: unknown[]): void;
+  activeTexture(...args: unknown[]): void;
+  pixelStorei(...args: unknown[]): void;
+  texImage2D(...args: unknown[]): void;
+  texParameteri(...args: unknown[]): void;
   getParameter(pname: number): unknown;
   getExtension(name: string): { loseContext(): void } | null;
   /** Test knobs: force shader-compile or program-link failure. */
@@ -195,10 +216,23 @@ export function createFakeGl(canvas: { width: number; height: number }): FakeGl 
     LINK_STATUS: 0x8b82,
     ARRAY_BUFFER: 0x8892,
     DYNAMIC_DRAW: 0x88e8,
+    STATIC_DRAW: 0x88e4,
     LINE_STRIP: 3,
     LINES: 1,
+    TRIANGLE_STRIP: 5,
     FLOAT: 0x1406,
     ALIASED_LINE_WIDTH_RANGE: 0x846e,
+    TEXTURE_2D: 0x0de1,
+    TEXTURE0: 0x84c0,
+    RGBA: 0x1908,
+    UNSIGNED_BYTE: 0x1401,
+    TEXTURE_WRAP_S: 0x2802,
+    TEXTURE_WRAP_T: 0x2803,
+    TEXTURE_MIN_FILTER: 0x2801,
+    TEXTURE_MAG_FILTER: 0x2800,
+    CLAMP_TO_EDGE: 0x812f,
+    NEAREST: 0x2600,
+    UNPACK_PREMULTIPLY_ALPHA_WEBGL: 0x9241,
     viewport: rec("viewport"),
     clearColor: rec("clearColor"),
     clear: rec("clear"),
@@ -227,10 +261,18 @@ export function createFakeGl(canvas: { width: number; height: number }): FakeGl 
     deleteBuffer: rec("deleteBuffer"),
     enableVertexAttribArray: rec("enableVertexAttribArray"),
     vertexAttribPointer: rec("vertexAttribPointer"),
+    uniform1i: rec("uniform1i"),
     uniform2f: rec("uniform2f"),
     uniform4f: rec("uniform4f"),
     lineWidth: rec("lineWidth"),
     drawArrays: rec("drawArrays"),
+    createTexture: recReturning("createTexture", () => ({})),
+    bindTexture: rec("bindTexture"),
+    deleteTexture: rec("deleteTexture"),
+    activeTexture: rec("activeTexture"),
+    pixelStorei: rec("pixelStorei"),
+    texImage2D: rec("texImage2D"),
+    texParameteri: rec("texParameteri"),
     getParameter: recReturning("getParameter", () => [1, 8] as unknown),
     getExtension(name: string) {
       calls.push({ name: "getExtension", args: [name] });
