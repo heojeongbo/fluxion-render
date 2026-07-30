@@ -1,5 +1,19 @@
 # Changelog
 
+# [1.2.0](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v1.1.0...fluxion-render-v1.2.0) (2026-07-30)
+
+
+### Bug Fixes
+
+* **render:** clear GL backing at init/resize so charts never flash black ([86f7c22](https://github.com/HeoJeongBo/fluxion-render/commit/86f7c22e7bb4d00742bf67d5b072a3af44224ef7))
+
+
+### Features
+
+* **render:** renderer:'webgl' backend — stage 1 (context + clear + plumbing) ([77498b8](https://github.com/HeoJeongBo/fluxion-render/commit/77498b84bcb3a31e0871202bbb2102171ff65f2e))
+* **render:** renderer:'webgl' backend — stage 2 (GL line layer) ([e8b38a2](https://github.com/HeoJeongBo/fluxion-render/commit/e8b38a28dda93ff55cd008579e7d7d0ab1da764c))
+* **render:** renderer:'webgl' backend — stage 3 (GL grid, inline axes, label sprites) ([eb97a42](https://github.com/HeoJeongBo/fluxion-render/commit/eb97a421177306aacd7ff90716e5bcbf09a543ca))
+
 # [1.1.0](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v1.0.3...fluxion-render-v1.1.0) (2026-07-30)
 
 
