@@ -20,6 +20,7 @@ import { ScatterColoredLayer } from "../../../entities/scatter-colored-layer";
 import { StackedAreaLayer } from "../../../entities/stacked-area-layer";
 import { StepChartLayer } from "../../../entities/step-chart-layer";
 import { TrajectoryLayer } from "../../../entities/trajectory-layer";
+import { GlRenderer } from "../../../shared/gl/gl-renderer";
 import type { Layer } from "../../../shared/model/layer";
 import { Scheduler } from "../../../shared/model/scheduler";
 import { Viewport } from "../../../shared/model/viewport";
@@ -27,6 +28,7 @@ import type {
   AxisStyle,
   HostMsg,
   LayerKind,
+  RendererKind,
   RenderStatsMsg,
   SetAxisCanvasMsg,
   TickUpdateMsg,
@@ -106,6 +108,11 @@ export class Engine {
   // layer add/remove/reset — render() and friends read it every frame and must
   // not re-scan the stack (or allocate a type-guard closure) per frame.
   private axisLayer: AxisGridLayer | null = null;
+  // WebGL backend (renderer:"webgl"); null = 2d path. Falls back to 2d when
+  // context creation fails so the chart always renders.
+  private glr: GlRenderer | null = null;
+  // Layer ids already warned as unsupported under webgl (cleared on RESET).
+  private readonly glWarned = new Set<string>();
   private bgColor = "#0b0d12";
   // Page visibility, driven by the host's `visibilitychange`. While false, the
   // follow-clock continuous render loop is suspended (CPU/battery), regardless
@@ -147,6 +154,7 @@ export class Engine {
           inlineAxes: msg.inlineAxes,
           xAxisHeight: msg.xAxisHeight,
           yAxisWidth: msg.yAxisWidth,
+          renderer: msg.renderer,
         });
         break;
       case Op.SET_BG_COLOR:
@@ -292,6 +300,7 @@ export class Engine {
   private reset(): void {
     this.stack.disposeAll();
     this.axisLayer = null;
+    this.glWarned.clear();
     this.viewport.latestT = 0;
     this.viewport.setBounds({ xMin: -1, xMax: 1, yMin: -1, yMax: 1 });
     this.viewport.yPadPx = 0;
@@ -310,6 +319,12 @@ export class Engine {
   }
 
   private setAxisCanvas(msg: SetAxisCanvasMsg): void {
+    if (this.glr) {
+      // Defense-in-depth: the host already refuses to send axis canvases for a
+      // webgl engine; a stray message must not bind 2d axis contexts.
+      console.warn("[fluxion] SET_AXIS_CANVAS ignored under renderer:'webgl'.");
+      return;
+    }
     this.xAxisHeight = msg.xAxisHeight;
     this.yAxisWidth = msg.yAxisWidth;
     if (msg.xAxisCanvas) {
@@ -348,6 +363,7 @@ export class Engine {
       inlineAxes?: boolean;
       xAxisHeight?: number;
       yAxisWidth?: number;
+      renderer?: RendererKind;
     },
   ) {
     this.canvas = canvas;
@@ -365,7 +381,19 @@ export class Engine {
     // Opaque context (alpha:false) composites faster — the engine fills `bgColor`
     // over the whole canvas every frame, so it's opaque regardless. `transparent`
     // opts back into an alpha channel for translucent backgrounds.
-    this.ctx = canvas.getContext("2d", { alpha: opts.transparent === true });
+    if (opts.renderer === "webgl") {
+      this.glr = GlRenderer.tryCreate(canvas, { alpha: opts.transparent === true }, () =>
+        this.scheduler.markDirty(),
+      );
+      if (!this.glr) {
+        console.warn(
+          "[fluxion] webgl context unavailable — falling back to the 2d renderer.",
+        );
+      }
+    }
+    if (!this.glr) {
+      this.ctx = canvas.getContext("2d", { alpha: opts.transparent === true });
+    }
     if (opts.bgColor !== undefined) this.bgColor = opts.bgColor;
     if (opts.maxFps !== undefined) this.scheduler.setMaxFps(opts.maxFps);
     if (opts.emitBounds !== undefined) this.emitBounds = opts.emitBounds;
@@ -407,9 +435,8 @@ export class Engine {
   }
 
   private render(dirty = true) {
-    const ctx = this.ctx;
-    /* v8 ignore start -- render only runs via the scheduler after init; ctx/canvas are always set */
-    if (!ctx || !this.canvas) return;
+    /* v8 ignore start -- render only runs via the scheduler after init; canvas is always set */
+    if (!this.canvas) return;
     /* v8 ignore stop */
     const rsStart = this.emitRenderStats ? performance.now() : 0;
     // 2-pass: scan (orchestration: time window, observed y, bounds) then
@@ -418,29 +445,10 @@ export class Engine {
     // the y-auto computation using those extents.
     this.viewport.beginScan();
     this.stack.scanAll(this.viewport);
-    const { dpr } = this.viewport;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = this.bgColor;
-    ctx.fillRect(0, 0, this.viewport.widthPx, this.viewport.heightPx);
-    // Inline-axes mode: confine data/grid strokes to the plot rect so nothing
-    // bleeds into the reserved margins; axis ticks/labels are drawn AFTER the
-    // restore so they land in the margins unclipped.
-    const inline = this.viewport.insetLeft > 0 || this.viewport.insetBottom > 0;
-    if (inline) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(
-        this.viewport.plotLeft,
-        0,
-        this.viewport.plotWidth,
-        this.viewport.plotHeight,
-      );
-      ctx.clip();
-    }
-    this.stack.drawAll(ctx, this.viewport);
-    if (inline) {
-      ctx.restore();
-      this.axisLayer?.drawInlineAxes(ctx, this.viewport, this.axisStyle);
+    if (this.glr) {
+      this.renderGl();
+    } else {
+      this.render2d();
     }
 
     // Notify main thread when effective y bounds change (yMode:"auto").
@@ -476,6 +484,7 @@ export class Engine {
     }
 
     // Draw axis canvases synchronously in the same rAF cycle (zero lag).
+    const { dpr } = this.viewport;
     const axisLayer = this.axisLayer;
     if (axisLayer) {
       if (this.xAxisCtx && this.xAxisCanvas) {
@@ -511,6 +520,66 @@ export class Engine {
     }
 
     if (this.emitRenderStats) this.recordRenderStats(rsStart);
+  }
+
+  /** canvas2d paint pass: bg fill + clipped layer draw + inline axes. */
+  private render2d(): void {
+    const ctx = this.ctx;
+    /* v8 ignore start -- init always binds a 2d ctx when glr is null */
+    if (!ctx) return;
+    /* v8 ignore stop */
+    const { dpr } = this.viewport;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = this.bgColor;
+    ctx.fillRect(0, 0, this.viewport.widthPx, this.viewport.heightPx);
+    // Inline-axes mode: confine data/grid strokes to the plot rect so nothing
+    // bleeds into the reserved margins; axis ticks/labels are drawn AFTER the
+    // restore so they land in the margins unclipped.
+    const inline = this.viewport.insetLeft > 0 || this.viewport.insetBottom > 0;
+    if (inline) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(
+        this.viewport.plotLeft,
+        0,
+        this.viewport.plotWidth,
+        this.viewport.plotHeight,
+      );
+      ctx.clip();
+    }
+    this.stack.drawAll(ctx, this.viewport);
+    if (inline) {
+      ctx.restore();
+      this.axisLayer?.drawInlineAxes(ctx, this.viewport, this.axisStyle);
+    }
+  }
+
+  /**
+   * WebGL paint pass: clear + scissored layer fan-out. Layers without a
+   * `drawGl` path are skipped with a one-time warn. While the GL context is
+   * lost the whole frame is skipped (the compositor keeps the last image).
+   */
+  private renderGl(): void {
+    const glr = this.glr;
+    /* v8 ignore start -- only called when glr is set */
+    if (!glr) return;
+    /* v8 ignore stop */
+    if (!glr.beginFrame(this.bgColor)) return;
+    const inline = this.viewport.insetLeft > 0 || this.viewport.insetBottom > 0;
+    if (inline) glr.scissorPlotRect(this.viewport);
+    this.stack.drawGlAll(glr, this.viewport, (l) => this.warnGlUnsupported(l));
+    if (inline) {
+      glr.scissorOff();
+      // Stage 3: axisLayer?.drawInlineAxesGl(glr, viewport, axisStyle)
+    }
+  }
+
+  private warnGlUnsupported(layer: Layer): void {
+    if (this.glWarned.has(layer.id)) return;
+    this.glWarned.add(layer.id);
+    console.warn(
+      `[fluxion] layer "${layer.id}" has no WebGL draw path — skipped under renderer:'webgl'.`,
+    );
   }
 
   /**
@@ -597,6 +666,8 @@ export class Engine {
     this.scheduler.stop();
     this.stack.disposeAll();
     this.axisLayer = null;
+    this.glr?.dispose();
+    this.glr = null;
     // Release each OffscreenCanvas's GPU backing store NOW instead of waiting for
     // GC. A `transferControlToOffscreen()` canvas keeps its GPU surface alive
     // until the OffscreenCanvas is garbage-collected; under rapid mount/unmount

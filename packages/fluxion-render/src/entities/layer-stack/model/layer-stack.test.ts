@@ -131,4 +131,36 @@ describe("LayerStack", () => {
     expect(stack.get("a")).toBeUndefined();
     expect(stack.get("b")).toBeUndefined();
   });
+
+  it("drawGlAll draws layers with a GL path and reports the rest", () => {
+    const stack = new LayerStack();
+    const drawGl = vi.fn();
+    const glLayer = {
+      id: "gl",
+      setConfig() {},
+      setData() {},
+      resize() {},
+      draw() {},
+      drawGl,
+      dispose() {},
+    } as unknown as Layer;
+    const plainLayer = {
+      id: "plain",
+      setConfig() {},
+      setData() {},
+      resize() {},
+      draw() {},
+      dispose() {},
+    } as unknown as Layer;
+    stack.add(glLayer);
+    stack.add(plainLayer);
+
+    const glr = {} as never;
+    const viewport = {} as never;
+    const onUnsupported = vi.fn();
+    stack.drawGlAll(glr, viewport, onUnsupported);
+    expect(drawGl).toHaveBeenCalledWith(glr, viewport);
+    expect(onUnsupported).toHaveBeenCalledTimes(1);
+    expect(onUnsupported.mock.calls[0]![0]).toBe(plainLayer);
+  });
 });

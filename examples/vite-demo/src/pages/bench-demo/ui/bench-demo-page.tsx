@@ -52,6 +52,11 @@ const PARAMS = {
   inlineAxes: new URLSearchParams(window.location.search).get("axes") === "inline",
   labels: new URLSearchParams(window.location.search).get("labels") !== "0",
   grid: new URLSearchParams(window.location.search).get("grid") !== "0",
+  // `renderer=webgl` opts charts into the WebGL backend.
+  renderer:
+    new URLSearchParams(window.location.search).get("renderer") === "webgl"
+      ? ("webgl" as const)
+      : ("2d" as const),
 };
 
 const COLORS = ["#4fc3f7", "#80ffa0", "#ffb060", "#f48fb1", "#ce93d8", "#80cbc4"];
@@ -155,6 +160,7 @@ const BenchChart = memo(function BenchChart({
           emitRenderStats: true,
           maxFps: PARAMS.maxFps,
           emitBounds: PARAMS.emitBounds,
+          renderer: PARAMS.renderer,
         }}
         onReady={(h) => {
           setHost(h);

@@ -104,20 +104,97 @@ export function createFakeCtx(): FakeCtx {
   };
 }
 
+/** Call-recording WebGL context stub (mirrors the FakeCtx convention). */
+export interface FakeGl {
+  calls: CtxCall[];
+  drawingBufferWidth: number;
+  drawingBufferHeight: number;
+  COLOR_BUFFER_BIT: number;
+  BLEND: number;
+  ONE: number;
+  ONE_MINUS_SRC_ALPHA: number;
+  SCISSOR_TEST: number;
+  viewport(...args: unknown[]): void;
+  clearColor(...args: unknown[]): void;
+  clear(...args: unknown[]): void;
+  enable(...args: unknown[]): void;
+  disable(...args: unknown[]): void;
+  blendFunc(...args: unknown[]): void;
+  scissor(...args: unknown[]): void;
+  getExtension(name: string): { loseContext(): void } | null;
+}
+
+export function createFakeGl(canvas: { width: number; height: number }): FakeGl {
+  const calls: CtxCall[] = [];
+  const rec =
+    (name: string) =>
+    (...args: unknown[]) => {
+      calls.push({ name, args });
+    };
+  return {
+    calls,
+    get drawingBufferWidth() {
+      return canvas.width;
+    },
+    get drawingBufferHeight() {
+      return canvas.height;
+    },
+    COLOR_BUFFER_BIT: 0x4000,
+    BLEND: 0x0be2,
+    ONE: 1,
+    ONE_MINUS_SRC_ALPHA: 0x0303,
+    SCISSOR_TEST: 0x0c11,
+    viewport: rec("viewport"),
+    clearColor: rec("clearColor"),
+    clear: rec("clear"),
+    enable: rec("enable"),
+    disable: rec("disable"),
+    blendFunc: rec("blendFunc"),
+    scissor: rec("scissor"),
+    getExtension(name: string) {
+      calls.push({ name: "getExtension", args: [name] });
+      return name === "WEBGL_lose_context" ? { loseContext: rec("loseContext") } : null;
+    },
+  };
+}
+
 class FakeOffscreenCanvas {
   width: number;
   height: number;
   /** Records the most recent `getContext` options arg (for asserting `alpha` etc.). */
   contextOptions: unknown;
   private ctx: FakeCtx | null = null;
+  private glCtx: FakeGl | null = null;
+  private listeners = new Map<string, Set<EventListener>>();
   constructor(width = 0, height = 0) {
     this.width = width;
     this.height = height;
   }
-  getContext(_type: string, options?: unknown): FakeCtx {
+  getContext(type: string, options?: unknown): FakeCtx | FakeGl {
     this.contextOptions = options;
+    if (type === "webgl") {
+      if (!this.glCtx) this.glCtx = createFakeGl(this);
+      return this.glCtx;
+    }
     if (!this.ctx) this.ctx = createFakeCtx();
     return this.ctx;
+  }
+  addEventListener(type: string, fn: EventListener): void {
+    let set = this.listeners.get(type);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(type, set);
+    }
+    set.add(fn);
+  }
+  removeEventListener(type: string, fn: EventListener): void {
+    this.listeners.get(type)?.delete(fn);
+  }
+  dispatchEvent(evt: { type: string; preventDefault?: () => void }): boolean {
+    for (const fn of this.listeners.get(evt.type) ?? []) {
+      fn(evt as Event);
+    }
+    return true;
   }
 }
 

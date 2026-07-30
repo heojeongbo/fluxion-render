@@ -49,6 +49,9 @@ export type LayerKind =
 
 export type DType = "f32" | "u8" | "i16" | "u16" | "i32";
 
+/** Rendering backend for a chart's worker engine. Construction-fixed. */
+export type RendererKind = "2d" | "webgl";
+
 export interface InitMsg {
   op: typeof Op.INIT;
   canvas: OffscreenCanvas;
@@ -81,6 +84,8 @@ export interface InitMsg {
   xAxisHeight?: number;
   /** Inline-axes left margin in CSS px. Only read with `inlineAxes`. Default 60. */
   yAxisWidth?: number;
+  /** Rendering backend. "webgl" bypasses the 2d remote-canvas pipeline. Default "2d". */
+  renderer?: RendererKind;
   hostId?: string;
 }
 
@@ -167,6 +172,7 @@ export interface PoolInitMsg {
   inlineAxes?: boolean;
   xAxisHeight?: number;
   yAxisWidth?: number;
+  renderer?: RendererKind;
 }
 
 /** Pool-only: tear down the engine for `hostId` without terminating the worker. */

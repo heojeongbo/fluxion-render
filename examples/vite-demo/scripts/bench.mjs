@@ -38,6 +38,7 @@ const opts = {
   axes: arg("axes", "1"), // "0" drops the external axis canvases
   labels: arg("labels", "1"), // "0" turns off tick labels
   grid: arg("grid", "1"), // "0" turns off grid lines
+  renderer: arg("renderer", "2d"), // "webgl" opts into the GL backend
 };
 
 const browserType = { firefox, chromium }[opts.browser];
@@ -81,7 +82,8 @@ const benchUrl =
   `${url}/bench?charts=${opts.charts}&rate=${opts.rate}` +
   `&duration=${opts.duration}&warmup=${opts.warmup}` +
   `&maxFps=${opts.maxFps}&emitBounds=${opts.emitBounds}` +
-  `&axes=${opts.axes}&labels=${opts.labels}&grid=${opts.grid}`;
+  `&axes=${opts.axes}&labels=${opts.labels}&grid=${opts.grid}` +
+  `&renderer=${opts.renderer}`;
 
 const results = [];
 try {

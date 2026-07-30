@@ -76,6 +76,10 @@ describe("FluxionWorkerHandle", () => {
           emitTicks: false,
           emitRenderStats: true,
           transparent: true,
+          inlineAxes: true,
+          xAxisHeight: 24,
+          yAxisWidth: 48,
+          renderer: "webgl",
         } as HostMsg,
         [],
       );
@@ -91,6 +95,10 @@ describe("FluxionWorkerHandle", () => {
         emitTicks: false,
         emitRenderStats: true,
         transparent: true,
+        inlineAxes: true,
+        xAxisHeight: 24,
+        yAxisWidth: 48,
+        renderer: "webgl",
       });
 
       const handle2 = pool.acquire();

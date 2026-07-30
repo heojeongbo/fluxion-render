@@ -33,6 +33,7 @@ export class FluxionWorkerHandle extends WorkerHandle<HostMsg> {
         inlineAxes: m.inlineAxes,
         xAxisHeight: m.xAxisHeight,
         yAxisWidth: m.yAxisWidth,
+        renderer: m.renderer,
       };
       this._worker.postMessage(poolMsg, transfer ?? []);
       return;

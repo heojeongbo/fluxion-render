@@ -27,6 +27,7 @@ self.onmessage = (e: MessageEvent<HostMsg>) => {
         inlineAxes: msg.inlineAxes,
         xAxisHeight: msg.xAxisHeight,
         yAxisWidth: msg.yAxisWidth,
+        renderer: msg.renderer,
         hostId: msg.hostId,
       });
       return;

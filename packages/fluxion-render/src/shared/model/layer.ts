@@ -1,3 +1,4 @@
+import type { GlRenderer } from "../gl/gl-renderer";
 import type { Viewport } from "./viewport";
 
 /**
@@ -29,6 +30,12 @@ export interface Layer {
    */
   scan?(viewport: Viewport): void;
   draw(ctx: OffscreenCanvasRenderingContext2D, viewport: Viewport): void;
+  /**
+   * Optional WebGL draw path (renderer: "webgl"). Same frame position and
+   * ordering contract as `draw()`. Layers without it are skipped under the
+   * webgl backend (the engine warns once per layer id).
+   */
+  drawGl?(glr: GlRenderer, viewport: Viewport): void;
   /**
    * Optional. Drop the layer's data buffer (ring buffer for streaming layers,
    * last-set dataset for static layers) without touching config or removing

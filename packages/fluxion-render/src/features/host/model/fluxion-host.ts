@@ -15,6 +15,7 @@ import {
   type HostMsg,
   type LayerKind,
   Op,
+  type RendererKind,
   type RenderStatsMsg,
   type SerializedTick,
   type TickUpdateMsg,
@@ -102,6 +103,16 @@ export interface FluxionHostOptions {
    * with `xAxisElement`/`yAxisElement`. Construction-fixed (recycle key).
    */
   inlineAxes?: boolean;
+  /**
+   * Rendering backend. `"webgl"` bypasses the 2d remote-canvas pipeline
+   * (Firefox worker canvas2d carries a fixed ~0.5-1.2 ms per-render submission
+   * cost regardless of content). v1 renders line + axis-grid layers; other
+   * layer kinds warn once and are skipped, and external axis canvases
+   * (`xAxisElement`/`yAxisElement`) are ignored — pair with `inlineAxes`.
+   * Falls back to 2d when a webgl context can't be created. Construction-fixed
+   * (recycle key). Default `"2d"`.
+   */
+  renderer?: RendererKind;
   /**
    * Coalesce high-frequency per-sample pushes (the typed handles' `push()`)
    * into ONE `Op.DATA` message per layer per animation frame, instead of one
@@ -326,12 +337,19 @@ export class FluxionHost {
         inlineAxes: opts.inlineAxes,
         xAxisHeight: opts.inlineAxes ? (opts.xAxisHeight ?? 30) : undefined,
         yAxisWidth: opts.inlineAxes ? (opts.yAxisWidth ?? 60) : undefined,
+        renderer: opts.renderer,
       },
       [offscreen],
     );
 
     // Transfer axis canvases to the Worker so they render in the same rAF cycle.
-    if (opts.xAxisElement || opts.yAxisElement) {
+    // The webgl backend has no 2d axis-canvas path — warn and ignore them.
+    if (opts.renderer === "webgl" && (opts.xAxisElement || opts.yAxisElement)) {
+      console.warn(
+        "[fluxion] renderer:'webgl' does not support external axis canvases — " +
+          "ignoring xAxisElement/yAxisElement. Use inlineAxes instead.",
+      );
+    } else if (opts.xAxisElement || opts.yAxisElement) {
       const xAxisCanvas = opts.xAxisElement?.transferControlToOffscreen();
       const yAxisCanvas = opts.yAxisElement?.transferControlToOffscreen();
       const transfer: Transferable[] = [];

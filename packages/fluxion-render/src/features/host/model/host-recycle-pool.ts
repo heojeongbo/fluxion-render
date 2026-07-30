@@ -264,6 +264,9 @@ export function createHostRecyclePool(
       // a warm inline host (or one with different margins) must never be
       // handed to a mount expecting a different plot rect.
       o.inlineAxes ? `i${o.xAxisHeight ?? 30}x${o.yAxisWidth ?? 60}` : "-",
+      // A webgl engine's canvas is permanently moded to webgl — it must never
+      // be recycled into a 2d mount (and vice versa).
+      o.renderer === "webgl" ? "gl" : "2d",
     ].join("|");
   };
 

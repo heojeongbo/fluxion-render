@@ -599,6 +599,162 @@ describe("Engine", () => {
     });
   });
 
+  describe("renderer: webgl", () => {
+    function glInit(engine: Engine, canvas: OffscreenCanvas, extra: object = {}) {
+      engine.dispatch({
+        op: Op.INIT,
+        canvas,
+        width: 200,
+        height: 130,
+        dpr: 1,
+        renderer: "webgl",
+        ...extra,
+      });
+    }
+
+    it("clears via the GL context and never touches a 2d context", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(200, 130);
+      glInit(engine, canvas);
+      flushFrame();
+      const gl = (
+        canvas as unknown as { getContext: (t: string) => { calls: { name: string }[] } }
+      ).getContext("webgl");
+      expect(gl.calls.some((c) => c.name === "clearColor")).toBe(true);
+      expect(gl.calls.some((c) => c.name === "clear")).toBe(true);
+      // The 2d branch never ran: no fillRect anywhere on the gl call log.
+      expect(gl.calls.some((c) => c.name === "fillRect")).toBe(false);
+      engine.dispatch({ op: Op.DISPOSE });
+      expect(gl.calls.some((c) => c.name === "loseContext")).toBe(true);
+    });
+
+    it("warns once per unsupported layer and keeps rendering", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const engine = new Engine();
+      const canvas = newCanvas(200, 130);
+      glInit(engine, canvas);
+      engine.dispatch({
+        op: Op.ADD_LAYER,
+        id: "line",
+        kind: "line",
+        config: { color: "#0f0" },
+      });
+      flushFrame();
+      flushFrame();
+      engine.dispatch({
+        op: Op.DATA,
+        id: "line",
+        buffer: new Float32Array([1, 2]).buffer,
+        dtype: "f32",
+        length: 2,
+      });
+      flushFrame();
+      const layerWarns = warnSpy.mock.calls.filter((c) =>
+        String(c[0]).includes("no WebGL draw path"),
+      );
+      expect(layerWarns).toHaveLength(1); // warn-once per layer id
+      warnSpy.mockRestore();
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
+    it("scissors the plot rect under inlineAxes", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(200, 130);
+      glInit(engine, canvas, { inlineAxes: true, xAxisHeight: 30, yAxisWidth: 60 });
+      flushFrame();
+      const gl = (
+        canvas as unknown as { getContext: (t: string) => { calls: { name: string }[] } }
+      ).getContext("webgl");
+      expect(gl.calls.some((c) => c.name === "scissor")).toBe(true);
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
+    it("re-renders after a context restore (onRestored marks dirty)", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const engine = new Engine();
+      const canvas = newCanvas(200, 130);
+      glInit(engine, canvas);
+      flushFrame();
+      const gl = (
+        canvas as unknown as { getContext: (t: string) => { calls: { name: string }[] } }
+      ).getContext("webgl");
+      const dispatch = (
+        canvas as unknown as {
+          dispatchEvent: (e: { type: string; preventDefault?: () => void }) => void;
+        }
+      ).dispatchEvent.bind(canvas);
+
+      dispatch({ type: "webglcontextlost", preventDefault: () => {} });
+      const clearsWhileLost = gl.calls.filter((c) => c.name === "clear").length;
+      engine.dispatch({ op: Op.SET_BG_COLOR, color: "#111111" }); // marks dirty
+      flushFrame(); // render runs but beginFrame refuses while lost
+      expect(gl.calls.filter((c) => c.name === "clear")).toHaveLength(clearsWhileLost);
+
+      dispatch({ type: "webglcontextrestored" }); // → scheduler.markDirty()
+      flushFrame();
+      expect(gl.calls.filter((c) => c.name === "clear").length).toBeGreaterThan(
+        clearsWhileLost,
+      );
+      warnSpy.mockRestore();
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
+    it("ignores SET_AXIS_CANVAS with a warning", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const engine = new Engine();
+      const canvas = newCanvas(200, 130);
+      glInit(engine, canvas);
+      const xAxisCanvas = newCanvas(200, 30);
+      engine.dispatch({
+        op: Op.SET_AXIS_CANVAS,
+        xAxisCanvas: xAxisCanvas as unknown as OffscreenCanvas,
+        xAxisHeight: 30,
+        yAxisWidth: 60,
+      });
+      flushFrame();
+      const xCtx = (
+        xAxisCanvas as unknown as { getContext: () => { calls: unknown[] } }
+      ).getContext();
+      expect(xCtx.calls).toHaveLength(0); // never bound/drawn
+      expect(
+        warnSpy.mock.calls.some((c) => String(c[0]).includes("SET_AXIS_CANVAS ignored")),
+      ).toBe(true);
+      warnSpy.mockRestore();
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
+    it("falls back to 2d when a webgl context is unavailable", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const ctx2d = (
+        newCanvas(10, 10) as unknown as { getContext: (t: string) => unknown }
+      ).getContext("2d");
+      const canvas = {
+        width: 200,
+        height: 130,
+        getContext: (t: string) => (t === "webgl" ? null : ctx2d),
+        addEventListener() {},
+        removeEventListener() {},
+      } as unknown as OffscreenCanvas;
+      const engine = new Engine();
+      engine.dispatch({
+        op: Op.INIT,
+        canvas,
+        width: 200,
+        height: 130,
+        dpr: 1,
+        renderer: "webgl",
+      });
+      flushFrame();
+      const fake = ctx2d as { calls: { name: string }[] };
+      expect(fake.calls.some((c) => c.name === "fillRect")).toBe(true); // 2d path ran
+      expect(
+        warnSpy.mock.calls.some((c) => String(c[0]).includes("falling back to the 2d")),
+      ).toBe(true);
+      warnSpy.mockRestore();
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+  });
+
   describe("inlineAxes", () => {
     it("clips data to the plot rect and draws margin labels on the MAIN canvas", () => {
       const engine = new Engine();

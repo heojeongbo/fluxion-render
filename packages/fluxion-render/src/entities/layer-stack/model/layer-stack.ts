@@ -1,3 +1,4 @@
+import type { GlRenderer } from "../../../shared/gl/gl-renderer";
 import type { Layer } from "../../../shared/model/layer";
 import type { Viewport } from "../../../shared/model/viewport";
 
@@ -51,6 +52,22 @@ export class LayerStack {
   drawAll(ctx: OffscreenCanvasRenderingContext2D, viewport: Viewport): void {
     for (let i = 0; i < this.layers.length; i++) {
       this.layers[i].draw(ctx, viewport);
+    }
+  }
+
+  /**
+   * WebGL fan-out: draw every layer that implements `drawGl`; report layers
+   * that don't to `onUnsupported` (the engine warns once per id and skips).
+   */
+  drawGlAll(
+    glr: GlRenderer,
+    viewport: Viewport,
+    onUnsupported: (l: Layer) => void,
+  ): void {
+    for (let i = 0; i < this.layers.length; i++) {
+      const layer = this.layers[i];
+      if (layer.drawGl) layer.drawGl(glr, viewport);
+      else onUnsupported(layer);
     }
   }
 

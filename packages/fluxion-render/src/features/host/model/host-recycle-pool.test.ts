@@ -97,6 +97,14 @@ describe("createHostRecyclePool", () => {
       );
     });
 
+    it("separates webgl engines from 2d ones", () => {
+      const pool = createHostRecyclePool();
+      const base = { hostOptions: {}, hasXAxis: false, hasYAxis: false };
+      const gl = { ...base, hostOptions: { renderer: "webgl" as const } };
+      expect(pool.keyFor(base)).not.toBe(pool.keyFor(gl));
+      expect(pool.keyFor(gl)).toBe(pool.keyFor({ ...gl }));
+    });
+
     it("separates distinct worker pools / factories but is stable per object", () => {
       const pool = createHostRecyclePool();
       const poolA = fakePool();

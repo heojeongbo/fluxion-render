@@ -50,6 +50,30 @@ function makeFakePoolHandle(hostId = "host-0") {
 }
 
 describe("FluxionHost", () => {
+  it("INIT carries the renderer choice; webgl ignores external axis elements", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const a = makeFakeWorker();
+    const glHost = new FluxionHost(makeCanvas(), {
+      workerFactory: () => a.worker,
+      renderer: "webgl",
+      xAxisElement: document.createElement("canvas"),
+    });
+    const init = a.posts[0]!.msg as { renderer?: string };
+    expect(init.renderer).toBe("webgl");
+    // Axis elements are refused under webgl: warn, and no SET_AXIS_CANVAS post.
+    expect(warnSpy).toHaveBeenCalled();
+    expect(a.posts.some((p) => (p.msg as { op: number }).op === Op.SET_AXIS_CANVAS)).toBe(
+      false,
+    );
+    glHost.dispose();
+
+    const b = makeFakeWorker();
+    const plain = new FluxionHost(makeCanvas(), { workerFactory: () => b.worker });
+    expect((b.posts[0]!.msg as { renderer?: string }).renderer).toBeUndefined();
+    plain.dispose();
+    warnSpy.mockRestore();
+  });
+
   it("INIT carries inline-axes margins only when inlineAxes is set", () => {
     const a = makeFakeWorker();
     const inlineHost = new FluxionHost(makeCanvas(), {
