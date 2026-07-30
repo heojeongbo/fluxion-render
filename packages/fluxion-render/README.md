@@ -42,6 +42,7 @@ npm install @heojeongbo/fluxion-render
 - **Worker Pool** — charts share an adaptive pool that grows with load. Zero config required.
 - **Automatic load shedding** — per-worker frame governors (JS budget + rAF cadence) and a main-thread flush governor degrade render rate gracefully under saturation instead of janking the whole browser. Nothing is dropped; `maxFps` remains the explicit ceiling.
 - **Inline axes** — `inlineAxes` renders axes into main-canvas margins: one compositor surface per chart (vs up to three with external axis canvases), the preferred mode for large grids
+- **WebGL renderer** — `renderer: 'webgl'` bypasses Firefox's fixed ~1 ms/render worker-canvas2d pipeline cost with GPU line/grid/label programs (−78 % worker busy at 60×25 Hz, 2.8× throughput at 200×60 Hz). Firefox-targeted; keep `'2d'` on Chromium (live-context cap)
 - **Host recycling** — reuse warm chart hosts across mount/unmount for churny UIs (virtualized lists, accordions) instead of paying create/destroy each time
 - **OffscreenCanvas** — all rendering happens off the main thread
 - **Zero-copy data** — `Float32Array` ownership is transferred to the worker, never copied
@@ -294,6 +295,7 @@ streams is cheap out of the box; the rest are opt-outs for niche cases.
 | `transparent` | `boolean` | `false` | Keep the canvas's alpha channel so the page shows through where the chart doesn't paint. Default `false` (opaque): the engine fills `bgColor` every frame, so an opaque 2D context (`alpha: false`) composites faster — a real win for a wall of many charts. Set `true` only if you use a translucent `bgColor` and want the page visible behind the plot |
 | `emitRenderStats` | `boolean` | `false` | Diagnostics opt-in (not a throughput knob): periodically post worker-side render load to `onRenderStats` for a perf HUD. Off by default — zero overhead. See [Diagnostics](#diagnostics-getmetrics--onmetricsupdate) |
 | `inlineAxes` | `boolean` | `false` | Reserve `yAxisWidth`/`xAxisHeight` margins INSIDE the main canvas and let the worker draw axis ticks/labels there — ONE canvas surface per chart instead of up to three. See [Inline axes](#inline-axes-inlineaxes--one-canvas-surface-per-chart). Construction-fixed (part of the recycle key); mutually exclusive with `xAxisElement`/`yAxisElement` |
+| `renderer` | `'2d' \| 'webgl'` | `'2d'` | Paint backend for the worker engine. `'webgl'` bypasses Firefox's worker-canvas2d pipeline (a measured **fixed ~0.5–1.2 ms cost per render**, regardless of content) and draws lines/grid/labels with GPU programs instead — ~4–30× less worker busy time per render on Firefox. See [WebGL renderer](#webgl-renderer-renderer-webgl--the-firefox-prescription). Construction-fixed (part of the recycle key) |
 
 (Plus `bgColor`, `pool`, `workerFactory` covered above.)
 
@@ -406,6 +408,57 @@ getLifecycleStats();
 
 Pair it with `recyclePool.stats` (below) to tell cold-create storms apart from
 resize storms.
+
+### WebGL renderer (`renderer: 'webgl'`) — the Firefox prescription
+
+Firefox executes worker-canvas2d through a remote command pipeline with a
+measured **fixed ~0.5–1.2 ms submission cost per render** — insensitive to
+pixels, command count, and messages, so no amount of draw-path trimming
+removes it. `renderer: 'webgl'` sidesteps the pipeline entirely: the engine
+draws lines (raw `(t, y)` vertices, data→pixel affine in the vertex shader),
+grid/ticks (batched `gl.LINES` snapped to the same pixel centers as the 2d
+strokes), and labels (the shared label-sprite cache uploaded as textures,
+blitted at identical positions) with GPU programs.
+
+```tsx
+<FluxionCanvas
+  hostOptions={{ renderer: 'webgl', inlineAxes: true, maxFps: 30 }}
+  layers={[/* … */]}
+/>
+```
+
+Measured (Playwright headed, dpr 2, inline axes, median of 3):
+
+| Browser | Load | `'2d'` busy/render | `'webgl'` busy/render | renders/s delivered |
+|---|---|---|---|---|
+| Firefox | 60 charts × 25 Hz | 1.18 ms | **0.27 ms (−78 %)** | 1408 → 1346 |
+| Firefox | 200 charts × 60 Hz | 0.94 ms (saturated, 0.5 % jank) | **0.27 ms (0 % jank)** | 3749 → **10392 (2.8×)** |
+| Chromium | 60 charts × 25 Hz | 0.038 ms | 0.033 ms | ≈ same |
+
+**Use it on Firefox; keep `'2d'` on Chromium.**
+
+- **Chromium caps live WebGL contexts (~16 per process).** Mounting more
+  webgl charts than the cap forcibly loses the oldest contexts, and they do
+  **not** restore while over the cap — charts freeze (measured: 28 lost at
+  60 charts). Chromium's worker canvas2d has no fixed per-render cost, so
+  `'webgl'` buys nothing there anyway. Firefox's cap is far higher (~300):
+  60–200 charts run without a single context loss.
+- Pair with `inlineAxes` (recommended): external axis canvases are 2d-drawn
+  and are skipped with a warn under `'webgl'` (React-side `useAxisTicks`
+  fallback still works).
+- Construction-fixed, like `inlineAxes` — part of the recycle-pool key, so
+  recycled `'webgl'` hosts never mix with `'2d'` hosts.
+- If the WebGL context can't be created at init (blocklisted driver,
+  headless), the engine logs a warn and falls back to `'2d'` — the chart
+  always renders.
+
+**v1 limitations** (each warns once and degrades gracefully): only `line` and
+`axis-grid` layers have GPU paths — other layer kinds are skipped under
+`'webgl'`; `dashArray`/`gridDashArray` draw solid; line width is clamped to
+the device's aliased-line range (commonly 1 device px under ANGLE); GL lines
+are not antialiased on most drivers (crisper, slightly more stair-stepped
+than 2d); colors must be `#hex` / `rgb()` / `rgba()` (named CSS colors warn
+and fall back to white).
 
 ### Theming (light/dark) — colors CSS can't reach
 
