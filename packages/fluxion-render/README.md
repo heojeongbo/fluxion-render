@@ -40,6 +40,8 @@ npm install @heojeongbo/fluxion-render
 ## Features
 
 - **Worker Pool** — charts share an adaptive pool that grows with load. Zero config required.
+- **Automatic load shedding** — per-worker frame governors (JS budget + rAF cadence) and a main-thread flush governor degrade render rate gracefully under saturation instead of janking the whole browser. Nothing is dropped; `maxFps` remains the explicit ceiling.
+- **Inline axes** — `inlineAxes` renders axes into main-canvas margins: one compositor surface per chart (vs up to three with external axis canvases), the preferred mode for large grids
 - **Host recycling** — reuse warm chart hosts across mount/unmount for churny UIs (virtualized lists, accordions) instead of paying create/destroy each time
 - **OffscreenCanvas** — all rendering happens off the main thread
 - **Zero-copy data** — `Float32Array` ownership is transferred to the worker, never copied
@@ -291,6 +293,7 @@ streams is cheap out of the box; the rest are opt-outs for niche cases.
 | `emitTicks` | `boolean` | `true` | Whether the worker posts `TICK_UPDATE` for React-side axis rendering. Only relevant with `externalAxes={false}` and no `onTickUpdate` consumer; set `false` to skip per-frame tick computation + postMessage. No effect when axis canvases render in the worker (`externalAxes` / `xAxisElement` / `yAxisElement`) |
 | `transparent` | `boolean` | `false` | Keep the canvas's alpha channel so the page shows through where the chart doesn't paint. Default `false` (opaque): the engine fills `bgColor` every frame, so an opaque 2D context (`alpha: false`) composites faster — a real win for a wall of many charts. Set `true` only if you use a translucent `bgColor` and want the page visible behind the plot |
 | `emitRenderStats` | `boolean` | `false` | Diagnostics opt-in (not a throughput knob): periodically post worker-side render load to `onRenderStats` for a perf HUD. Off by default — zero overhead. See [Diagnostics](#diagnostics-getmetrics--onmetricsupdate) |
+| `inlineAxes` | `boolean` | `false` | Reserve `yAxisWidth`/`xAxisHeight` margins INSIDE the main canvas and let the worker draw axis ticks/labels there — ONE canvas surface per chart instead of up to three. See [Inline axes](#inline-axes-inlineaxes--one-canvas-surface-per-chart). Construction-fixed (part of the recycle key); mutually exclusive with `xAxisElement`/`yAxisElement` |
 
 (Plus `bgColor`, `pool`, `workerFactory` covered above.)
 
@@ -1335,6 +1338,10 @@ every `pointermove`). Set e.g. `throttleMs: 16` to cap crosshair `setState` to
 ~60fps when many series make per-event re-renders expensive; the `pointerleave`
 reset is never throttled.
 
+For charts rendered with **`inlineAxes`**, also pass **`insetLeft`** (the chart's
+`yAxisWidth`, default 0): the plot rect starts that many px in from the capture
+element's left edge, and the hook maps pointer px over the inset plot span.
+
 #### Managed-pool charts: `useBroadcastCrosshairCache`
 
 The crosshair reads from a main-thread `HoverDataCache`. In the **pool fan-out**
@@ -1802,14 +1809,16 @@ FluxionHost                          FluxionWorkerPool
   │──RESIZE ──────────────────────────►│      LidarScatterLayer
   │──DISPOSE ─────────────────────────►│      AxisGridLayer
                                        │
-                                       │  Scheduler (rAF)
+                                       │  FrameDriver (ONE rAF per worker)
+                                       │    per-engine Scheduler (dirty-gated)
                                        │    scan pass → draw pass
                                        │    OffscreenCanvas → screen
 ```
 
 - Workers are never blocked by main-thread layout or JS execution
 - `ArrayBuffer` is transferred (not copied) on every `pushData` call
-- The Scheduler only renders when data changes (`markDirty()`)
+- All engines on a worker share ONE rAF loop (`FrameDriver`) that stops entirely when nothing is dirty or continuous, and load-sheds (skip-stride) when the frame's JS budget is exceeded or rAF delivery degrades
+- Each engine's Scheduler only renders when data changes (`markDirty()`)
 - Multiple engines share one worker via `hostId` routing
 - `pool.broadcastStream()` with `size: 1` decodes once and fans out to N engines — ideal for multi-channel sensor dashboards
 

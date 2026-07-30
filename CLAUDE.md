@@ -18,6 +18,11 @@ pnpm typecheck   # tsc --noEmit per package
 pnpm dev         # vite-demo
 pnpm dev:replay  # fluxion-replay-demo
 pnpm lint:fix    # biome check --write . (formatter + import sort; linter disabled)
+
+# Perf bench (headed Playwright, from examples/vite-demo after `pnpm build` there):
+#   pnpm bench --browser firefox|chromium --charts 60 --rate 25 --runs 3
+#   levers: --maxFps N --emitBounds 0 --axes inline|0 --labels 0 --grid 0
+# Or open /bench?charts=60&rate=25 manually — results render on-page + window.__benchResult.
 ```
 
 ## Conventions
@@ -25,12 +30,16 @@ pnpm lint:fix    # biome check --write . (formatter + import sort; linter disabl
 - Conventional commits with package scope: `feat(render): …`, `fix(replay): …`, multi-scope `feat(render,examples): …`. `examples`-only commits never trigger a release.
 - Draw-path tests use the `createFakeCtx()` call-recording pattern (assert `moveTo`/`lineTo`/`stroke` counts), `renderHook` + fake timers for hooks.
 - Data timestamps are host-relative ms (`Date.now() - timeOrigin`); never push absolute epoch ms (Float32 quantization).
+- Worker frame loop: ONE `FrameDriver` rAF per worker (shared by all engines' `Scheduler`s), idle-stop + load governors (JS-budget stride, rAF-cadence stride); main-thread coalesce flush is a shared frame in `shared/lib/flush-scheduler.ts` with its own pressure governor. Axis labels render via the `shared/lib/label-cache.ts` sprite cache (`drawImage`, not per-frame `fillText`).
+- Axis modes: `externalAxes` (separate axis canvases), `inlineAxes` (margins inside the main canvas — one surface; viewport `insetLeft/insetBottom` plot rect), or neither (React-side ticks via TICK_UPDATE). In-plot labels auto-suppress when either axis mode renders labels.
 
 ## Testing & coverage
 
 - Coverage runs per package (no root script): `cd packages/<pkg> && pnpm vitest run --coverage`. Build render first (`pnpm --filter @heojeongbo/fluxion-render build`) so replay resolves it.
 - Enforced thresholds (`vitest.config.ts`): render = 100% stmts/funcs/lines, 98% branches; worker = 100% stmts/funcs/lines, 90% branches; replay = 100% lines (binding).
-- Patterns: `createFakeCtx()` (`src/test/setup.ts`) for canvas draw tests; a stub host whose `line(id)` returns a handle with a spyable `push` (see `use-simple-chart.test.tsx` `makeStubHost`) for stream-hook tests.
+- Patterns: `createFakeCtx()` (`src/test/setup.ts`) for canvas draw tests; a stub host whose `line(id)` returns a handle with a spyable `push` (see `use-simple-chart.test.tsx` `makeStubHost`) for stream-hook tests; `labelDraws(ctx)` (setup.ts) to assert label text/anchor coords from sprite `drawImage` blits — labels are NOT `fillText` on the target ctx anymore.
+- Module singletons (frame driver, flush scheduler, label cache) are reset by a global `afterEach` in setup.ts; file-local afterEach hooks that reset them must run BEFORE `vi.useRealTimers()` (a fake-timer rAF handle cancelled under real timers wedges the singleton).
+- Frame-count-exact tests: happy-dom/sinon rAF due-times don't align with arbitrary `advanceTimersByTime` steps — step frames with `vi.advanceTimersToNextTimer()` (it fires ALL timers due at that tick, in registration order). Governor tests drive time via `vi.spyOn(performance, "now")` with a manual clock (advance BEFORE the frame for arrival gaps, INSIDE onFrame for busy).
 - React component tests run with vitest `globals:false` → testing-library auto-cleanup is OFF. Add `afterEach(cleanup)` or scope queries to the returned `container`, or you'll hit "Found multiple elements" across tests.
 - v8-ignore: `/* v8 ignore next */` does NOT suppress cond-expr (`a?b:c`), binary-expr (`a??b`), or `if`-statement branches — use `/* v8 ignore start */ … /* v8 ignore stop */` for those, always with `-- reason`. The render branch gate is 98 (not 100) because v8 emits an untargetable phantom "implicit else" on every `if` without an `else`.
 - replay `scenarios/09-*.test.ts` is timing-flaky ONLY under `--coverage` (v8 slowdown) — it carries per-test `testTimeout: 20_000`; don't touch VirtualClock/ReplayPlayer to "fix" it.

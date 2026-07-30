@@ -27,8 +27,8 @@ Dependency order: **fluxion-worker ← fluxion-render ← fluxion-replay**.
 | Package | Version | Description |
 |---------|---------|-------------|
 | [`packages/fluxion-worker`](packages/fluxion-worker) | `0.6.0` | Generic worker pool infrastructure — [`@heojeongbo/fluxion-worker`](https://www.npmjs.com/package/@heojeongbo/fluxion-worker) |
-| [`packages/fluxion-render`](packages/fluxion-render) | `0.21.0` | Core rendering library — [`@heojeongbo/fluxion-render`](https://www.npmjs.com/package/@heojeongbo/fluxion-render) |
-| [`packages/fluxion-replay`](packages/fluxion-replay) | `0.12.1` | Time-travel replay engine — [`@heojeongbo/fluxion-replay`](https://www.npmjs.com/package/@heojeongbo/fluxion-replay) |
+| [`packages/fluxion-render`](packages/fluxion-render) | `1.0.3` | Core rendering library — [`@heojeongbo/fluxion-render`](https://www.npmjs.com/package/@heojeongbo/fluxion-render) |
+| [`packages/fluxion-replay`](packages/fluxion-replay) | `0.13.0` | Time-travel replay engine — [`@heojeongbo/fluxion-replay`](https://www.npmjs.com/package/@heojeongbo/fluxion-replay) |
 | [`examples/vite-demo`](examples/vite-demo) | — | Rendering demo — a route per public layer type (line/area/step/bar/scatter/scatter-colored/candlestick/heatmap/heatmap-stream/histogram/box-plot/polar/stacked-area/event-marker/reference-line/lidar/pose-arrow/trajectory/occupancy-grid + SVG gauge/pie), DX helpers, axis formatters, crosshair/brush/export, and infrastructure routes (LiDAR 30k, 300-chart broadcast pool) |
 | [`examples/fluxion-replay-demo`](examples/fluxion-replay-demo) | — | Replay demo — DVR/screen capture, metrics, logs, time-travel scrubber, plus a multi-chart DVR route with scrub-then-play UX |
 
@@ -47,7 +47,8 @@ FluxionHost × N                      FluxionWorkerPool (adaptive, auto-growing)
   │──RESIZE ──────────────────────────►│      LidarScatterLayer
   │──DISPOSE ─────────────────────────►│      AxisGridLayer
                                        │
-                                       │  Scheduler (rAF-based)
+                                       │  FrameDriver (ONE rAF per worker,
+                                       │    idle-stop + load governors)
                                        │    scan → draw → OffscreenCanvas
 
 Replay (main thread)
@@ -60,8 +61,10 @@ ReplayPlayer   ──► VirtualClock (RAF) → prefetch → onFrame()
 - All rendering runs in workers — main thread is never blocked
 - `ArrayBuffer` is **transferred** (not copied) on every data push
 - Charts share an **adaptive** worker pool that starts small and grows on demand toward a hardware-bound cap
-- Scales to hundreds of simultaneous high-rate charts: per-frame push **coalescing**, automatic draw **decimation** (min/max envelope), and an optional render-FPS cap (`maxFps`)
-- Scheduler only renders when data changes (dirty flag)
+- Scales to hundreds of simultaneous high-rate charts: per-frame push **coalescing**, automatic draw **decimation** (min/max envelope), cached axis ticks + label sprites, and an optional render-FPS cap (`maxFps`)
+- **Load-sheds automatically under saturation**: each worker's shared frame loop throttles on JS-budget overrun or degraded rAF delivery, and the main-thread flush frame sheds data cadence under compositor pressure — skipped frames keep data latched, nothing is dropped
+- One rAF loop per worker (not per chart) that stops entirely when idle; renders only when data changes (dirty flag)
+- `inlineAxes` mode draws axes into main-canvas margins — ONE compositor surface per chart instead of up to three
 - Replay stores up to 10 minutes of any stream in IndexedDB + OPFS
 
 ---
@@ -83,6 +86,10 @@ pnpm dev:replay
 # Typecheck + test all packages
 pnpm typecheck
 pnpm test
+
+# Performance benchmark (headed Playwright; run `pnpm build` in examples/vite-demo first)
+cd examples/vite-demo
+pnpm bench --browser firefox --charts 60 --rate 25   # also: chromium; --axes inline|0; --labels 0; --maxFps N
 ```
 
 ---
