@@ -1,3 +1,4 @@
+import type { GlRenderer } from "../../../shared/gl/gl-renderer";
 import {
   formatTick,
   formatYTick,
@@ -402,7 +403,14 @@ export class AxisGridLayer implements Layer {
     return this.followClock && this.xMode === "time" && this.timeOrigin != null;
   }
 
-  draw(ctx: OffscreenCanvasRenderingContext2D, viewport: Viewport): void {
+  /**
+   * Finalize yMode:"auto" bounds from the scan pass's observed y-extents and
+   * publish them to the viewport. MUST run once per frame before anything
+   * reads `viewport.bounds` (the engine's bounds emit, tick export, axis
+   * draws) — `draw()` and `drawGl()` both call it first, preserving the
+   * "bounds are final after the axis layer draws" contract on either backend.
+   */
+  finalizeBounds(viewport: Viewport): void {
     // Finalize y-auto bounds. Runs after all line-layer scans have
     // published their observed extents into the viewport.
     if (this.yMode === "auto") {
@@ -437,7 +445,19 @@ export class AxisGridLayer implements Layer {
       this.bounds.yMax = yMax;
       if (this.applyToViewport) viewport.setBounds(this.bounds);
     }
+  }
 
+  /**
+   * WebGL draw path. Stage 2: bounds finalization only (grid/axis visuals
+   * land in stage 3) — keeps yMode:auto, bounds emission, and tick export
+   * correct under renderer:"webgl".
+   */
+  drawGl(_glr: GlRenderer, viewport: Viewport): void {
+    this.finalizeBounds(viewport);
+  }
+
+  draw(ctx: OffscreenCanvasRenderingContext2D, viewport: Viewport): void {
+    this.finalizeBounds(viewport);
     const { widthPx: w, heightPx: h } = viewport;
     const { ticks: xTicks, labels: xLabels } = this.xTicksFor();
     const { ticks: yTicks, labels: yLabels } = this.yTicksFor();

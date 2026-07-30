@@ -440,6 +440,27 @@ describe("AxisGridLayer", () => {
       expect(v.bounds.yMax).toBeCloseTo(11);
     });
 
+    it("drawGl finalizes bounds identically to draw (WebGL parity)", () => {
+      const make = () => {
+        const layer = new AxisGridLayer("axis");
+        layer.setConfig({ xRange: [0, 10], yMode: "auto", yAutoPadding: 0.2 });
+        const v = makeViewport();
+        v.beginScan();
+        v.observedYMin = -4;
+        v.observedYMax = 4;
+        layer.scan?.(v);
+        return { layer, v };
+      };
+      const a = make();
+      a.layer.draw(createFakeCtx() as unknown as OffscreenCanvasRenderingContext2D, a.v);
+      const b = make();
+      // Stage 2 GL path: finalize only, no visuals — glr is never touched.
+      b.layer.drawGl(null as never, b.v);
+      expect(b.v.bounds).toEqual(a.v.bounds);
+      expect(b.v.bounds.yMin).toBeCloseTo(-5.6); // 20% padding on span 8
+      expect(b.v.bounds.yMax).toBeCloseTo(5.6);
+    });
+
     it("falls back to configured yRange when no observations", () => {
       const layer = new AxisGridLayer("axis");
       layer.setConfig({

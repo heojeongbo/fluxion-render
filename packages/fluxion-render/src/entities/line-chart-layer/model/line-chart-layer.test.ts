@@ -1,4 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import type { GlRenderer } from "../../../shared/gl/gl-renderer";
+import {
+  type ClipTransform,
+  dataToClip,
+  laneToClip,
+} from "../../../shared/gl/gl-transform";
 import { Viewport } from "../../../shared/model/viewport";
 import { createFakeCtx } from "../../../test/setup";
 import { AxisGridLayer } from "../../axis-grid-layer/model/axis-grid-layer";
@@ -1075,5 +1081,150 @@ describe("LineChartLayer (streaming)", () => {
       layer.draw(ctx as unknown as OffscreenCanvasRenderingContext2D, vp);
       expect(ctx.calls.some((c) => c.name === "stroke")).toBe(false);
     });
+  });
+});
+
+describe("LineChartLayer.drawGl", () => {
+  function makeGlr() {
+    const drawLineStrip = vi.fn();
+    return { glr: { drawLineStrip } as unknown as GlRenderer, drawLineStrip };
+  }
+  function makeViewport() {
+    const v = new Viewport();
+    v.setSize(1000, 100, 2);
+    v.setBounds({ xMin: 0, xMax: 5000, yMin: -1, yMax: 1 });
+    return v;
+  }
+
+  it("no-ops below 2 samples and when invisible", () => {
+    const { glr, drawLineStrip } = makeGlr();
+    const vp = makeViewport();
+    const layer = new LineChartLayer("l");
+    layer.setData(new Float32Array([0, 0]).buffer, 2, vp);
+    layer.drawGl(glr, vp); // 1 sample
+    layer.setData(new Float32Array([100, 1]).buffer, 2, vp);
+    layer.setConfig({ visible: false });
+    layer.drawGl(glr, vp); // 2 samples but hidden
+    expect(drawLineStrip).not.toHaveBeenCalled();
+  });
+
+  it("streams raw [t, y] vertices with the dataToClip transform, parsed color, and dpr width", () => {
+    const { glr, drawLineStrip } = makeGlr();
+    const vp = makeViewport();
+    const layer = new LineChartLayer("l");
+    layer.setConfig({ color: "#4fc3f7", lineWidth: 1.5, opacity: 0.8, yOffset: 0.25 });
+    layer.setData(new Float32Array([0, 0, 100, 0.5, 200, -0.5]).buffer, 6, vp);
+    layer.drawGl(glr, vp);
+    expect(drawLineStrip).toHaveBeenCalledTimes(1);
+    const [verts, count, breaks, transform, color, opacity, widthPx] =
+      drawLineStrip.mock.calls[0]!;
+    expect(count).toBe(3);
+    expect(Array.from((verts as Float32Array).subarray(0, 6))).toEqual([
+      0, 0, 100, 0.5, 200, -0.5,
+    ]);
+    expect(breaks).toEqual([]);
+    const expected = new Float32Array(6);
+    dataToClip(vp, 0.25, expected as ClipTransform);
+    expect(Array.from(transform as Float32Array)).toEqual(Array.from(expected));
+    expect(color).toEqual([79 / 255, 195 / 255, 247 / 255, 1]);
+    expect(opacity).toBe(0.8);
+    expect(widthPx).toBe(3); // 1.5 CSS px × dpr 2
+  });
+
+  it("reuses the persistent vertex scratch across frames", () => {
+    const { glr, drawLineStrip } = makeGlr();
+    const vp = makeViewport();
+    const layer = new LineChartLayer("l");
+    layer.setData(new Float32Array([0, 0, 100, 1]).buffer, 4, vp);
+    layer.drawGl(glr, vp);
+    layer.setData(new Float32Array([200, 2]).buffer, 2, vp);
+    layer.drawGl(glr, vp);
+    const first = drawLineStrip.mock.calls[0]![0];
+    const second = drawLineStrip.mock.calls[1]![0];
+    expect(second).toBe(first); // same Float32Array instance
+    expect(drawLineStrip.mock.calls[1]![1]).toBe(3);
+  });
+
+  it("skips the draw when fewer than 2 samples survive the xMin filter", () => {
+    const { glr, drawLineStrip } = makeGlr();
+    const vp = makeViewport();
+    const layer = new LineChartLayer("l");
+    layer.setData(new Float32Array([0, 0, 100, 1]).buffer, 4, vp);
+    vp.setBounds({ xMin: 150, xMax: 5000, yMin: -1, yMax: 1 });
+    layer.drawGl(glr, vp);
+    expect(drawLineStrip).not.toHaveBeenCalled();
+  });
+
+  it("maps lane mode through laneToClip using its own scanned extent", () => {
+    const { glr, drawLineStrip } = makeGlr();
+    const vp = makeViewport();
+    vp.yPadPx = 8;
+    const layer = new LineChartLayer("l");
+    layer.setConfig({ laneIndex: 1, laneCount: 2, laneGapPx: 4 });
+    layer.setData(new Float32Array([0, 2, 100, 6, 200, 4]).buffer, 6, vp);
+    layer.scan(vp); // engine order: scan fills scannedYMin/Max before draw
+    layer.drawGl(glr, vp);
+    const transform = drawLineStrip.mock.calls[0]![3] as Float32Array;
+    // Recompute the band exactly as yToBandPx does.
+    const pad = 8;
+    const usable = vp.plotHeight - pad * 2;
+    const bandH = usable / 2;
+    const top = pad + 1 * bandH + 2;
+    const bottom = pad + 2 * bandH - 2;
+    const expected = new Float32Array(6);
+    laneToClip(vp, top, bottom, 2, 6, expected as ClipTransform);
+    expect(Array.from(transform)).toEqual(Array.from(expected));
+  });
+
+  it("expands a flat lane extent by ±0.5 like the 2d band mapping", () => {
+    const { glr, drawLineStrip } = makeGlr();
+    const vp = makeViewport();
+    const layer = new LineChartLayer("l");
+    layer.setConfig({ laneIndex: 0, laneCount: 1 });
+    layer.setData(new Float32Array([0, 3, 100, 3]).buffer, 4, vp);
+    layer.scan(vp);
+    layer.drawGl(glr, vp);
+    const transform = drawLineStrip.mock.calls[0]![3] as Float32Array;
+    const usable = vp.plotHeight;
+    const expected = new Float32Array(6);
+    laneToClip(vp, 3, usable - 3, 2.5, 3.5, expected as ClipTransform); // laneGapPx 6 default
+    expect(Array.from(transform)).toEqual(Array.from(expected));
+  });
+
+  it("defers lane draws until scan has produced an extent", () => {
+    const { glr, drawLineStrip } = makeGlr();
+    const vp = makeViewport();
+    const layer = new LineChartLayer("l");
+    layer.setConfig({ laneIndex: 0, laneCount: 2 });
+    layer.setData(new Float32Array([0, 1, 100, 2]).buffer, 4, vp);
+    layer.drawGl(glr, vp); // no scan yet → scannedYMin is NaN
+    expect(drawLineStrip).not.toHaveBeenCalled();
+  });
+
+  it("warns once for dashArray and draws solid", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { glr, drawLineStrip } = makeGlr();
+    const vp = makeViewport();
+    const layer = new LineChartLayer("l");
+    layer.setConfig({ dashArray: [4, 2] });
+    layer.setData(new Float32Array([0, 0, 100, 1]).buffer, 4, vp);
+    layer.drawGl(glr, vp);
+    layer.drawGl(glr, vp);
+    expect(drawLineStrip).toHaveBeenCalledTimes(2);
+    const dashWarns = warnSpy.mock.calls.filter((c) =>
+      String(c[0]).includes("dashArray"),
+    );
+    expect(dashWarns).toHaveLength(1);
+    warnSpy.mockRestore();
+  });
+
+  it("falls back to opaque white when the color cannot be parsed", () => {
+    const { glr, drawLineStrip } = makeGlr();
+    const vp = makeViewport();
+    const layer = new LineChartLayer("l");
+    layer.setConfig({ color: "tomato" });
+    layer.setData(new Float32Array([0, 0, 100, 1]).buffer, 4, vp);
+    layer.drawGl(glr, vp);
+    expect(drawLineStrip.mock.calls[0]![4]).toEqual([1, 1, 1, 1]);
   });
 });

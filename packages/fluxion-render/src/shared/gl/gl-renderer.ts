@@ -16,8 +16,10 @@
  * latching, and disposal (with `WEBGL_lose_context` release). Draw programs
  * (lines, label quads) arrive in later stages.
  */
-import { parseColor } from "../lib/parse-color";
+import { parseColor, type Rgba } from "../lib/parse-color";
 import type { Viewport } from "../model/viewport";
+import { buildLineProgram, type LineProgram } from "./gl-programs";
+import type { ClipTransform } from "./gl-transform";
 
 export class GlRenderer {
   private readonly gl: WebGLRenderingContext;
@@ -39,6 +41,10 @@ export class GlRenderer {
   };
   // Colors that failed to parse — warn once each, then paint opaque white.
   private readonly warnedColors = new Set<string>();
+  // Lazily built line program + shared streaming VBO (dropped on context loss).
+  private lineProgram: LineProgram | null = null;
+  private lineVbo: WebGLBuffer | null = null;
+  private lineWidthRange: readonly [number, number] | null = null;
 
   /**
    * Acquire a webgl context on `canvas`. Returns null when the context can't
@@ -136,9 +142,65 @@ export class GlRenderer {
     return [1, 1, 1, 1];
   }
 
+  /**
+   * Draw a polyline of `count` raw vertices (already in `vertices[0..count*2)`)
+   * under the affine `transform`, split into separate strips at `breaks`
+   * (vertex indices that START a new strip). `color` is straight-alpha; the
+   * premultiplication for the frame's (ONE, ONE_MINUS_SRC_ALPHA) blend happens
+   * here. `widthPx` is clamped to the device's aliased line-width range.
+   */
+  drawLineStrip(
+    vertices: Float32Array,
+    count: number,
+    breaks: readonly number[],
+    transform: ClipTransform,
+    color: Rgba,
+    opacity: number,
+    widthPx: number,
+  ): void {
+    if (this.lost || count < 2) return;
+    const gl = this.gl;
+    const prog = this.ensureLineProgram();
+    if (!prog) return;
+    gl.useProgram(prog.program);
+    if (!this.lineVbo) this.lineVbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.lineVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, vertices.subarray(0, count * 2), gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(prog.aPos);
+    gl.vertexAttribPointer(prog.aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform2f(prog.uOrigin, transform[0]!, transform[1]!);
+    gl.uniform2f(prog.uScale, transform[2]!, transform[3]!);
+    gl.uniform2f(prog.uOffset, transform[4]!, transform[5]!);
+    const a = color[3] * opacity;
+    gl.uniform4f(prog.uColor, color[0] * a, color[1] * a, color[2] * a, a);
+    if (!this.lineWidthRange) {
+      const range = gl.getParameter(gl.ALIASED_LINE_WIDTH_RANGE) as
+        | Float32Array
+        | [number, number];
+      this.lineWidthRange = [range[0]!, range[1]!];
+    }
+    gl.lineWidth(
+      Math.min(Math.max(widthPx, this.lineWidthRange[0]), this.lineWidthRange[1]),
+    );
+    let segStart = 0;
+    for (let i = 0; i <= breaks.length; i++) {
+      const segEnd = i < breaks.length ? breaks[i]! : count;
+      if (segEnd - segStart >= 2)
+        gl.drawArrays(gl.LINE_STRIP, segStart, segEnd - segStart);
+      segStart = segEnd;
+    }
+  }
+
+  private ensureLineProgram(): LineProgram | null {
+    if (!this.lineProgram) this.lineProgram = buildLineProgram(this.gl);
+    return this.lineProgram;
+  }
+
   /** Drop GPU-object caches after a context restore (extended by later stages). */
   private dropGpuCaches(): void {
-    // Stage 1 holds no programs/buffers/textures yet.
+    this.lineProgram = null;
+    this.lineVbo = null;
+    this.lineWidthRange = null;
   }
 
   /**
@@ -149,6 +211,8 @@ export class GlRenderer {
   dispose(): void {
     this.canvas.removeEventListener("webglcontextlost", this.onLostEvt);
     this.canvas.removeEventListener("webglcontextrestored", this.onRestoredEvt);
+    if (this.lineProgram) this.gl.deleteProgram(this.lineProgram.program);
+    if (this.lineVbo) this.gl.deleteBuffer(this.lineVbo);
     this.dropGpuCaches();
     try {
       this.gl.getExtension("WEBGL_lose_context")?.loseContext();

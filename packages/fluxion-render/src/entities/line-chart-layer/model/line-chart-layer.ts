@@ -1,4 +1,12 @@
+import { type GlRenderer } from "../../../shared/gl/gl-renderer";
+import {
+  type ClipTransform,
+  dataToClip,
+  laneToClip,
+} from "../../../shared/gl/gl-transform";
+import { buildLineVertices } from "../../../shared/gl/line-geometry";
 import { type ColumnSink, forEachColumn } from "../../../shared/lib/column-reduce";
+import { parseColor } from "../../../shared/lib/parse-color";
 import { pushSamples } from "../../../shared/lib/push-samples";
 import { computeRingCapacity } from "../../../shared/lib/ring-capacity";
 import type { Layer } from "../../../shared/model/layer";
@@ -225,6 +233,73 @@ export class LineChartLayer implements Layer {
     }
     const frac = (y - lo) / (hi - lo);
     return bottom - frac * (bottom - top);
+  }
+
+  // WebGL scratch: persistent vertex buffer sized to the ring capacity, plus
+  // the strip-break index list and the 6-slot uniform transform — one
+  // allocation set per layer, reused every frame.
+  private _glVerts: Float32Array | null = null;
+  private readonly _glBreaks: number[] = [];
+  private readonly _glTransform: ClipTransform = new Float32Array(6);
+  private _warnedGlDash = false;
+
+  /**
+   * WebGL draw path: raw `(t, y)` vertices streamed to the shared VBO, the
+   * data→clip affine applied in the vertex shader. Decimation is deliberately
+   * skipped under GL — the GPU rasterizes full-resolution strips in the
+   * noise, so the drawn shape is the ground truth the 2d decimated path
+   * approximates. `dashArray` is unsupported (warned once, drawn solid);
+   * `lineWidth` is clamped to the device's aliased range.
+   */
+  drawGl(glr: GlRenderer, viewport: Viewport): void {
+    if (!this.visible || this.ring.length < 2) return;
+    if (this.laneActive() && !Number.isFinite(this.scannedYMin)) return;
+    if (this.dashArray.length > 0 && !this._warnedGlDash) {
+      this._warnedGlDash = true;
+      console.warn(
+        `[fluxion] line layer "${this.id}": dashArray is not supported under ` +
+          "renderer:'webgl' — drawing solid.",
+      );
+    }
+    if (!this._glVerts || this._glVerts.length !== this.ring.capacity * 2) {
+      this._glVerts = new Float32Array(this.ring.capacity * 2);
+    }
+    const n = buildLineVertices(
+      this.ring,
+      viewport.bounds.xMin,
+      this.maxGapMs,
+      this._glVerts,
+      this._glBreaks,
+    );
+    if (n < 2) return;
+    if (this.laneActive()) {
+      // Same band math as yToBandPx, expressed as an affine for the shader.
+      const pad = viewport.yPadPx;
+      const usable = viewport.plotHeight - pad * 2;
+      const bandH = usable / this.laneCount;
+      const gap = this.laneGapPx;
+      const top = pad + this.laneIndex * bandH + gap / 2;
+      const bottom = pad + (this.laneIndex + 1) * bandH - gap / 2;
+      let lo = this.scannedYMin;
+      let hi = this.scannedYMax;
+      if (!(hi > lo)) {
+        lo -= 0.5;
+        hi += 0.5;
+      }
+      laneToClip(viewport, top, bottom, lo, hi, this._glTransform);
+    } else {
+      dataToClip(viewport, this.yOffset, this._glTransform);
+    }
+    const rgba = parseColor(this.color) ?? ([1, 1, 1, 1] as const);
+    glr.drawLineStrip(
+      this._glVerts,
+      n,
+      this._glBreaks,
+      this._glTransform,
+      rgba,
+      this.opacity,
+      this.lineWidth * viewport.dpr,
+    );
   }
 
   draw(ctx: OffscreenCanvasRenderingContext2D, viewport: Viewport): void {

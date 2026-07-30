@@ -628,11 +628,13 @@ describe("Engine", () => {
       expect(gl.calls.some((c) => c.name === "loseContext")).toBe(true);
     });
 
-    it("warns once per unsupported layer and keeps rendering", () => {
+    it("warns once per unsupported layer kind; GL-capable layers draw silently", () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const engine = new Engine();
       const canvas = newCanvas(200, 130);
       glInit(engine, canvas);
+      // scatter has no drawGl yet → unsupported; line DOES → no warn for it.
+      engine.dispatch({ op: Op.ADD_LAYER, id: "dots", kind: "scatter", config: {} });
       engine.dispatch({
         op: Op.ADD_LAYER,
         id: "line",
@@ -640,20 +642,53 @@ describe("Engine", () => {
         config: { color: "#0f0" },
       });
       flushFrame();
-      flushFrame();
-      engine.dispatch({
-        op: Op.DATA,
-        id: "line",
-        buffer: new Float32Array([1, 2]).buffer,
-        dtype: "f32",
-        length: 2,
-      });
+      engine.dispatch({ op: Op.SET_BG_COLOR, color: "#111" }); // mark dirty again
       flushFrame();
       const layerWarns = warnSpy.mock.calls.filter((c) =>
         String(c[0]).includes("no WebGL draw path"),
       );
-      expect(layerWarns).toHaveLength(1); // warn-once per layer id
+      expect(layerWarns).toHaveLength(1); // warn-once, scatter only
+      expect(String(layerWarns[0]![0])).toContain('"dots"');
       warnSpy.mockRestore();
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
+    it("streams line vertices to the GL pipeline (drawArrays LINE_STRIP)", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(200, 130);
+      glInit(engine, canvas);
+      engine.dispatch({
+        op: Op.ADD_LAYER,
+        id: "axis",
+        kind: "axis-grid",
+        config: { xMode: "time", timeWindowMs: 1000, yMode: "auto" },
+      });
+      engine.dispatch({
+        op: Op.ADD_LAYER,
+        id: "line",
+        kind: "line",
+        config: { color: "#4fc3f7", capacity: 16 },
+      });
+      const samples = new Float32Array([0, 0, 100, 0.5, 200, -0.5, 300, 1]);
+      engine.dispatch({
+        op: Op.DATA,
+        id: "line",
+        buffer: samples.buffer,
+        dtype: "f32",
+        length: samples.length,
+      });
+      flushFrame();
+      const gl = (
+        canvas as unknown as {
+          getContext: (t: string) => { calls: { name: string; args: unknown[] }[] };
+        }
+      ).getContext("webgl");
+      const draws = gl.calls.filter((c) => c.name === "drawArrays");
+      expect(draws).toHaveLength(1);
+      expect(draws[0]!.args[1]).toBe(0); // segment start
+      expect(draws[0]!.args[2]).toBe(4); // all four samples in one strip
+      const upload = gl.calls.find((c) => c.name === "bufferData");
+      expect((upload!.args[1] as Float32Array).length).toBe(8); // 4 × (t, y)
       engine.dispatch({ op: Op.DISPOSE });
     });
 

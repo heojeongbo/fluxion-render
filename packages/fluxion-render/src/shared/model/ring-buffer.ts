@@ -42,6 +42,15 @@ export class RingBuffer {
     return this.count;
   }
 
+  /**
+   * Chronological start slot: iterate `(start + i) % capacity` for
+   * `i < length` to walk records oldest→newest without the per-record
+   * closure cost of {@link forEach} (used by the WebGL vertex fill).
+   */
+  get start(): number {
+    return this.count < this.capacity ? 0 : this.head;
+  }
+
   private feedExtent(base: number): void {
     const ext = this.extent;
     if (!ext) return;

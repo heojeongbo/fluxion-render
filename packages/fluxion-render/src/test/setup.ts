@@ -114,6 +114,16 @@ export interface FakeGl {
   ONE: number;
   ONE_MINUS_SRC_ALPHA: number;
   SCISSOR_TEST: number;
+  VERTEX_SHADER: number;
+  FRAGMENT_SHADER: number;
+  COMPILE_STATUS: number;
+  LINK_STATUS: number;
+  ARRAY_BUFFER: number;
+  DYNAMIC_DRAW: number;
+  LINE_STRIP: number;
+  LINES: number;
+  FLOAT: number;
+  ALIASED_LINE_WIDTH_RANGE: number;
   viewport(...args: unknown[]): void;
   clearColor(...args: unknown[]): void;
   clear(...args: unknown[]): void;
@@ -121,7 +131,36 @@ export interface FakeGl {
   disable(...args: unknown[]): void;
   blendFunc(...args: unknown[]): void;
   scissor(...args: unknown[]): void;
+  createShader(...args: unknown[]): object;
+  shaderSource(...args: unknown[]): void;
+  compileShader(...args: unknown[]): void;
+  getShaderParameter(...args: unknown[]): boolean;
+  getShaderInfoLog(...args: unknown[]): string;
+  deleteShader(...args: unknown[]): void;
+  createProgram(...args: unknown[]): object;
+  attachShader(...args: unknown[]): void;
+  linkProgram(...args: unknown[]): void;
+  getProgramParameter(...args: unknown[]): boolean;
+  getProgramInfoLog(...args: unknown[]): string;
+  deleteProgram(...args: unknown[]): void;
+  useProgram(...args: unknown[]): void;
+  getAttribLocation(...args: unknown[]): number;
+  getUniformLocation(...args: unknown[]): object;
+  createBuffer(...args: unknown[]): object;
+  bindBuffer(...args: unknown[]): void;
+  bufferData(...args: unknown[]): void;
+  deleteBuffer(...args: unknown[]): void;
+  enableVertexAttribArray(...args: unknown[]): void;
+  vertexAttribPointer(...args: unknown[]): void;
+  uniform2f(...args: unknown[]): void;
+  uniform4f(...args: unknown[]): void;
+  lineWidth(...args: unknown[]): void;
+  drawArrays(...args: unknown[]): void;
+  getParameter(pname: number): unknown;
   getExtension(name: string): { loseContext(): void } | null;
+  /** Test knobs: force shader-compile or program-link failure. */
+  failCompile: boolean;
+  failLink: boolean;
 }
 
 export function createFakeGl(canvas: { width: number; height: number }): FakeGl {
@@ -131,7 +170,13 @@ export function createFakeGl(canvas: { width: number; height: number }): FakeGl 
     (...args: unknown[]) => {
       calls.push({ name, args });
     };
-  return {
+  const recReturning =
+    <T>(name: string, value: () => T) =>
+    (...args: unknown[]): T => {
+      calls.push({ name, args });
+      return value();
+    };
+  const fake: FakeGl = {
     calls,
     get drawingBufferWidth() {
       return canvas.width;
@@ -144,6 +189,16 @@ export function createFakeGl(canvas: { width: number; height: number }): FakeGl 
     ONE: 1,
     ONE_MINUS_SRC_ALPHA: 0x0303,
     SCISSOR_TEST: 0x0c11,
+    VERTEX_SHADER: 0x8b31,
+    FRAGMENT_SHADER: 0x8b30,
+    COMPILE_STATUS: 0x8b81,
+    LINK_STATUS: 0x8b82,
+    ARRAY_BUFFER: 0x8892,
+    DYNAMIC_DRAW: 0x88e8,
+    LINE_STRIP: 3,
+    LINES: 1,
+    FLOAT: 0x1406,
+    ALIASED_LINE_WIDTH_RANGE: 0x846e,
     viewport: rec("viewport"),
     clearColor: rec("clearColor"),
     clear: rec("clear"),
@@ -151,11 +206,40 @@ export function createFakeGl(canvas: { width: number; height: number }): FakeGl 
     disable: rec("disable"),
     blendFunc: rec("blendFunc"),
     scissor: rec("scissor"),
+    createShader: recReturning("createShader", () => ({})),
+    shaderSource: rec("shaderSource"),
+    compileShader: rec("compileShader"),
+    getShaderParameter: recReturning("getShaderParameter", () => !fake.failCompile),
+    getShaderInfoLog: recReturning("getShaderInfoLog", () => "fake compile log"),
+    deleteShader: rec("deleteShader"),
+    createProgram: recReturning("createProgram", () => ({})),
+    attachShader: rec("attachShader"),
+    linkProgram: rec("linkProgram"),
+    getProgramParameter: recReturning("getProgramParameter", () => !fake.failLink),
+    getProgramInfoLog: recReturning("getProgramInfoLog", () => "fake link log"),
+    deleteProgram: rec("deleteProgram"),
+    useProgram: rec("useProgram"),
+    getAttribLocation: recReturning("getAttribLocation", () => 0),
+    getUniformLocation: recReturning("getUniformLocation", () => ({})),
+    createBuffer: recReturning("createBuffer", () => ({})),
+    bindBuffer: rec("bindBuffer"),
+    bufferData: rec("bufferData"),
+    deleteBuffer: rec("deleteBuffer"),
+    enableVertexAttribArray: rec("enableVertexAttribArray"),
+    vertexAttribPointer: rec("vertexAttribPointer"),
+    uniform2f: rec("uniform2f"),
+    uniform4f: rec("uniform4f"),
+    lineWidth: rec("lineWidth"),
+    drawArrays: rec("drawArrays"),
+    getParameter: recReturning("getParameter", () => [1, 8] as unknown),
     getExtension(name: string) {
       calls.push({ name: "getExtension", args: [name] });
       return name === "WEBGL_lose_context" ? { loseContext: rec("loseContext") } : null;
     },
+    failCompile: false,
+    failLink: false,
   };
+  return fake;
 }
 
 class FakeOffscreenCanvas {

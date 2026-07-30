@@ -4,12 +4,23 @@ import { resetParseColorCache } from "../lib/parse-color";
 import { Viewport } from "../model/viewport";
 import { GlRenderer } from "./gl-renderer";
 
-function newGlCanvas(w = 200, h = 100) {
+interface GlCanvasHarness {
+  canvas: OffscreenCanvas;
+  gl: FakeGl;
+  dispatch(evt: { type: string; preventDefault?: () => void }): void;
+  options(): unknown;
+}
+
+function newGlCanvas(w = 200, h = 100): GlCanvasHarness {
   // biome-ignore lint: using global stub
-  const canvas = new (globalThis as any).OffscreenCanvas(w, h);
-  return canvas as OffscreenCanvas & {
-    getContext(type: string): FakeGl;
-    dispatchEvent(evt: { type: string; preventDefault?: () => void }): boolean;
+  const raw = new (globalThis as any).OffscreenCanvas(w, h);
+  return {
+    canvas: raw as OffscreenCanvas,
+    get gl() {
+      return raw.getContext("webgl") as FakeGl;
+    },
+    dispatch: (evt) => raw.dispatchEvent(evt),
+    options: () => raw.contextOptions,
   };
 }
 
@@ -23,10 +34,10 @@ describe("GlRenderer", () => {
   });
 
   it("beginFrame sizes the viewport, clears premultiplied bg, and sets the frame blend state", () => {
-    const canvas = newGlCanvas(200, 100);
-    const glr = GlRenderer.tryCreate(canvas, { alpha: false }, () => {})!;
+    const h = newGlCanvas(200, 100);
+    const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
     expect(glr).not.toBeNull();
-    const gl = canvas.getContext("webgl");
+    const gl = h.gl;
 
     expect(glr.beginFrame("rgba(255, 0, 0, 0.5)")).toBe(true);
     const seq = names(gl.calls);
@@ -47,9 +58,9 @@ describe("GlRenderer", () => {
 
   it("falls back to opaque white for unparseable colors, warning once per string", () => {
     const errSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const canvas = newGlCanvas();
-    const glr = GlRenderer.tryCreate(canvas, { alpha: false }, () => {})!;
-    const gl = canvas.getContext("webgl");
+    const h = newGlCanvas();
+    const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
+    const gl = h.gl;
 
     glr.beginFrame("tomato");
     glr.beginFrame("tomato");
@@ -60,9 +71,9 @@ describe("GlRenderer", () => {
   });
 
   it("scissors the plot rect in device px with a bottom-left origin", () => {
-    const canvas = newGlCanvas(400, 260);
-    const glr = GlRenderer.tryCreate(canvas, { alpha: false }, () => {})!;
-    const gl = canvas.getContext("webgl");
+    const h = newGlCanvas(400, 260);
+    const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
+    const gl = h.gl;
 
     const v = new Viewport();
     v.setSize(200, 130, 2);
@@ -79,19 +90,19 @@ describe("GlRenderer", () => {
   it("suspends on context lost and resumes (with onRestored) after restore", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const onRestored = vi.fn();
-    const canvas = newGlCanvas();
-    const glr = GlRenderer.tryCreate(canvas, { alpha: false }, onRestored)!;
-    const gl = canvas.getContext("webgl");
+    const h = newGlCanvas();
+    const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, onRestored)!;
+    const gl = h.gl;
 
     const preventDefault = vi.fn();
-    canvas.dispatchEvent({ type: "webglcontextlost", preventDefault });
+    h.dispatch({ type: "webglcontextlost", preventDefault });
     expect(preventDefault).toHaveBeenCalled(); // required to allow restore
     expect(glr.isLost).toBe(true);
     const before = gl.calls.length;
     expect(glr.beginFrame("#000")).toBe(false); // whole frame skipped
     expect(gl.calls.length).toBe(before);
 
-    canvas.dispatchEvent({ type: "webglcontextrestored" });
+    h.dispatch({ type: "webglcontextrestored" });
     expect(glr.isLost).toBe(false);
     expect(onRestored).toHaveBeenCalledTimes(1);
     expect(glr.beginFrame("#000")).toBe(true);
@@ -100,15 +111,124 @@ describe("GlRenderer", () => {
 
   it("dispose releases the context and detaches the loss listeners", () => {
     const onRestored = vi.fn();
-    const canvas = newGlCanvas();
-    const glr = GlRenderer.tryCreate(canvas, { alpha: false }, onRestored)!;
-    const gl = canvas.getContext("webgl");
+    const h = newGlCanvas();
+    const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, onRestored)!;
+    const gl = h.gl;
 
     glr.dispose();
     expect(gl.calls.some((c) => c.name === "getExtension")).toBe(true);
     expect(gl.calls.some((c) => c.name === "loseContext")).toBe(true);
-    canvas.dispatchEvent({ type: "webglcontextrestored" });
+    h.dispatch({ type: "webglcontextrestored" });
     expect(onRestored).not.toHaveBeenCalled(); // listener removed
+  });
+
+  describe("drawLineStrip", () => {
+    const TRANSFORM = new Float32Array([0, 0, 1, 1, 0, 0]);
+
+    function drawOnce(
+      glr: GlRenderer,
+      verts = new Float32Array([0, 0, 1, 1, 2, 0, 3, 1]),
+      breaks: number[] = [],
+      count = 4,
+    ): void {
+      glr.drawLineStrip(verts, count, breaks, TRANSFORM, [0.2, 0.4, 0.8, 0.5], 0.5, 2);
+    }
+
+    it("uploads the visible prefix and draws one strip with premultiplied color", () => {
+      const h = newGlCanvas();
+      const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
+      const gl = h.gl;
+      const verts = new Float32Array(16); // scratch larger than the fill
+      verts.set([0, 0, 1, 1, 2, 0]);
+      glr.drawLineStrip(verts, 3, [], TRANSFORM, [0.2, 0.4, 0.8, 0.5], 0.5, 2);
+
+      const upload = gl.calls.find((c) => c.name === "bufferData")!;
+      expect((upload.args[1] as Float32Array).length).toBe(6); // count*2, not scratch len
+      const color = gl.calls.find((c) => c.name === "uniform4f")!;
+      // a = 0.5 (color alpha) × 0.5 (opacity) = 0.25; rgb premultiplied by a.
+      expect(color.args.slice(1)).toEqual([0.2 * 0.25, 0.4 * 0.25, 0.8 * 0.25, 0.25]);
+      const draws = gl.calls.filter((c) => c.name === "drawArrays");
+      expect(draws).toHaveLength(1);
+      expect(draws[0]!.args).toEqual([gl.LINE_STRIP, 0, 3]);
+    });
+
+    it("splits at break indices and skips degenerate (<2 vertex) segments", () => {
+      const h = newGlCanvas();
+      const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
+      const gl = h.gl;
+      const verts = new Float32Array(12);
+      // 6 vertices, breaks at 2 and 5 → segments [0,2) [2,5) [5,6); last is 1 vertex → skipped.
+      glr.drawLineStrip(verts, 6, [2, 5], TRANSFORM, [1, 1, 1, 1], 1, 1);
+      const draws = gl.calls.filter((c) => c.name === "drawArrays");
+      expect(draws.map((c) => c.args)).toEqual([
+        [gl.LINE_STRIP, 0, 2],
+        [gl.LINE_STRIP, 2, 3],
+      ]);
+    });
+
+    it("clamps line width to ALIASED_LINE_WIDTH_RANGE (queried once)", () => {
+      const h = newGlCanvas();
+      const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
+      const gl = h.gl; // FakeGl reports [1, 8]
+      drawOnce(glr); // width 2 → within range
+      glr.drawLineStrip(new Float32Array(8), 4, [], TRANSFORM, [1, 1, 1, 1], 1, 40);
+      glr.drawLineStrip(new Float32Array(8), 4, [], TRANSFORM, [1, 1, 1, 1], 1, 0.1);
+      const widths = gl.calls.filter((c) => c.name === "lineWidth").map((c) => c.args[0]);
+      expect(widths).toEqual([2, 8, 1]);
+      const queries = gl.calls.filter(
+        (c) => c.name === "getParameter" && c.args[0] === gl.ALIASED_LINE_WIDTH_RANGE,
+      );
+      expect(queries).toHaveLength(1); // cached after first draw
+    });
+
+    it("reuses one streaming VBO and the lazily built program across draws", () => {
+      const h = newGlCanvas();
+      const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
+      const gl = h.gl;
+      drawOnce(glr);
+      drawOnce(glr);
+      expect(gl.calls.filter((c) => c.name === "createBuffer")).toHaveLength(1);
+      expect(gl.calls.filter((c) => c.name === "linkProgram")).toHaveLength(1);
+    });
+
+    it("no-ops with fewer than 2 vertices, while lost, or when the program fails to build", () => {
+      const h = newGlCanvas();
+      const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
+      const gl = h.gl;
+      drawOnce(glr, new Float32Array([0, 0]), [], 1); // count < 2
+      expect(gl.calls.filter((c) => c.name === "drawArrays")).toHaveLength(0);
+
+      h.dispatch({ type: "webglcontextlost", preventDefault: () => {} });
+      const before = gl.calls.length;
+      drawOnce(glr);
+      expect(gl.calls.length).toBe(before); // lost → untouched
+      h.dispatch({ type: "webglcontextrestored" });
+
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      gl.failCompile = true; // context restore dropped the cached program
+      drawOnce(glr);
+      expect(gl.calls.filter((c) => c.name === "drawArrays")).toHaveLength(0);
+      warnSpy.mockRestore();
+    });
+
+    it("rebuilds GL objects dropped by a context restore", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const h = newGlCanvas();
+      const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
+      const gl = h.gl;
+      drawOnce(glr);
+      h.dispatch({ type: "webglcontextlost", preventDefault: () => {} });
+      h.dispatch({ type: "webglcontextrestored" });
+      drawOnce(glr);
+      expect(gl.calls.filter((c) => c.name === "createBuffer")).toHaveLength(2);
+      expect(gl.calls.filter((c) => c.name === "linkProgram")).toHaveLength(2);
+      // Width range re-queried too (device limits can change across restores).
+      const queries = gl.calls.filter(
+        (c) => c.name === "getParameter" && c.args[0] === gl.ALIASED_LINE_WIDTH_RANGE,
+      );
+      expect(queries).toHaveLength(2);
+      warnSpy.mockRestore();
+    });
   });
 
   it("tryCreate returns null when the context is unavailable or throws", () => {
@@ -128,12 +248,9 @@ describe("GlRenderer", () => {
   });
 
   it("requests the documented context attributes (alpha follows `transparent`)", () => {
-    const canvas = newGlCanvas();
-    GlRenderer.tryCreate(canvas, { alpha: true }, () => {});
-    expect(
-      (canvas as unknown as { contextOptions: { alpha: boolean; antialias: boolean } })
-        .contextOptions,
-    ).toMatchObject({
+    const h = newGlCanvas();
+    GlRenderer.tryCreate(h.canvas, { alpha: true }, () => {});
+    expect(h.options()).toMatchObject({
       alpha: true,
       antialias: true,
       depth: false,
