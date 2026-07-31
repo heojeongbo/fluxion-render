@@ -31,6 +31,7 @@ import { ReferenceLineDemoPage } from "../pages/reference-line-demo";
 import { RobotDashboardPage } from "../pages/robot-dashboard";
 import { ScatterColoredDemoPage } from "../pages/scatter-colored-demo";
 import { ScatterDemoPage } from "../pages/scatter-demo";
+import { ScrollGridDemoPage } from "../pages/scroll-grid-demo";
 import { StackedAreaDemoPage } from "../pages/stacked-area-demo";
 import { StaticXyDemoPage } from "../pages/static-xy-demo";
 import { StepDemoPage } from "../pages/step-demo";
@@ -133,6 +134,11 @@ export const DEMO_GROUPS: readonly DemoGroup[] = [
       { slug: "historical", label: "Historical", component: HistoricalDemoPage },
       { slug: "lidar", label: "LiDAR 30k", component: LidarDemoPage },
       { slug: "pool", label: "Pool (40 charts)", component: PoolDemoPage },
+      {
+        slug: "scroll-grid",
+        label: "Scroll Grid (pause off-screen)",
+        component: ScrollGridDemoPage,
+      },
       {
         slug: "churn",
         label: "Mount/Unmount Churn (300)",
