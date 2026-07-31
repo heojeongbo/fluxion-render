@@ -317,10 +317,14 @@ system recovers — `maxFps` remains the deterministic ceiling when you want a
 guaranteed rate. For a read-only
 thumbnail grid, also set
 `emitBounds: false` / `emitTicks: false` to drop the per-frame bookkeeping
-postMessages:
+postMessages. And when the grid **scrolls** (most charts out of view at any
+moment), add `pauseWhenOffscreen` — off-screen charts stop rendering entirely
+while still buffering data (see [Pausing off-screen charts](#pausing-off-screen-charts-pausewhenoffscreen)),
+the single biggest lever for a tall scroll grid:
 
 ```tsx
 <FluxionCanvas
+  pauseWhenOffscreen                              // stop rendering scrolled-out charts
   hostOptions={{ coalesce: true, maxFps: 30, emitBounds: false, emitTicks: false }}
   layers={[
     axisGridLayer('axis', { xMode: 'time', timeWindowMs: 5000, yMode: 'auto' }),

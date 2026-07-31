@@ -65,6 +65,8 @@ ReplayPlayer   ──► VirtualClock (RAF) → prefetch → onFrame()
 - **Load-sheds automatically under saturation**: each worker's shared frame loop throttles on JS-budget overrun or degraded rAF delivery, and the main-thread flush frame sheds data cadence under compositor pressure — skipped frames keep data latched, nothing is dropped
 - One rAF loop per worker (not per chart) that stops entirely when idle; renders only when data changes (dirty flag)
 - `inlineAxes` mode draws axes into main-canvas margins — ONE compositor surface per chart instead of up to three
+- `renderer: 'webgl'` backend bypasses Firefox's fixed ~1 ms/render worker-canvas2d cost with GPU line/grid/label programs (Firefox-targeted)
+- `pauseWhenOffscreen` stops rendering scrolled-out charts (shared IntersectionObserver) while data keeps buffering — scrolling back shows full history; −80 % to −94 % worker render time in a scroll grid
 - Replay stores up to 10 minutes of any stream in IndexedDB + OPFS
 
 ---
