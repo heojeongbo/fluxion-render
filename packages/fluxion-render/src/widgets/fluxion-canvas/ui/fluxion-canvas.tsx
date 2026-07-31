@@ -41,6 +41,14 @@ export interface FluxionCanvasProps {
    */
   recycleKey?: string;
   /**
+   * Pause a chart's rendering while it's scrolled off-screen (shared
+   * IntersectionObserver) — the big win for tall scroll grids. Data keeps
+   * streaming into the ring while off-screen, so scrolling back into view shows
+   * the full buffered history, not an empty chart. Composes with page
+   * visibility. **Default `false`.** Tune with `configureOnScreenObserver`.
+   */
+  pauseWhenOffscreen?: boolean;
+  /**
    * Renders axis labels in separate canvases drawn by the Worker —
    * y-axis canvas to the LEFT, x-axis canvas BELOW the chart.
    * Default `true`. Set to `false` only to embed the chart without
@@ -104,6 +112,7 @@ export const FluxionCanvas = forwardRef<FluxionCanvasHandle, FluxionCanvasProps>
       staggerMount,
       recyclePool,
       recycleKey,
+      pauseWhenOffscreen,
       externalAxes = true,
       inlineAxes = false,
       axisLayerId = "",
@@ -143,6 +152,7 @@ export const FluxionCanvas = forwardRef<FluxionCanvasHandle, FluxionCanvasProps>
       staggerMount,
       recyclePool,
       recycleKey,
+      pauseWhenOffscreen,
       xAxisContainerRef: useExternal ? xAxisContainerRef : undefined,
       yAxisContainerRef: useExternal ? yAxisContainerRef : undefined,
     });

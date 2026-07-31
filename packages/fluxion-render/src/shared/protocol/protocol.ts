@@ -21,6 +21,7 @@ export const Op = {
   CONFIG_BATCH: 15,
   RESET: 16,
   RELEASE_BACKING: 17,
+  SET_ON_SCREEN: 18,
 } as const;
 export type Op = (typeof Op)[keyof typeof Op];
 
@@ -234,6 +235,21 @@ export interface SetVisibleMsg {
 }
 
 /**
+ * Per-chart on-screen signal, driven by a main-thread IntersectionObserver
+ * (the `pauseWhenOffscreen` opt-in). Orthogonal to `SET_VISIBLE` (page
+ * visibility): the engine renders only while BOTH are true, so a scrolled-off
+ * chart and a hidden tab both fully suspend the render loop. Data ingestion is
+ * NOT gated — samples keep flowing into the ring while off-screen, so a chart
+ * scrolled back into view repaints its full buffered history in one frame
+ * (no gap), then re-anchors the follow-clock window to now.
+ */
+export interface SetOnScreenMsg {
+  op: typeof Op.SET_ON_SCREEN;
+  onScreen: boolean;
+  hostId?: string;
+}
+
+/**
  * Reset an engine to a pristine, just-constructed state WITHOUT tearing down
  * its OffscreenCanvas binding or worker engine — the basis of host recycling.
  * Disposes every layer (empty stack), rewinds the viewport (`latestT`, bounds,
@@ -289,6 +305,7 @@ export type HostMsg =
   | SetAxisStyleMsg
   | ClearDataMsg
   | SetVisibleMsg
+  | SetOnScreenMsg
   | ResetMsg
   | ReleaseBackingMsg;
 

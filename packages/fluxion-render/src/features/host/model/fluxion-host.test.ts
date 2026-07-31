@@ -1122,6 +1122,28 @@ describe("FluxionHost", () => {
     expect(posts).toHaveLength(0);
   });
 
+  it("setOnScreen forwards a SET_ON_SCREEN message (both values)", () => {
+    const { worker, posts } = makeFakeWorker();
+    const host = new FluxionHost(makeCanvas(), { workerFactory: () => worker });
+    posts.length = 0;
+    host.setOnScreen(false);
+    host.setOnScreen(true);
+    expect(posts.map((p) => p.msg)).toEqual([
+      { op: Op.SET_ON_SCREEN, onScreen: false },
+      { op: Op.SET_ON_SCREEN, onScreen: true },
+    ]);
+    host.dispose();
+  });
+
+  it("setOnScreen is a no-op after dispose", () => {
+    const { worker, posts } = makeFakeWorker();
+    const host = new FluxionHost(makeCanvas(), { workerFactory: () => worker });
+    host.dispose();
+    posts.length = 0;
+    host.setOnScreen(false);
+    expect(posts).toHaveLength(0);
+  });
+
   it("reset() posts RESET and drops staged data without posting it", () => {
     const { worker, posts } = makeFakeWorker();
     const host = new FluxionHost(makeCanvas(), { workerFactory: () => worker });

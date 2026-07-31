@@ -42,6 +42,7 @@ npm install @heojeongbo/fluxion-render
 - **Worker Pool** — charts share an adaptive pool that grows with load. Zero config required.
 - **Automatic load shedding** — per-worker frame governors (JS budget + rAF cadence) and a main-thread flush governor degrade render rate gracefully under saturation instead of janking the whole browser. Nothing is dropped; `maxFps` remains the explicit ceiling.
 - **Inline axes** — `inlineAxes` renders axes into main-canvas margins: one compositor surface per chart (vs up to three with external axis canvases), the preferred mode for large grids
+- **Pause off-screen charts** — `pauseWhenOffscreen` stops rendering scrolled-out charts via a shared IntersectionObserver; data keeps buffering, so scrolling back shows full history (no gap). The big win for tall scroll grids
 - **WebGL renderer** — `renderer: 'webgl'` bypasses Firefox's fixed ~1 ms/render worker-canvas2d pipeline cost with GPU line/grid/label programs (−78 % worker busy at 60×25 Hz, 2.8× throughput at 200×60 Hz). Firefox-targeted; keep `'2d'` on Chromium (live-context cap)
 - **Host recycling** — reuse warm chart hosts across mount/unmount for churny UIs (virtualized lists, accordions) instead of paying create/destroy each time
 - **OffscreenCanvas** — all rendering happens off the main thread
@@ -408,6 +409,50 @@ getLifecycleStats();
 
 Pair it with `recyclePool.stats` (below) to tell cold-create storms apart from
 resize storms.
+
+### Pausing off-screen charts (`pauseWhenOffscreen`)
+
+In a tall scroll grid most charts are out of view, yet each still pays the
+per-frame render + present cost — the dominant cost on both engines (Firefox's
+fixed per-render overhead, Chromium's present flood). Pass `pauseWhenOffscreen`
+to `<FluxionCanvas>` / `useFluxionCanvas` to **pause a chart's RENDERING while
+it's scrolled off-screen**, via a single shared `IntersectionObserver` for the
+whole grid. It composes with page visibility: a chart renders only while it's
+both on-screen and its tab is visible (a hidden tab now fully stops rendering,
+not just its scrolling clock).
+
+```tsx
+<FluxionCanvas pauseWhenOffscreen layers={[/* … */]} hostOptions={{ pool }} />
+```
+
+**Data is never paused — only the paint is.** Samples keep streaming into the
+worker's ring buffer while a chart is off-screen, so scrolling it back into view
+**repaints the full buffered history in one frame** rather than starting empty
+at the moment it reappeared. There is nothing to backfill (contrast the
+staggered-mount note above, where a *late-created* host genuinely missed the
+stream): here the host exists the whole time and just stops drawing.
+
+The one requirement for "full history on scroll-in" is the usual streaming
+contract — the layer's **ring capacity must cover the visible window** (set
+`capacity`, or `retentionMs` + `maxHz`). If capacity is smaller than the window,
+the oldest in-window samples are evicted while off-screen exactly as they would
+be on-screen; size it so the window fits. (The undersized-capacity warning only
+fires while a chart is rendering, so verify sizing on-screen.)
+
+Tune the shared observer globally — a pre-warm margin so charts paint just
+before they scroll into view (default `"200px"`), and an alternate scroll root
+for a nested scroll pane:
+
+```tsx
+import { configureOnScreenObserver } from '@heojeongbo/fluxion-render/react';
+
+configureOnScreenObserver({ rootMargin: '400px', root: scrollPaneEl });
+```
+
+Opt-in (**default off**) — existing charts render exactly as before. Where no
+`IntersectionObserver` exists (SSR, old runtimes) charts simply always render.
+It's a runtime signal, not construction-fixed, so it composes freely with host
+recycling.
 
 ### WebGL renderer (`renderer: 'webgl'`) — the Firefox prescription
 

@@ -335,6 +335,96 @@ describe("Scheduler", () => {
     rafSpy.mockRestore();
   });
 
+  it("setPaused suspends rendering, latches dirty, and resumes on unpause", () => {
+    const tick = vi.fn();
+    const s = new Scheduler(tick);
+    s.start();
+    s.setPaused(true);
+
+    // Dirty while paused: latched, but NO frame fires.
+    s.markDirty();
+    vi.advanceTimersByTime(100);
+    expect(tick).not.toHaveBeenCalled();
+
+    // Resume: the latched dirty renders in one frame (full-history catch-up).
+    s.setPaused(false);
+    vi.advanceTimersByTime(20);
+    expect(tick).toHaveBeenCalledTimes(1);
+    s.stop();
+  });
+
+  it("does not wake the driver on markDirty while paused (no wasted frames)", () => {
+    const rafSpy = vi.spyOn(globalThis, "requestAnimationFrame");
+    const tick = vi.fn();
+    const s = new Scheduler(tick);
+    s.start();
+    // Drain the start() wake so the loop is idle before we pause.
+    vi.advanceTimersByTime(40);
+    s.setPaused(true);
+    const settled = rafSpy.mock.calls.length;
+
+    s.markDirty();
+    s.markDirty();
+    vi.advanceTimersByTime(200);
+    // Paused markDirty must schedule NOTHING — an off-screen chart can't burn a
+    // frame per incoming data message.
+    expect(rafSpy.mock.calls.length).toBe(settled);
+    expect(tick).not.toHaveBeenCalled();
+    s.stop();
+    rafSpy.mockRestore();
+  });
+
+  it("setPaused(false) with nothing pending schedules no frame", () => {
+    const rafSpy = vi.spyOn(globalThis, "requestAnimationFrame");
+    const tick = vi.fn();
+    const s = new Scheduler(tick);
+    s.start();
+    vi.advanceTimersByTime(40); // idle
+    s.setPaused(true);
+    const settled = rafSpy.mock.calls.length;
+    s.setPaused(false); // no dirty, not continuous → no wake
+    vi.advanceTimersByTime(100);
+    expect(rafSpy.mock.calls.length).toBe(settled);
+    expect(tick).not.toHaveBeenCalled();
+    s.stop();
+    rafSpy.mockRestore();
+  });
+
+  it("pause suspends a continuous loop; resume restores it", () => {
+    const tick = vi.fn();
+    const s = new Scheduler(tick);
+    s.start();
+    s.setContinuous(true);
+    vi.advanceTimersByTime(40);
+    const before = tick.mock.calls.length;
+    expect(before).toBeGreaterThanOrEqual(1);
+
+    s.setPaused(true);
+    vi.advanceTimersByTime(200);
+    expect(tick.mock.calls.length).toBe(before); // continuous frozen while paused
+
+    s.setPaused(false);
+    vi.advanceTimersByTime(40);
+    expect(tick.mock.calls.length).toBeGreaterThan(before); // resumes scrolling
+    s.stop();
+  });
+
+  it("setContinuous(true) while paused does not wake the driver", () => {
+    const rafSpy = vi.spyOn(globalThis, "requestAnimationFrame");
+    const tick = vi.fn();
+    const s = new Scheduler(tick);
+    s.start();
+    vi.advanceTimersByTime(40);
+    s.setPaused(true);
+    const settled = rafSpy.mock.calls.length;
+    s.setContinuous(true); // paused → must not schedule
+    vi.advanceTimersByTime(100);
+    expect(rafSpy.mock.calls.length).toBe(settled);
+    expect(tick).not.toHaveBeenCalled();
+    s.stop();
+    rafSpy.mockRestore();
+  });
+
   it("setMaxFps(undefined) / non-positive restores uncapped rendering", () => {
     const tick = vi.fn();
     const s = new Scheduler(tick);

@@ -1447,6 +1447,223 @@ describe("Engine", () => {
     });
   });
 
+  describe("viewability gating (SET_ON_SCREEN + SET_VISIBLE)", () => {
+    function frameCount(ctx: FakeCtx): number {
+      return ctx.calls.filter((c) => c.name === "fillRect").length;
+    }
+    function lineTos(ctx: FakeCtx): number {
+      return ctx.calls.filter((c) => c.name === "lineTo").length;
+    }
+    function ctxOf(canvas: OffscreenCanvas): FakeCtx {
+      return (canvas as unknown as { getContext: () => FakeCtx }).getContext();
+    }
+    // An axis layer that only controls bounds (no grid/axis/label draws), so the
+    // ONLY moveTo/lineTo in a frame come from the line layer — makes "was the
+    // full history drawn?" a clean lineTo count.
+    function initLineChart(engine: Engine, canvas: OffscreenCanvas): void {
+      engine.dispatch({ op: Op.INIT, canvas, width: 100, height: 100, dpr: 1 });
+      engine.dispatch({
+        op: Op.ADD_LAYER,
+        id: "axis",
+        kind: "axis-grid",
+        config: {
+          xRange: [0, 1000],
+          yRange: [-1, 1],
+          showXGrid: false,
+          showYGrid: false,
+          showAxes: false,
+          showXLabels: false,
+          showYLabels: false,
+        },
+      });
+      engine.dispatch({
+        op: Op.ADD_LAYER,
+        id: "line",
+        kind: "line",
+        config: { color: "#4fc3f7", capacity: 64 },
+      });
+    }
+    function pushSamples(engine: Engine, samples: number[]): void {
+      const buf = new Float32Array(samples);
+      engine.dispatch({
+        op: Op.DATA,
+        id: "line",
+        buffer: buf.buffer,
+        dtype: "f32",
+        length: buf.length,
+      });
+    }
+
+    it("[guarantee] off-screen keeps buffering; on-screen paints the FULL history in one frame", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(100, 100);
+      initLineChart(engine, canvas);
+      flushFrame();
+      const ctx = ctxOf(canvas);
+
+      // Scroll off-screen, then stream 6 samples across 3 messages (≈ the user's
+      // "data has been arriving for 20s while hidden" scenario).
+      engine.dispatch({ op: Op.SET_ON_SCREEN, onScreen: false });
+      flushFrame();
+      ctx.calls.length = 0;
+      pushSamples(engine, [100, 0.1, 200, 0.2]);
+      flushFrame();
+      pushSamples(engine, [300, 0.3, 400, 0.4]);
+      flushFrame();
+      pushSamples(engine, [500, 0.5, 600, 0.6]);
+      flushFrame();
+      // Paused: nothing painted, no data lost.
+      expect(frameCount(ctx)).toBe(0);
+      expect(lineTos(ctx)).toBe(0);
+
+      // Scroll back into view: ONE frame renders all 6 buffered samples
+      // (moveTo + 5 lineTo) — NOT an empty chart starting at the last message.
+      engine.dispatch({ op: Op.SET_ON_SCREEN, onScreen: true });
+      ctx.calls.length = 0;
+      flushFrame();
+      expect(frameCount(ctx)).toBe(1);
+      expect(ctx.calls.filter((c) => c.name === "moveTo").length).toBe(1);
+      expect(lineTos(ctx)).toBe(5); // full 6-sample history, one polyline
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
+    it("page-hidden (SET_VISIBLE false) also fully pauses dirty renders, not just the clock loop", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(100, 100);
+      initLineChart(engine, canvas);
+      flushFrame();
+      const ctx = ctxOf(canvas);
+
+      engine.dispatch({ op: Op.SET_VISIBLE, visible: false });
+      flushFrame();
+      ctx.calls.length = 0;
+      pushSamples(engine, [100, 0.1, 200, 0.2]);
+      flushFrame();
+      expect(frameCount(ctx)).toBe(0); // no paint while the tab is hidden
+
+      engine.dispatch({ op: Op.SET_VISIBLE, visible: true });
+      ctx.calls.length = 0;
+      flushFrame();
+      expect(frameCount(ctx)).toBe(1);
+      expect(lineTos(ctx)).toBe(1); // both buffered samples drawn
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
+    it("renders only when BOTH visible and on-screen (AND of the two signals)", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(100, 100);
+      initLineChart(engine, canvas);
+      flushFrame();
+      const ctx = ctxOf(canvas);
+
+      engine.dispatch({ op: Op.SET_VISIBLE, visible: false });
+      engine.dispatch({ op: Op.SET_ON_SCREEN, onScreen: false });
+      flushFrame();
+      ctx.calls.length = 0;
+
+      // Flip only visible → still off-screen → paused.
+      engine.dispatch({ op: Op.SET_VISIBLE, visible: true });
+      pushSamples(engine, [100, 0.1, 200, 0.2]);
+      flushFrame();
+      expect(frameCount(ctx)).toBe(0);
+
+      // Now also on-screen → both true → renders.
+      engine.dispatch({ op: Op.SET_ON_SCREEN, onScreen: true });
+      ctx.calls.length = 0;
+      flushFrame();
+      expect(frameCount(ctx)).toBe(1);
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
+    it("a redundant SET_ON_SCREEN(true) while already renderable forces no frame (transition guard)", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(100, 100);
+      initLineChart(engine, canvas);
+      pushSamples(engine, [100, 0.1, 200, 0.2]);
+      flushFrame();
+      flushFrame(); // settle to idle
+      const ctx = ctxOf(canvas);
+      ctx.calls.length = 0;
+
+      // onScreen is already true → no transition → must NOT markDirty (which
+      // would also re-anchor a live follow-clock window and make it jump).
+      engine.dispatch({ op: Op.SET_ON_SCREEN, onScreen: true });
+      flushFrame();
+      expect(frameCount(ctx)).toBe(0);
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
+    it("SET_ON_SCREEN false suspends continuous render; true resumes it (follow-clock re-anchor)", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(100, 100);
+      engine.dispatch({ op: Op.INIT, canvas, width: 100, height: 100, dpr: 1 });
+      engine.dispatch({
+        op: Op.ADD_LAYER,
+        id: "axis",
+        kind: "axis-grid",
+        config: {
+          xMode: "time",
+          timeWindowMs: 1000,
+          timeOrigin: 1_000_000,
+          followClock: true,
+          yRange: [-1, 1],
+        },
+      });
+      flushFrame();
+      const ctx = ctxOf(canvas);
+
+      engine.dispatch({ op: Op.SET_ON_SCREEN, onScreen: false });
+      flushFrame();
+      ctx.calls.length = 0;
+      flushFrame();
+      expect(frameCount(ctx)).toBe(0); // continuous loop frozen off-screen
+
+      engine.dispatch({ op: Op.SET_ON_SCREEN, onScreen: true });
+      flushFrame();
+      ctx.calls.length = 0;
+      flushFrame();
+      expect(frameCount(ctx)).toBeGreaterThanOrEqual(1);
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
+    it("RESET clears a stale off-screen pause so a recycled host renders (no wedge)", () => {
+      // Repro of the recycle wedge: a pauseWhenOffscreen host parked while
+      // scrolled off (onScreen=false) then reused by a PLAIN mount that never
+      // sends SET_ON_SCREEN. Without reset restoring onScreen, the engine would
+      // stay paused forever. Sequence mirrors park (RESET + SET_VISIBLE false)
+      // then acquire (SET_VISIBLE true, re-add layers, DATA) with NO SET_ON_SCREEN.
+      const engine = new Engine();
+      const canvas = newCanvas(100, 100);
+      initLineChart(engine, canvas);
+      flushFrame();
+
+      engine.dispatch({ op: Op.SET_ON_SCREEN, onScreen: false }); // scrolled off
+      // Park: reset() then SET_VISIBLE(false).
+      engine.dispatch({ op: Op.RESET });
+      engine.dispatch({ op: Op.SET_VISIBLE, visible: false });
+      // Acquire by a plain (non-pauseWhenOffscreen) mount: re-hydrate, resume.
+      initLineChart(engine, canvas);
+      engine.dispatch({ op: Op.SET_VISIBLE, visible: true });
+      const ctx = ctxOf(canvas);
+      ctx.calls.length = 0;
+      pushSamples(engine, [100, 0.1, 200, 0.2]);
+      flushFrame();
+      expect(frameCount(ctx)).toBe(1); // renders — not wedged paused
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
+    it("SET_ON_SCREEN is a harmless no-op with no axis layer", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(100, 100);
+      engine.dispatch({ op: Op.INIT, canvas, width: 100, height: 100, dpr: 1 });
+      expect(() => {
+        engine.dispatch({ op: Op.SET_ON_SCREEN, onScreen: false });
+        engine.dispatch({ op: Op.SET_ON_SCREEN, onScreen: true });
+      }).not.toThrow();
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+  });
+
   describe("pre-init guards + flat range", () => {
     it("RESIZE before INIT is a harmless no-op (no canvas)", () => {
       const engine = new Engine();

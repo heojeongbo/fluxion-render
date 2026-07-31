@@ -10,6 +10,12 @@ export class Scheduler implements FrameSubscriber {
   private dirty = false;
   private continuous = false;
   private running = false;
+  // Hard render suspend, distinct from the fps cap. While paused, `onFrame`
+  // ticks NOTHING and does not consume `dirty`, so the shared driver idle-stops
+  // this engine entirely — used when a chart is off-screen or its tab is hidden.
+  // `dirty` stays latched across the pause, so a single frame on resume repaints
+  // the full buffered history (no data gap: ingestion is never gated on this).
+  private paused = false;
   private readonly driver: FrameDriver;
   private readonly tick: (dirty: boolean) => void;
   // Render-rate cap. 0 = uncapped (render on every dirty/continuous frame, the
@@ -38,11 +44,24 @@ export class Scheduler implements FrameSubscriber {
   setContinuous(on: boolean) {
     this.continuous = on;
     // Wake the loop immediately so the first continuous frame doesn't wait for
-    // an external markDirty.
-    if (on) {
+    // an external markDirty. Never wake while paused — a paused engine renders
+    // nothing until resumed.
+    if (on && !this.paused) {
       this.dirty = true;
       if (this.running) this.driver.wake();
     }
+  }
+
+  /**
+   * Hard-suspend or resume rendering, independent of the fps cap. While paused,
+   * {@link onFrame} skips the tick without consuming `dirty` and reports no need
+   * for frames, so the shared driver idles this engine. On resume, a latched
+   * `dirty` (or continuous mode) wakes the driver so the pending frame renders
+   * immediately — the full history buffered while paused paints in one frame.
+   */
+  setPaused(on: boolean) {
+    this.paused = on;
+    if (!on && this.running && (this.dirty || this.continuous)) this.driver.wake();
   }
 
   start() {
@@ -59,7 +78,10 @@ export class Scheduler implements FrameSubscriber {
 
   markDirty() {
     this.dirty = true;
-    if (this.running) this.driver.wake();
+    // Latch the dirty flag even while paused (so resume repaints), but don't
+    // wake the driver — a paused, off-screen chart must not burn a frame per
+    // incoming data message.
+    if (this.running && !this.paused) this.driver.wake();
   }
 
   /**
@@ -93,6 +115,9 @@ export class Scheduler implements FrameSubscriber {
    * public semantics. Returns whether this scheduler still needs frames.
    */
   onFrame(): boolean {
+    // Paused: render nothing and keep `dirty` latched (do NOT consume it), and
+    // report no need for frames so the shared driver idle-stops this engine.
+    if (this.paused) return false;
     if ((this.continuous || this.dirty) && this.shouldRender()) {
       const wasDirty = this.dirty;
       this.dirty = false;

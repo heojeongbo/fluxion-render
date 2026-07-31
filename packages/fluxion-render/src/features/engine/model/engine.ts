@@ -114,10 +114,18 @@ export class Engine {
   // Layer ids already warned as unsupported under webgl (cleared on RESET).
   private readonly glWarned = new Set<string>();
   private bgColor = "#0b0d12";
-  // Page visibility, driven by the host's `visibilitychange`. While false, the
-  // follow-clock continuous render loop is suspended (CPU/battery), regardless
-  // of whether an axis layer is following the clock.
+  // Two orthogonal viewability signals. The engine renders only while BOTH are
+  // true (see `applyViewability`): a hidden tab OR a scrolled-off chart fully
+  // suspends the render loop, while data keeps flowing into the ring.
+  // `visible`  — page visibility, driven by the host's `visibilitychange`.
+  // `onScreen` — per-chart intersection, driven by the `pauseWhenOffscreen`
+  //   IntersectionObserver (SET_ON_SCREEN). Defaults true, so charts that never
+  //   opt in are unaffected.
   private visible = true;
+  private onScreen = true;
+  // Cached `visible && onScreen`, so `applyViewability` acts only on real
+  // transitions (a redundant SET must not re-anchor the follow-clock window).
+  private renderable = true;
   // Worker→main notifications. Default on; a host with no bounds/tick consumer
   // (e.g. a large thumbnail grid with externalAxes=false) can disable them to
   // skip per-frame postMessage + tick computation.
@@ -248,14 +256,12 @@ export class Engine {
       }
       case Op.SET_VISIBLE: {
         this.visible = msg.visible;
-        if (msg.visible) {
-          // Re-anchor the follow-clock window to the current wall clock so it
-          // jumps once to true "now" (elapsed hidden time is real) instead of
-          // resuming from a stale anchor.
-          this.axisLayer?.resetClockAnchor();
-          this.scheduler.markDirty();
-        }
-        this.syncContinuousMode();
+        this.applyViewability();
+        break;
+      }
+      case Op.SET_ON_SCREEN: {
+        this.onScreen = msg.onScreen;
+        this.applyViewability();
         break;
       }
       case Op.RESET:
@@ -314,6 +320,16 @@ export class Engine {
     this.rsRenders = 0;
     this.rsBusyMs = 0;
     this.rsWindowStart = -1;
+    // Restore the per-chart on-screen signal to its pristine default. `visible`
+    // is re-driven by the host (park sends SET_VISIBLE false, acquire true), but
+    // `onScreen` is only re-sent for pauseWhenOffscreen mounts — so a host parked
+    // while scrolled off (onScreen=false) and recycled into a plain mount would
+    // stay wedged paused forever. Resetting here (and recomputing renderable /
+    // unpausing to match `visible`) keeps a recycled engine indistinguishable
+    // from a fresh one, whatever the next tenant's options.
+    this.onScreen = true;
+    this.renderable = this.visible;
+    this.scheduler.setPaused(!this.renderable);
     this.syncContinuousMode();
     this.scheduler.markDirty();
   }
@@ -662,9 +678,31 @@ export class Engine {
    */
   private syncContinuousMode(): void {
     const follow = this.axisLayer?.isFollowingClock() ?? false;
-    // Suspend the continuous loop while the page is hidden — no point scrolling
-    // an axis nobody can see, and it saves CPU/battery.
-    this.scheduler.setContinuous(this.visible && follow);
+    // Suspend the continuous loop whenever the chart isn't viewable (hidden tab
+    // or scrolled off-screen) — no point scrolling an axis nobody can see, and
+    // it saves CPU/battery.
+    this.scheduler.setContinuous(this.visible && this.onScreen && follow);
+  }
+
+  /**
+   * Apply a change to either viewability signal (`visible`/`onScreen`). Renders
+   * iff both are true. Acts only on a real transition so a redundant SET doesn't
+   * re-anchor a live follow-clock window (which would visibly jump). On becoming
+   * renderable, re-anchors the follow-clock window to the current wall clock
+   * (elapsed off-screen time is real) and marks dirty so one frame repaints the
+   * full history buffered while paused. On becoming non-renderable, hard-pauses
+   * the scheduler — data ingestion continues untouched, only the paint stops.
+   */
+  private applyViewability(): void {
+    const next = this.visible && this.onScreen;
+    if (next === this.renderable) return;
+    this.renderable = next;
+    this.scheduler.setPaused(!next);
+    this.syncContinuousMode();
+    if (next) {
+      this.axisLayer?.resetClockAnchor();
+      this.scheduler.markDirty();
+    }
   }
 
   pushRaw(layerId: string, data: Float32Array): void {

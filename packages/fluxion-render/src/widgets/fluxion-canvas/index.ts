@@ -3,6 +3,10 @@ export {
   getLifecycleStats,
   type LifecycleSchedulerStats,
 } from "../../shared/lib/lifecycle-scheduler";
+export {
+  configureOnScreenObserver,
+  type OnScreenObserveOptions,
+} from "../../shared/lib/onscreen-observer";
 export { type CapacityAdvisory, checkCapacity } from "./lib/check-capacity";
 export {
   areaLayer,

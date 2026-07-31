@@ -32,6 +32,7 @@ import {
   enqueueMount,
   scheduleResize,
 } from "../../../shared/lib/lifecycle-scheduler";
+import { observeOnScreen } from "../../../shared/lib/onscreen-observer";
 import { type ResizeInfo, useResizeObserver } from "./use-resize-observer";
 
 /**
@@ -109,6 +110,21 @@ export interface UseFluxionCanvasOptions {
    * the worker pool identity + axis-canvas presence + render options.
    */
   recycleKey?: string;
+  /**
+   * Pause a chart's RENDERING while it is scrolled off-screen, via a shared
+   * IntersectionObserver — the big win for tall scroll grids where most charts
+   * are out of view (the off-screen render/present cost is the dominant one on
+   * both Firefox and Chromium). Data is NOT paused: samples keep streaming into
+   * the worker's ring while off-screen, so a chart scrolled back into view
+   * repaints its full buffered history in one frame rather than starting empty
+   * — provided the layer's ring capacity covers the visible window (the usual
+   * contract). Composes with page visibility: a chart renders only when both
+   * on-screen and its tab is visible.
+   *
+   * **Default `false`.** Tune the pre-warm margin / scroll root globally with
+   * {@link configureOnScreenObserver}.
+   */
+  pauseWhenOffscreen?: boolean;
 }
 
 export interface UseFluxionCanvasResult {
@@ -213,6 +229,11 @@ export function useFluxionCanvas(
   // remount, and an unchanged value across a grid never spams postMessages.
   const appliedBgRef = useRef<string | undefined>(undefined);
   const appliedAxisRef = useRef<string>("null");
+  // Latest on-screen state from the pauseWhenOffscreen observer, applied to the
+  // host as soon as it exists (the host is created deferred, and the observer's
+  // initial callback can fire before then). Optimistic true so a chart mounted
+  // in view renders immediately.
+  const onScreenRef = useRef(true);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -296,6 +317,7 @@ export function useFluxionCanvas(
         host.setVisible(true);
         seedReconcile();
         hostRef.current = host;
+        if (current.pauseWhenOffscreen) host.setOnScreen(onScreenRef.current);
         setHost(host);
         current.onReady?.(host);
       };
@@ -325,6 +347,7 @@ export function useFluxionCanvas(
           key: recyclePool ? recyclePool.keyFor(keyParams) : "",
         };
         hostRef.current = host;
+        if (current.pauseWhenOffscreen) host.setOnScreen(onScreenRef.current);
         setHost(host);
         current.onReady?.(host);
       };
@@ -336,7 +359,20 @@ export function useFluxionCanvas(
     const cancelMount = stagger ? enqueueMount(work) : null;
     if (!cancelMount) work();
 
+    // pauseWhenOffscreen: observe the container (present synchronously, and
+    // re-parented — not swapped — across recycles) and forward its on-screen
+    // state to the host as soon as it exists. Only rendering pauses; data keeps
+    // streaming into the ring, so scrolling back into view shows full history.
+    let unobserve: (() => void) | undefined;
+    if (current.pauseWhenOffscreen) {
+      unobserve = observeOnScreen(container, (onScreen) => {
+        onScreenRef.current = onScreen;
+        hostRef.current?.setOnScreen(onScreen);
+      });
+    }
+
     return () => {
+      unobserve?.();
       // Cancel a not-yet-run deferred work item first, then recycle/dispose the
       // live bundle if one exists.
       cancelled = true;

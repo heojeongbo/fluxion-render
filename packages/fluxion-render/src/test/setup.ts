@@ -8,6 +8,7 @@
 import { afterEach } from "vitest";
 import { resetFlushScheduler } from "../shared/lib/flush-scheduler";
 import { labelMetaOf, resetLabelCache } from "../shared/lib/label-cache";
+import { resetOnScreenObserver } from "../shared/lib/onscreen-observer";
 import { resetFrameDriver } from "../shared/model/frame-driver";
 
 // The frame singletons (shared flush scheduler, shared frame driver) and the
@@ -21,6 +22,8 @@ afterEach(() => {
   resetFlushScheduler();
   resetFrameDriver();
   resetLabelCache();
+  resetOnScreenObserver();
+  fakeIntersectionObservers.length = 0;
 });
 
 export interface CtxCall {
@@ -343,6 +346,69 @@ class FakeResizeObserver {
 }
 // biome-ignore lint: installing global stub
 (globalThis as any).ResizeObserver = FakeResizeObserver;
+
+/**
+ * Call-recording IntersectionObserver stub. Happy-DOM ships no Intersection
+ * observer, and the `pauseWhenOffscreen` path needs one. Tests drive
+ * intersection changes via {@link triggerIntersection}. Live instances are
+ * tracked so the global afterEach can drop stale ones between tests.
+ */
+export interface FakeIntersectionEntry {
+  target: Element;
+  isIntersecting: boolean;
+}
+const fakeIntersectionObservers: FakeIntersectionObserver[] = [];
+
+class FakeIntersectionObserver {
+  readonly callback: (entries: FakeIntersectionEntry[]) => void;
+  readonly options: IntersectionObserverInit | undefined;
+  readonly elements = new Set<Element>();
+  disconnected = false;
+  constructor(
+    callback: (entries: FakeIntersectionEntry[]) => void,
+    options?: IntersectionObserverInit,
+  ) {
+    this.callback = callback;
+    this.options = options;
+    fakeIntersectionObservers.push(this);
+  }
+  observe(el: Element): void {
+    this.elements.add(el);
+  }
+  unobserve(el: Element): void {
+    this.elements.delete(el);
+  }
+  disconnect(): void {
+    this.elements.clear();
+    this.disconnected = true;
+  }
+  takeRecords(): [] {
+    return [];
+  }
+}
+// biome-ignore lint: installing global stub
+(globalThis as any).IntersectionObserver = FakeIntersectionObserver;
+
+/**
+ * Fire an intersection change for `el` on every live observer watching it.
+ * With `foreignTarget`, delivers an entry whose target was never observed by
+ * that observer (exercises the "callback for an unregistered element" guard).
+ */
+export function triggerIntersection(
+  el: Element,
+  isIntersecting: boolean,
+  opts?: { foreignTarget?: Element },
+): void {
+  for (const io of fakeIntersectionObservers) {
+    if (io.disconnected || !io.elements.has(el)) continue;
+    io.callback([{ target: opts?.foreignTarget ?? el, isIntersecting }]);
+  }
+}
+
+/** Test seam: live (non-disconnected) fake IntersectionObserver instances. */
+export function liveIntersectionObservers(): FakeIntersectionObserver[] {
+  return fakeIntersectionObservers.filter((io) => !io.disconnected);
+}
 
 export interface LabelDraw {
   text: string;

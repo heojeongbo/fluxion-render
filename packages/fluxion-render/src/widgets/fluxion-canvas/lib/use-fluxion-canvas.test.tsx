@@ -8,6 +8,7 @@ import {
   resetLifecycleScheduler,
 } from "../../../shared/lib/lifecycle-scheduler";
 import { Op } from "../../../shared/protocol";
+import { liveIntersectionObservers, triggerIntersection } from "../../../test/setup";
 import { type FluxionLayerSpec, useFluxionCanvas } from "./use-fluxion-canvas";
 
 interface RecordedPost {
@@ -889,5 +890,99 @@ describe("useFluxionCanvas theme reconcile (bgColor / axisStyle)", () => {
     // key changes ("{…}" → "null") but there is no style object to send.
     rerender(<ThemeHarness workerFactory={factory} axisStyle={undefined} />);
     expect(ops(posts)).not.toContain(Op.SET_AXIS_STYLE);
+  });
+
+  describe("pauseWhenOffscreen", () => {
+    function PauseHarness({
+      workerFactory,
+      pauseWhenOffscreen = true,
+      staggerMount = false,
+      recyclePool,
+    }: {
+      workerFactory: () => Worker;
+      pauseWhenOffscreen?: boolean;
+      staggerMount?: boolean;
+      recyclePool?: ReturnType<typeof createHostRecyclePool>;
+    }) {
+      const { containerRef } = useFluxionCanvas({
+        layers: [{ id: "line", kind: "line", config: { color: "#fff" } }],
+        hostOptions: { workerFactory },
+        staggerMount,
+        pauseWhenOffscreen,
+        recyclePool,
+      });
+      return (
+        <div ref={containerRef} data-testid="chart" style={{ width: 200, height: 100 }} />
+      );
+    }
+    const onScreenPosts = (posts: RecordedPost[]) =>
+      posts
+        .filter((p) => (p.msg as { op: number }).op === Op.SET_ON_SCREEN)
+        .map((p) => (p.msg as { onScreen: boolean }).onScreen);
+
+    afterEach(() => {
+      resetLifecycleScheduler();
+    });
+
+    it("forwards container intersection changes to host.setOnScreen", () => {
+      const { factory, posts } = makeFakeWorkerFactory();
+      const { container, unmount } = render(<PauseHarness workerFactory={factory} />);
+      const el = container.querySelector('[data-testid="chart"]')!;
+      // Seed on create is optimistic (true); scrolling then drives the flag.
+      act(() => triggerIntersection(el, false));
+      act(() => triggerIntersection(el, true));
+      expect(onScreenPosts(posts)).toEqual([true, false, true]);
+      unmount();
+    });
+
+    it("registers no observer when the option is off", () => {
+      const { factory, posts } = makeFakeWorkerFactory();
+      const { unmount } = render(
+        <PauseHarness workerFactory={factory} pauseWhenOffscreen={false} />,
+      );
+      expect(liveIntersectionObservers()).toHaveLength(0);
+      expect(onScreenPosts(posts)).toEqual([]);
+      unmount();
+    });
+
+    it("unobserves on unmount", () => {
+      const { factory } = makeFakeWorkerFactory();
+      const { unmount } = render(<PauseHarness workerFactory={factory} />);
+      expect(liveIntersectionObservers()).toHaveLength(1);
+      unmount();
+      expect(liveIntersectionObservers()).toHaveLength(0);
+    });
+
+    it("seeds a deferred (staggered) host with the state observed before it existed", () => {
+      const { factory, posts } = makeFakeWorkerFactory();
+      const { container, unmount } = render(
+        <PauseHarness workerFactory={factory} staggerMount />,
+      );
+      const el = container.querySelector('[data-testid="chart"]')!;
+      // Observer reports off-screen BEFORE the deferred host is created.
+      act(() => triggerIntersection(el, false));
+      expect(posts.some((p) => (p.msg as { op: number }).op === Op.INIT)).toBe(false);
+      // Flush the mount queue → host created → seed applies the latched state.
+      act(() => flushLifecycleScheduler());
+      expect(onScreenPosts(posts).at(-1)).toBe(false);
+      unmount();
+    });
+
+    it("re-seeds on-screen state when a warm host is recycled", () => {
+      const { factory, posts } = makeFakeWorkerFactory();
+      const pool = createHostRecyclePool();
+      const first = render(<PauseHarness workerFactory={factory} recyclePool={pool} />);
+      first.unmount(); // parks the warm host
+      expect(pool.size).toBe(1);
+
+      posts.length = 0;
+      const second = render(<PauseHarness workerFactory={factory} recyclePool={pool} />);
+      // Warm reactivation re-drives on-screen state (no re-INIT).
+      const reinit = posts.filter((p) => (p.msg as { op: number }).op === Op.INIT);
+      expect(reinit).toHaveLength(0);
+      expect(onScreenPosts(posts)).toContain(true);
+      second.unmount();
+      pool.dispose();
+    });
   });
 });

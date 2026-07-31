@@ -427,6 +427,22 @@ export class FluxionHost {
   }
 
   /**
+   * Tell the worker engine whether this host's chart is currently ON SCREEN,
+   * orthogonal to page visibility ({@link setVisible}). The engine renders only
+   * while both are true, so a scrolled-off chart fully pauses its render loop.
+   * Driven by the `pauseWhenOffscreen` IntersectionObserver in the React hook.
+   *
+   * Crucially this gates only RENDERING — staged/incoming samples keep flowing
+   * into the worker's ring (the page is visible, so the shared flush frame
+   * still drains every frame), so a chart scrolled back into view repaints its
+   * full buffered history in one frame rather than starting empty.
+   */
+  setOnScreen(onScreen: boolean): void {
+    if (this.disposed) return;
+    this.post({ op: Op.SET_ON_SCREEN, onScreen });
+  }
+
+  /**
    * Reset the host to a pristine, just-constructed state WITHOUT tearing down the
    * worker engine or its OffscreenCanvas binding — the basis of host recycling
    * (see `createHostRecyclePool`). Drops every layer worker-side (RESET), discards
