@@ -425,6 +425,23 @@ not just its scrolling clock).
 <FluxionCanvas pauseWhenOffscreen layers={[/* … */]} hostOptions={{ pool }} />
 ```
 
+Measured with `scroll-bench` (headed, dpr 2, grid scrolled so most charts are
+off-screen, one shared feed pushing to *every* chart in both cases — so the
+delta is pure render saving; median of 3). Aggregate worker render time summed
+across all engines:
+
+| Browser | Charts | Worker busy `off` | Worker busy `on` | Reduction |
+|---|---|---|---|---|
+| Chromium | 60 | 78 ms/s | 15 ms/s | **−80 %** |
+| Chromium | 200 | 147 ms/s | 24 ms/s | **−84 %** |
+| Firefox | 60 | 1135 ms/s | 208 ms/s | **−82 %** |
+| Firefox | 200 | 4340 ms/s | 255 ms/s | **−94 %** |
+
+Renders/sec drops from ~1300–4500 to ~110 (only the on-screen charts still
+draw), and the saving scales with the off-screen fraction. Firefox's absolute
+numbers are ~15× Chromium's (its fixed per-render cost), so the absolute relief
+is largest exactly where it hurts most.
+
 **Data is never paused — only the paint is.** Samples keep streaming into the
 worker's ring buffer while a chart is off-screen, so scrolling it back into view
 **repaints the full buffered history in one frame** rather than starting empty
@@ -997,6 +1014,10 @@ const { containerRef, host } = useFluxionCanvas({
   recyclePool?: HostRecyclePool,    // reuse warm hosts on mount/unmount instead of
   recycleKey?: string,              // create/destroy — see "Recycling hosts under
                                     // heavy churn" in Performance / many charts
+  pauseWhenOffscreen?: boolean,     // pause rendering while scrolled off-screen
+                                    // (default false; data keeps buffering) — see
+                                    // "Pausing off-screen charts". Tune the shared
+                                    // observer with configureOnScreenObserver.
 });
 ```
 
