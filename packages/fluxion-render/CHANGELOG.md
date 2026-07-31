@@ -1,5 +1,14 @@
 # Changelog
 
+# [1.3.0](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v1.2.0...fluxion-render-v1.3.0) (2026-07-31)
+
+
+### Features
+
+* **examples:** scroll-bench harness + shared-feed scroll-grid demo ([573930e](https://github.com/HeoJeongBo/fluxion-render/commit/573930e0e4602ff97e0f1bf84d38294310c0c139))
+* **examples:** scroll-grid demo for pauseWhenOffscreen ([b3a50a9](https://github.com/HeoJeongBo/fluxion-render/commit/b3a50a9a8b694a90ad12e386837531cbdbf9146b))
+* **render:** pause off-screen chart rendering (pauseWhenOffscreen, IntersectionObserver) ([9f17038](https://github.com/HeoJeongBo/fluxion-render/commit/9f170389bd3e84dbfcc980f79c6ceed4e42ff176))
+
 # [1.2.0](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v1.1.0...fluxion-render-v1.2.0) (2026-07-30)
 
 
