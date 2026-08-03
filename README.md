@@ -67,6 +67,7 @@ ReplayPlayer   ──► VirtualClock (RAF) → prefetch → onFrame()
 - `inlineAxes` mode draws axes into main-canvas margins — ONE compositor surface per chart instead of up to three
 - `renderer: 'webgl'` backend bypasses Firefox's fixed ~1 ms/render worker-canvas2d cost with GPU line/grid/label programs (Firefox-targeted)
 - `pauseWhenOffscreen` stops rendering scrolled-out charts (shared IntersectionObserver) while data keeps buffering — scrolling back shows full history; −80 % to −94 % worker render time in a scroll grid
+- `configureFluxionDefaults()` sets app-wide default host options (bgColor, maxFps, renderer, …) once; charts inherit them and per-chart props override — a `bgColor` default also paints the correct background on the first frame (no black flash on light themes)
 - Replay stores up to 10 minutes of any stream in IndexedDB + OPFS
 
 ---
