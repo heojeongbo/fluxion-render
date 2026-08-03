@@ -48,6 +48,55 @@ describe("Engine", () => {
     engine.dispatch({ op: Op.DISPOSE });
   });
 
+  describe("no black flash (opaque 2d backing)", () => {
+    it("fills the backing with bgColor at INIT, before the first scheduled frame", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(200, 130);
+      // The default 2d context is opaque (alpha:false) → the fresh backing is
+      // opaque BLACK. Without a scheduled frame having run yet, it must already
+      // be filled with the (light) bg color, not left black.
+      engine.dispatch({
+        op: Op.INIT,
+        canvas,
+        width: 200,
+        height: 130,
+        dpr: 2,
+        bgColor: "#ffffff",
+      });
+      const ctx = (canvas as unknown as { getContext: () => FakeCtx }).getContext();
+      expect(ctx.calls.some((c) => c.name === "fillRect")).toBe(true);
+      expect(ctx.fillStyle).toBe("#ffffff");
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
+    it("re-fills the backing on a real resize but not on a no-op resize", () => {
+      const engine = new Engine();
+      const canvas = newCanvas(200, 130);
+      engine.dispatch({
+        op: Op.INIT,
+        canvas,
+        width: 200,
+        height: 130,
+        dpr: 1,
+        bgColor: "#ffffff",
+      });
+      const ctx = (canvas as unknown as { getContext: () => FakeCtx }).getContext();
+      const afterInit = ctx.calls.filter((c) => c.name === "fillRect").length;
+
+      // Same size → backing not reallocated → must NOT re-fill (would wipe the
+      // current frame under ResizeObserver same-size re-fires).
+      engine.dispatch({ op: Op.RESIZE, width: 200, height: 130, dpr: 1 });
+      expect(ctx.calls.filter((c) => c.name === "fillRect").length).toBe(afterInit);
+
+      // Real size change → backing reallocated to black → re-fill.
+      engine.dispatch({ op: Op.RESIZE, width: 300, height: 130, dpr: 1 });
+      expect(ctx.calls.filter((c) => c.name === "fillRect").length).toBeGreaterThan(
+        afterInit,
+      );
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+  });
+
   describe("bgColor", () => {
     it("INIT without bgColor uses the dark default #0b0d12", () => {
       const engine = new Engine();

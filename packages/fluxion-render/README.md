@@ -555,6 +555,16 @@ these two on change (seeded at mount, so an unchanged value never re-posts
 across a large grid). Series colors already reconcile through the normal layer
 config path.
 
+**Pass `bgColor` at construction for a correct first frame.** The default
+canvas context is opaque, so the worker fills `bgColor` into the backing
+synchronously at INIT — a light-theme chart paints its background on the very
+first frame instead of flashing the opaque-black default. That fill uses the
+color known at INIT, i.e. `hostOptions.bgColor`. If you instead leave `bgColor`
+unset at mount and apply the theme only via a later `setBgColor` (e.g. after
+resolving CSS variables in an effect), the **first** frame uses the dark default
+`#0b0d12` and the light color lands on the next frame. So resolve the theme
+before mount and pass it in `hostOptions.bgColor`.
+
 **Color format — `oklch()` and CSS variables work.** Every color field
 (`bgColor`, layer `color`, axis `color`) is assigned straight to the canvas
 `fillStyle`/`strokeStyle`, so it accepts any CSS `<color>` the browser's canvas

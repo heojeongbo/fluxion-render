@@ -416,19 +416,38 @@ export class Engine {
     if (opts.emitTicks !== undefined) this.emitTicks = opts.emitTicks;
     if (opts.emitRenderStats !== undefined) this.emitRenderStats = opts.emitRenderStats;
     this.resize(width, height, dpr);
+    // Always clear on init: the freshly created/transferred backing is black
+    // regardless of whether `resize` changed its dimensions (a canvas already
+    // at the target size wouldn't reallocate, so resize's gated clear skips it).
+    this.clearBacking();
     this.scheduler.start();
     this.scheduler.markDirty();
   }
 
   /**
-   * A fresh (or just-resized) opaque WebGL drawing buffer composites as SOLID
-   * BLACK until the first presented frame — under mount/resize churn the
-   * scheduler's first frame can lag, flashing black on light themes. Clear to
-   * the background color synchronously so the first composite already matches.
-   * (canvas2d needs none of this: a fresh 2d backing is transparent.)
+   * A freshly (re)allocated backing composites as SOLID BLACK until the first
+   * rendered frame — the scheduler's first frame is ≥1 rAF after INIT/resize,
+   * so a light-theme chart flashes black in the gap. Fill `bgColor` synchronously
+   * so the first composite already matches. This is NOT WebGL-only: the default
+   * 2d context is opaque (`alpha:false`), whose bitmap also initializes to — and
+   * re-clears on every `canvas.width/height` assignment to — opaque black.
+   * (`transparent:true` → `alpha:true` → transparent init, so there's no black to
+   * hide; filling anyway is harmless — `render2d` fills `bgColor` every frame.)
    */
-  private clearGlBacking(): void {
-    if (this.glr) this.glr.beginFrame(this.bgColor);
+  private clearBacking(): void {
+    if (this.glr) {
+      this.glr.beginFrame(this.bgColor);
+      return;
+    }
+    const ctx = this.ctx;
+    /* v8 ignore start -- init always binds a 2d ctx when glr is null (mirror render2d) */
+    if (!ctx || !this.canvas) return;
+    /* v8 ignore stop */
+    // viewport.setSize hasn't run yet at init/resize time — fill the raw backing
+    // under an identity transform (device px).
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = this.bgColor;
+    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
   private resize(width: number, height: number, dpr: number) {
@@ -438,9 +457,14 @@ export class Engine {
     // re-fire with the same size during layout churn).
     const w = Math.max(1, Math.round(width * dpr));
     const h = Math.max(1, Math.round(height * dpr));
+    // A dimension change reallocates AND clears the backing (to opaque black for
+    // the default alpha:false 2d context / to black for a GL buffer). Only then
+    // does it need a synchronous bg fill — re-filling on a no-op resize (a
+    // ResizeObserver re-firing the same size) would wipe the current frame.
+    const reallocated = this.canvas.width !== w || this.canvas.height !== h;
     if (this.canvas.width !== w) this.canvas.width = w;
     if (this.canvas.height !== h) this.canvas.height = h;
-    this.clearGlBacking();
+    if (reallocated) this.clearBacking();
     this.viewport.setSize(width, height, dpr);
     this.stack.resizeAll(this.viewport);
     this.resizeAxisCanvases(width, height, dpr);
