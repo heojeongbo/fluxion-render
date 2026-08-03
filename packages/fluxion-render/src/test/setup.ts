@@ -6,6 +6,7 @@
  */
 
 import { afterEach } from "vitest";
+import { resetFluxionDefaults } from "../features/host/model/fluxion-defaults";
 import { resetFlushScheduler } from "../shared/lib/flush-scheduler";
 import { labelMetaOf, resetLabelCache } from "../shared/lib/label-cache";
 import { resetOnScreenObserver } from "../shared/lib/onscreen-observer";
@@ -23,6 +24,7 @@ afterEach(() => {
   resetFrameDriver();
   resetLabelCache();
   resetOnScreenObserver();
+  resetFluxionDefaults();
   fakeIntersectionObservers.length = 0;
 });
 

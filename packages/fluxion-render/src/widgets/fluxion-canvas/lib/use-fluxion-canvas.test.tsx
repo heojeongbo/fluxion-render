@@ -1,7 +1,11 @@
 import { act, render } from "@testing-library/react";
 import { StrictMode, useEffect, useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createHostRecyclePool } from "../../../features/host";
+import {
+  configureFluxionDefaults,
+  createHostRecyclePool,
+  resetFluxionDefaults,
+} from "../../../features/host";
 import {
   configureLifecycleScheduler,
   flushLifecycleScheduler,
@@ -982,6 +986,79 @@ describe("useFluxionCanvas theme reconcile (bgColor / axisStyle)", () => {
       expect(reinit).toHaveLength(0);
       expect(onScreenPosts(posts)).toContain(true);
       second.unmount();
+      pool.dispose();
+    });
+  });
+
+  describe("configureFluxionDefaults (app-wide defaults)", () => {
+    function DefaultsHarness({
+      workerFactory,
+      hostOptions,
+      recyclePool,
+    }: {
+      workerFactory: () => Worker;
+      hostOptions?: Parameters<typeof useFluxionCanvas>[0]["hostOptions"];
+      recyclePool?: ReturnType<typeof createHostRecyclePool>;
+    }) {
+      const { containerRef } = useFluxionCanvas({
+        layers: [{ id: "line", kind: "line", config: { color: "#fff" } }],
+        hostOptions: { workerFactory, ...hostOptions },
+        staggerMount: false,
+        recyclePool,
+      });
+      return <div ref={containerRef} style={{ width: 200, height: 100 }} />;
+    }
+    const initOf = (posts: RecordedPost[]) =>
+      posts.find((p) => (p.msg as { op: number }).op === Op.INIT)?.msg as
+        | { bgColor?: string; renderer?: string }
+        | undefined;
+
+    afterEach(() => {
+      resetFluxionDefaults();
+      resetLifecycleScheduler();
+    });
+
+    it("a default bgColor reaches a chart that sets none", () => {
+      configureFluxionDefaults({ bgColor: "#ffffff" });
+      const { factory, posts } = makeFakeWorkerFactory();
+      const { unmount } = render(<DefaultsHarness workerFactory={factory} />);
+      expect(initOf(posts)?.bgColor).toBe("#ffffff");
+      unmount();
+    });
+
+    it("a per-chart bgColor overrides the default", () => {
+      configureFluxionDefaults({ bgColor: "#ffffff" });
+      const { factory, posts } = makeFakeWorkerFactory();
+      const { unmount } = render(
+        <DefaultsHarness workerFactory={factory} hostOptions={{ bgColor: "#101010" }} />,
+      );
+      expect(initOf(posts)?.bgColor).toBe("#101010");
+      unmount();
+    });
+
+    it("a default renderer participates in the recycle key", () => {
+      configureFluxionDefaults({ renderer: "webgl" });
+      const { factory, posts } = makeFakeWorkerFactory();
+      const pool = createHostRecyclePool();
+      // Park a host that inherited the default renderer:'webgl'.
+      const a = render(<DefaultsHarness workerFactory={factory} recyclePool={pool} />);
+      a.unmount();
+      expect(pool.size).toBe(1);
+
+      // A chart with an EXPLICIT renderer:'2d' is a different bucket → cold create
+      // (must NOT reuse the parked webgl host), proving the default is in the key.
+      posts.length = 0;
+      const b = render(
+        <DefaultsHarness
+          workerFactory={factory}
+          recyclePool={pool}
+          hostOptions={{ renderer: "2d" }}
+        />,
+      );
+      expect(posts.filter((p) => (p.msg as { op: number }).op === Op.INIT)).toHaveLength(
+        1,
+      );
+      b.unmount();
       pool.dispose();
     });
   });

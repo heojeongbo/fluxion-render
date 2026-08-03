@@ -3,6 +3,7 @@ import { _resetArityGuard } from "../../../shared/lib/arity-guard";
 import { resetFlushScheduler } from "../../../shared/lib/flush-scheduler";
 import { Op, WorkerOp } from "../../../shared/protocol";
 import { FluxionWorkerHandle, type FluxionWorkerPool } from "../../worker-pool";
+import { configureFluxionDefaults, resetFluxionDefaults } from "./fluxion-defaults";
 import { FluxionHost } from "./fluxion-host";
 
 interface RecordedPost {
@@ -108,6 +109,30 @@ describe("FluxionHost", () => {
     expect((first.msg as { op: number }).op).toBe(Op.INIT);
     expect(first.transfer).toHaveLength(1);
     host.dispose();
+  });
+
+  it("inherits app-wide defaults (configureFluxionDefaults) in INIT; per-host options override", () => {
+    configureFluxionDefaults({ bgColor: "#ffffff", maxFps: 30 });
+    // Direct construction with no bgColor → INIT carries the default.
+    const a = makeFakeWorker();
+    const host = new FluxionHost(makeCanvas(), { workerFactory: () => a.worker });
+    const initA = a.posts[0]!.msg as { op: number; bgColor?: string; maxFps?: number };
+    expect(initA.op).toBe(Op.INIT);
+    expect(initA.bgColor).toBe("#ffffff");
+    expect(initA.maxFps).toBe(30);
+    host.dispose();
+
+    // Per-host bgColor overrides the default; unspecified fields still inherit.
+    const b = makeFakeWorker();
+    const host2 = new FluxionHost(makeCanvas(), {
+      workerFactory: () => b.worker,
+      bgColor: "#000000",
+    });
+    const initB = b.posts[0]!.msg as { bgColor?: string; maxFps?: number };
+    expect(initB.bgColor).toBe("#000000"); // caller wins
+    expect(initB.maxFps).toBe(30); // still inherits the default
+    host2.dispose();
+    resetFluxionDefaults();
   });
 
   it("addLayer / configLayer / removeLayer post the right opcodes", () => {

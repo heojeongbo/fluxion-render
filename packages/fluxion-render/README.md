@@ -565,6 +565,27 @@ resolving CSS variables in an effect), the **first** frame uses the dark default
 `#0b0d12` and the light color lands on the next frame. So resolve the theme
 before mount and pass it in `hostOptions.bgColor`.
 
+**App-wide defaults — `configureFluxionDefaults()`.** Rather than repeat
+`hostOptions={{ bgColor }}` (and `maxFps`, `renderer`, `axisStyle`, …) on every
+chart — and risk forgetting it and getting the black first frame — set them once
+at app startup. Every chart then inherits them; a per-chart `hostOptions` field
+still overrides. Because it feeds the same INIT as `hostOptions.bgColor`, the
+first frame is correctly themed everywhere.
+
+```ts
+import { configureFluxionDefaults } from '@heojeongbo/fluxion-render';
+
+// once, at app entry (before any chart mounts)
+configureFluxionDefaults({ bgColor: theme.canvasBg, maxFps: 30, renderer: 'webgl' });
+```
+
+It accepts any `FluxionHostOptions` fields and accumulates across calls. The
+default is merged before the recycle-pool key is computed, so a default
+`renderer`/`maxFps`/etc. buckets warm hosts correctly. (Set the worker `pool`
+via `configureDefaultPool` instead.) The values are read at chart construction,
+so call it before mounting; per-chart props remain the way to override or to
+re-theme a live chart.
+
 **Color format — `oklch()` and CSS variables work.** Every color field
 (`bgColor`, layer `color`, axis `color`) is assigned straight to the canvas
 `fillStyle`/`strokeStyle`, so it accepts any CSS `<color>` the browser's canvas

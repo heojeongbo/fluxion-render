@@ -1,5 +1,10 @@
 export type { FluxionWorkerPoolOptions } from "../worker-pool";
 export { configureDefaultPool, FluxionWorkerPool, getDefaultPool } from "../worker-pool";
+export {
+  configureFluxionDefaults,
+  getFluxionDefaults,
+  resetFluxionDefaults,
+} from "./model/fluxion-defaults";
 export type {
   BoundsChangeListener,
   FluxionHostOptions,

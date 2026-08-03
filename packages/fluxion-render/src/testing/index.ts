@@ -9,6 +9,8 @@
  *       from "@heojeongbo/fluxion-render/testing";
  */
 
+// Reset the app-wide `configureFluxionDefaults` in `afterEach` for isolation.
+export { resetFluxionDefaults } from "../features/host/model/fluxion-defaults";
 // Lifecycle-scheduler test helpers. Because `staggerMount` is on by default,
 // mounting/unmounting a `<FluxionCanvas>` defers host creation/teardown across
 // animation frames — so a test can't observe the host synchronously. These make

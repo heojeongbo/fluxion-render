@@ -23,6 +23,7 @@ import type { TrajectoryConfig } from "../../../entities/trajectory-layer";
 import {
   FluxionHost,
   type FluxionHostOptions,
+  getFluxionDefaults,
   type HostBundle,
   type HostRecyclePool,
 } from "../../../features/host";
@@ -247,7 +248,13 @@ export function useFluxionCanvas(
     // pool instead of a disposed one. (A disposed RECYCLE pool needs no such guard:
     // its `acquire` safely returns null → the cold path, and `release` disposes.)
     const current = optionsRef.current;
-    if (current.hostOptions?.pool?.isDisposed) {
+    // App-wide defaults (configureFluxionDefaults) underlay the per-chart
+    // hostOptions. Merge here — BEFORE the recycle key is derived and the host
+    // is constructed — so the key, the disposed-pool guard, and the INIT all see
+    // the same effective options (a default `renderer`/`maxFps`/etc. must bucket
+    // consistently). Per-chart fields still win.
+    const effectiveHostOptions = { ...getFluxionDefaults(), ...current.hostOptions };
+    if (effectiveHostOptions.pool?.isDisposed) {
       setMountKey((k) => k + 1);
       return;
     }
@@ -256,7 +263,7 @@ export function useFluxionCanvas(
     const xAxisContainer = current.xAxisContainerRef?.current ?? null;
     const yAxisContainer = current.yAxisContainerRef?.current ?? null;
     const keyParams = {
-      hostOptions: current.hostOptions,
+      hostOptions: effectiveHostOptions,
       hasXAxis: xAxisContainer !== null,
       hasYAxis: yAxisContainer !== null,
       recycleKey: current.recycleKey,
@@ -271,8 +278,8 @@ export function useFluxionCanvas(
         current.layers.map((l) => [l.id, JSON.stringify(l.config)]),
       );
       lastKindsRef.current = new Map(current.layers.map((l) => [l.id, l.kind]));
-      appliedBgRef.current = current.hostOptions?.bgColor;
-      appliedAxisRef.current = JSON.stringify(current.hostOptions?.axisStyle ?? null);
+      appliedBgRef.current = effectiveHostOptions.bgColor;
+      appliedAxisRef.current = JSON.stringify(effectiveHostOptions.axisStyle ?? null);
     };
 
     // Borrow a warm host for this config, or null → cold create. Parked bundles
@@ -307,8 +314,8 @@ export function useFluxionCanvas(
         /* v8 ignore stop */
         const { host } = warm;
         for (const l of current.layers) host.addLayer(l.id, l.kind, l.config);
-        if (current.hostOptions?.bgColor !== undefined) {
-          host.setBgColor(current.hostOptions.bgColor);
+        if (effectiveHostOptions.bgColor !== undefined) {
+          host.setBgColor(effectiveHostOptions.bgColor);
         }
         // Re-parent may have landed in a differently-sized slot — resize now
         // instead of waiting for the debounced ResizeObserver.
@@ -333,7 +340,7 @@ export function useFluxionCanvas(
         /* v8 ignore stop */
         recyclePool?.markCreated();
         const host = new FluxionHost(canvas, {
-          ...current.hostOptions,
+          ...effectiveHostOptions,
           xAxisElement: xAxisCanvas,
           yAxisElement: yAxisCanvas,
         });
@@ -461,8 +468,13 @@ export function useFluxionCanvas(
   // remount. `hostOptions` is otherwise mount-only; these two are the parts a
   // theme switch flips. Seeded in `seedReconcile` (INIT/warm already sent the
   // current values), so an unchanged value never re-posts.
-  const bgColor = options.hostOptions?.bgColor;
-  const axisStyleKey = JSON.stringify(options.hostOptions?.axisStyle ?? null);
+  // Merge app-wide defaults the same way the mount effect does, so the seeded
+  // appliedBg/appliedAxis baselines and this reconcile compare against identical
+  // values (no drift, no redundant re-post when a field comes only from a default).
+  const effectiveBg = { ...getFluxionDefaults(), ...options.hostOptions };
+  const bgColor = effectiveBg.bgColor;
+  const axisStyle = effectiveBg.axisStyle;
+  const axisStyleKey = JSON.stringify(axisStyle ?? null);
   useEffect(() => {
     if (!host) return;
     if (bgColor !== undefined && bgColor !== appliedBgRef.current) {
@@ -471,10 +483,9 @@ export function useFluxionCanvas(
     }
     if (axisStyleKey !== appliedAxisRef.current) {
       appliedAxisRef.current = axisStyleKey;
-      const style = optionsRef.current.hostOptions?.axisStyle;
-      if (style) host.setAxisStyle(style);
+      if (axisStyle) host.setAxisStyle(axisStyle);
     }
-  }, [host, bgColor, axisStyleKey]);
+  }, [host, bgColor, axisStyle, axisStyleKey]);
 
   const handleResize = useCallback((info: ResizeInfo) => {
     // Forward to the host only once it exists (under staggerMount a resize can

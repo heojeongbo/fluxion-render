@@ -22,6 +22,7 @@ import {
   type WorkerMsg,
   WorkerOp,
 } from "../../../shared/protocol";
+import { getFluxionDefaults } from "./fluxion-defaults";
 import {
   AreaLayerHandle,
   BarLayerHandle,
@@ -300,7 +301,12 @@ export class FluxionHost {
   // shared across all hosts — see `shared/lib/flush-scheduler`.
   private flushScheduled = false;
 
-  constructor(canvas: HTMLCanvasElement, opts: FluxionHostOptions = {}) {
+  constructor(canvas: HTMLCanvasElement, options: FluxionHostOptions = {}) {
+    // App-wide defaults (configureFluxionDefaults) underlay the caller's options;
+    // per-host fields win. The React hook already merges these before computing
+    // the recycle key, so for hook-created hosts this re-merge is idempotent —
+    // it's here so direct `new FluxionHost(...)` users inherit the defaults too.
+    const opts: FluxionHostOptions = { ...getFluxionDefaults(), ...options };
     this.coalesce = opts.coalesce ?? true;
     this.coalesceMaxFloats = opts.coalesceMaxFloats ?? 1_000_000;
     if (opts.workerFactory) {
