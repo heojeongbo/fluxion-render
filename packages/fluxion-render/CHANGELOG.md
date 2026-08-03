@@ -1,5 +1,17 @@
 # Changelog
 
+# [1.4.0](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v1.3.0...fluxion-render-v1.4.0) (2026-08-03)
+
+
+### Bug Fixes
+
+* **render:** fill the opaque 2d backing with bgColor at init so light charts never flash black ([49c696c](https://github.com/HeoJeongBo/fluxion-render/commit/49c696cb41a2e3f8a12bac09baebda2568c189b3))
+
+
+### Features
+
+* **render:** app-wide default host options via configureFluxionDefaults() ([0fa39f3](https://github.com/HeoJeongBo/fluxion-render/commit/0fa39f3791df9634328755892979548667c035c4))
+
 # [1.3.0](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v1.2.0...fluxion-render-v1.3.0) (2026-07-31)
 
 
