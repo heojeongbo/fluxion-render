@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { _resetArityGuard } from "../../../shared/lib/arity-guard";
 import { resetFlushScheduler } from "../../../shared/lib/flush-scheduler";
-import { Op, WorkerOp } from "../../../shared/protocol";
+import { type BatchEntry, Op, WorkerOp } from "../../../shared/protocol";
 import { FluxionWorkerHandle, type FluxionWorkerPool } from "../../worker-pool";
 import { configureFluxionDefaults, resetFluxionDefaults } from "./fluxion-defaults";
 import { FluxionHost } from "./fluxion-host";
@@ -48,6 +48,33 @@ function makeFakePoolHandle(hostId = "host-0") {
   } as unknown as Worker;
   const handle = new FluxionWorkerHandle(rawWorker, hostId, onRelease);
   return { handle, posts, onRelease };
+}
+
+// A solo host whose fake worker captures the shared batch-inbox listener, plus
+// helpers to deliver a worker→main frame. `deliver(entry)` wraps the entry in a
+// BATCH_UPDATE keyed to this host's id (the inbox demuxes by hostId; a solo host
+// normalizes to SOLO_HOST_ID). `deliverRaw` posts an arbitrary message payload.
+function makeReceivingHost(hostOpts: Record<string, unknown> = {}) {
+  const { worker, posts } = makeFakeWorker();
+  let messageHandler: ((evt: Event) => void) | null = null;
+  const workerWithEvents = {
+    ...worker,
+    addEventListener: (_t: string, fn: EventListener) => {
+      messageHandler = fn as (evt: Event) => void;
+    },
+    removeEventListener: () => {},
+  };
+  const host = new FluxionHost(makeCanvas(), {
+    workerFactory: () => workerWithEvents as unknown as Worker,
+    ...hostOpts,
+  });
+  const deliverRaw = (data: unknown) => messageHandler!({ data } as unknown as Event);
+  const deliver = (entry: Omit<BatchEntry, "hostId">) =>
+    deliverRaw({
+      op: WorkerOp.BATCH_UPDATE,
+      updates: [{ hostId: host.hostId, ...entry }],
+    });
+  return { host, posts, deliver, deliverRaw };
 }
 
 describe("FluxionHost", () => {
@@ -650,27 +677,8 @@ describe("FluxionHost", () => {
     });
 
     it("captures the latest worker bounds", () => {
-      const { worker } = makeFakeWorker();
-      let messageHandler: ((evt: Event) => void) | null = null;
-      const workerWithEvents = {
-        ...worker,
-        addEventListener: (_t: string, fn: EventListener) => {
-          messageHandler = fn as (evt: Event) => void;
-        },
-        removeEventListener: () => {},
-      };
-      const host = new FluxionHost(makeCanvas(), {
-        workerFactory: () => workerWithEvents as unknown as Worker,
-      });
-      messageHandler!({
-        data: {
-          op: WorkerOp.BOUNDS_UPDATE,
-          hostId: "x",
-          yMin: -2,
-          yMax: 8,
-          latestT: 900,
-        },
-      } as unknown as Event);
+      const { host, deliver } = makeReceivingHost();
+      deliver({ bounds: { yMin: -2, yMax: 8, latestT: 900 } });
       expect(host.getMetrics().bounds).toEqual({ yMin: -2, yMax: 8, latestT: 900 });
       host.dispose();
     });
@@ -741,81 +749,34 @@ describe("FluxionHost", () => {
     });
   });
 
-  it("onBoundsChange fires when worker sends BOUNDS_UPDATE", () => {
-    const { worker } = makeFakeWorker();
-    let messageHandler: ((evt: Event) => void) | null = null;
-    const workerWithEvents = {
-      ...worker,
-      addEventListener: (_type: string, fn: EventListener) => {
-        messageHandler = fn as (evt: Event) => void;
-      },
-      removeEventListener: () => {},
-    };
-    const host = new FluxionHost(makeCanvas(), {
-      workerFactory: () => workerWithEvents as unknown as Worker,
-    });
+  it("onBoundsChange fires when worker sends bounds in a batch", () => {
+    const { host, deliver } = makeReceivingHost();
     const received: { yMin: number; yMax: number; latestT: number }[] = [];
     host.onBoundsChange((yMin, yMax, latestT) => received.push({ yMin, yMax, latestT }));
-    messageHandler!({
-      data: { op: WorkerOp.BOUNDS_UPDATE, hostId: "x", yMin: -1, yMax: 1, latestT: 500 },
-    } as unknown as Event);
+    deliver({ bounds: { yMin: -1, yMax: 1, latestT: 500 } });
     expect(received).toHaveLength(1);
     expect(received[0]).toEqual({ yMin: -1, yMax: 1, latestT: 500 });
     host.dispose();
   });
 
-  it("onTickUpdate fires when worker sends TICK_UPDATE", () => {
-    const { worker } = makeFakeWorker();
-    let messageHandler: ((evt: Event) => void) | null = null;
-    const workerWithEvents = {
-      ...worker,
-      addEventListener: (_type: string, fn: EventListener) => {
-        messageHandler = fn as (evt: Event) => void;
-      },
-      removeEventListener: () => {},
-    };
-    const host = new FluxionHost(makeCanvas(), {
-      workerFactory: () => workerWithEvents as unknown as Worker,
-    });
+  it("onTickUpdate fires when worker sends ticks in a batch", () => {
+    const { host, deliver } = makeReceivingHost();
     const received: { xTicks: unknown; yTicks: unknown }[] = [];
     host.onTickUpdate((xTicks, yTicks) => received.push({ xTicks, yTicks }));
     const xTicks = [{ value: 0, label: "0", fraction: 0 }];
     const yTicks = [{ value: 1, label: "1", fraction: 0.5 }];
-    messageHandler!({
-      data: { op: WorkerOp.TICK_UPDATE, hostId: "x", xTicks, yTicks, xRawValues: [] },
-    } as unknown as Event);
+    deliver({ ticks: { xTicks, yTicks, xRawValues: [] } });
     expect(received).toHaveLength(1);
     expect(received[0].xTicks).toBe(xTicks);
     expect(received[0].yTicks).toBe(yTicks);
     host.dispose();
   });
 
-  it("onRenderStats fires on RENDER_STATS and stops after unsubscribe", () => {
-    const { worker } = makeFakeWorker();
-    let messageHandler: ((evt: Event) => void) | null = null;
-    const workerWithEvents = {
-      ...worker,
-      addEventListener: (_type: string, fn: EventListener) => {
-        messageHandler = fn as (evt: Event) => void;
-      },
-      removeEventListener: () => {},
-    };
-    const host = new FluxionHost(makeCanvas(), {
-      workerFactory: () => workerWithEvents as unknown as Worker,
-      emitRenderStats: true,
-    });
+  it("onRenderStats fires on batch stats and stops after unsubscribe", () => {
+    const { host, deliver } = makeReceivingHost({ emitRenderStats: true });
     const received: { renders: number; busyMs: number; windowMs: number }[] = [];
     const unsub = host.onRenderStats((s) => received.push(s));
-    const fire = () =>
-      messageHandler!({
-        data: {
-          op: WorkerOp.RENDER_STATS,
-          hostId: "x",
-          renders: 30,
-          busyMs: 12,
-          windowMs: 1000,
-        },
-      } as unknown as Event);
+    const fire = () => deliver({ stats: { renders: 30, busyMs: 12, windowMs: 1000 } });
     fire();
     expect(received).toHaveLength(1);
     expect(received[0]).toEqual({ renders: 30, busyMs: 12, windowMs: 1000 });
@@ -839,93 +800,56 @@ describe("FluxionHost", () => {
   });
 
   it("onBoundsChange unsubscribe removes listener", () => {
-    const { worker } = makeFakeWorker();
-    let messageHandler: ((evt: Event) => void) | null = null;
-    const workerWithEvents = {
-      ...worker,
-      addEventListener: (_type: string, fn: EventListener) => {
-        messageHandler = fn as (evt: Event) => void;
-      },
-      removeEventListener: () => {},
-    };
-    const host = new FluxionHost(makeCanvas(), {
-      workerFactory: () => workerWithEvents as unknown as Worker,
-    });
+    const { host, deliver } = makeReceivingHost();
     let count = 0;
     const unsub = host.onBoundsChange(() => {
       count++;
     });
-    messageHandler!({
-      data: { op: WorkerOp.BOUNDS_UPDATE, hostId: "x", yMin: 0, yMax: 1, latestT: 0 },
-    } as unknown as Event);
+    deliver({ bounds: { yMin: 0, yMax: 1, latestT: 0 } });
     expect(count).toBe(1);
     unsub();
-    messageHandler!({
-      data: { op: WorkerOp.BOUNDS_UPDATE, hostId: "x", yMin: 0, yMax: 1, latestT: 0 },
-    } as unknown as Event);
+    deliver({ bounds: { yMin: 0, yMax: 1, latestT: 0 } });
     expect(count).toBe(1);
     host.dispose();
   });
 
   it("onTickUpdate unsubscribe removes listener", () => {
-    const { worker } = makeFakeWorker();
-    let messageHandler: ((evt: Event) => void) | null = null;
-    const workerWithEvents = {
-      ...worker,
-      addEventListener: (_type: string, fn: EventListener) => {
-        messageHandler = fn as (evt: Event) => void;
-      },
-      removeEventListener: () => {},
-    };
-    const host = new FluxionHost(makeCanvas(), {
-      workerFactory: () => workerWithEvents as unknown as Worker,
-    });
+    const { host, deliver } = makeReceivingHost();
     let count = 0;
     const unsub = host.onTickUpdate(() => {
       count++;
     });
-    messageHandler!({
-      data: {
-        op: WorkerOp.TICK_UPDATE,
-        hostId: "x",
-        xTicks: [],
-        yTicks: [],
-        xRawValues: [],
-      },
-    } as unknown as Event);
+    deliver({ ticks: { xTicks: [], yTicks: [], xRawValues: [] } });
     expect(count).toBe(1);
     unsub();
-    messageHandler!({
-      data: {
-        op: WorkerOp.TICK_UPDATE,
-        hostId: "x",
-        xTicks: [],
-        yTicks: [],
-        xRawValues: [],
-      },
-    } as unknown as Event);
+    deliver({ ticks: { xTicks: [], yTicks: [], xRawValues: [] } });
     expect(count).toBe(1);
     host.dispose();
   });
 
-  it("ignores unknown worker message op codes", () => {
-    const { worker } = makeFakeWorker();
-    let messageHandler: ((evt: Event) => void) | null = null;
-    const workerWithEvents = {
-      ...worker,
-      addEventListener: (_type: string, fn: EventListener) => {
-        messageHandler = fn as (evt: Event) => void;
-      },
-      removeEventListener: () => {},
-    };
-    const host = new FluxionHost(makeCanvas(), {
-      workerFactory: () => workerWithEvents as unknown as Worker,
-    });
+  it("ignores non-batch and malformed worker messages", () => {
+    const { host, deliverRaw } = makeReceivingHost();
     expect(() => {
-      messageHandler!({ data: { op: 999 } } as unknown as Event);
-      messageHandler!({ data: null } as unknown as Event);
-      messageHandler!({ data: "string" } as unknown as Event);
+      deliverRaw({ op: 999 }); // unknown op → not a BATCH_UPDATE
+      deliverRaw(null);
+      deliverRaw("string");
     }).not.toThrow();
+    host.dispose();
+  });
+
+  it("delivers only this host's slice of a multi-host batch", () => {
+    const { host, deliverRaw } = makeReceivingHost();
+    const received: number[] = [];
+    host.onBoundsChange((yMin) => received.push(yMin));
+    // A batch carrying another host's entry plus this one — only ours routes.
+    deliverRaw({
+      op: WorkerOp.BATCH_UPDATE,
+      updates: [
+        { hostId: "someone-else", bounds: { yMin: -9, yMax: 9, latestT: 0 } },
+        { hostId: host.hostId, bounds: { yMin: 3, yMax: 4, latestT: 1 } },
+      ],
+    });
+    expect(received).toEqual([3]);
     host.dispose();
   });
 
@@ -1293,6 +1217,31 @@ describe("FluxionHost push coalescing", () => {
     expect(f32(data[0]!)).toEqual([1, 10, 2, 20, 3, 30]);
     const ms = data[0]!.msg as { buffer: ArrayBuffer };
     expect(data[0]!.transfer).toEqual([ms.buffer]);
+    host.dispose();
+  });
+
+  it("grows the staging buffer geometrically for a long run of pushes", () => {
+    const { worker, posts } = makeFakeWorker();
+    const { runFrame } = captureRaf();
+    // High cap so growth (not backpressure) handles the overflow.
+    const host = new FluxionHost(makeCanvas(), {
+      workerFactory: () => worker,
+      coalesceMaxFloats: 1_000_000,
+    });
+    const line = host.addLineLayer("chart");
+    posts.length = 0;
+    // Initial buffer is max(64, 2*8)=64 floats = 32 samples; 100 samples forces
+    // two doublings (64→128→256) via the geometric-growth branch.
+    const expected: number[] = [];
+    for (let i = 0; i < 100; i++) {
+      line.push({ t: i, y: i * 2 });
+      expected.push(i, i * 2);
+    }
+    expect(dataPosts(posts)).toHaveLength(0); // all still staged, none dropped
+    runFrame();
+    const data = dataPosts(posts);
+    expect(data).toHaveLength(1);
+    expect(f32(data[0]!)).toEqual(expected); // every sample, in order, preserved
     host.dispose();
   });
 

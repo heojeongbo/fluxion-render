@@ -14,6 +14,17 @@ export class FluxionWorkerHandle extends WorkerHandle<HostMsg> {
     super(worker, hostId, onRelease);
   }
 
+  /**
+   * The underlying Worker shared by every pooled host on it. The batch inbox
+   * (shared/model/batch-inbox) keys on this so all hosts multiplexed onto one
+   * worker demux from a SINGLE native `message` listener — bypassing this
+   * handle's per-host hostId filter, which a multi-host BATCH_UPDATE (no single
+   * hostId) would fail. Solo hosts key on their raw worker instead.
+   */
+  get sharedWorker(): Worker {
+    return this._worker;
+  }
+
   override postMessage(msg: HostMsg, transfer?: Transferable[]): void {
     if (msg.op === Op.INIT) {
       const m = msg as InitMsg;

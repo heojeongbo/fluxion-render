@@ -669,16 +669,21 @@ describe("useFluxionCanvas host recycling", () => {
 });
 
 describe("useFluxionCanvas resize forwarding", () => {
+  // The shared ResizeObserver is a page-wide singleton demuxing by entry.target.
   let roCb: ((entries: unknown[]) => void) | null;
+  let observed: Element | null;
   const realRO = globalThis.ResizeObserver;
 
   beforeEach(() => {
     roCb = null;
+    observed = null;
     (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
       constructor(cb: (entries: unknown[]) => void) {
         roCb = cb;
       }
-      observe() {}
+      observe(el: Element) {
+        observed = el;
+      }
       unobserve() {}
       disconnect() {}
     };
@@ -690,7 +695,7 @@ describe("useFluxionCanvas resize forwarding", () => {
 
   const deliver = (w: number, h: number) =>
     act(() => {
-      roCb?.([{ contentRect: { width: w, height: h } }]);
+      roCb?.([{ target: observed, contentRect: { width: w, height: h } }]);
     });
 
   const ops = (posts: RecordedPost[]) => posts.map((p) => (p.msg as { op: number }).op);
@@ -774,14 +779,18 @@ describe("useFluxionCanvas resize forwarding", () => {
     vi.useFakeTimers();
     try {
       configureLifecycleScheduler({ resizePerFrame: 1 });
-      // Local RO stub that collects EVERY chart's callback (the describe-level
-      // stub keeps only the last), so one layout change can hit all charts.
-      const cbs: Array<(entries: unknown[]) => void> = [];
+      // The shared ResizeObserver is a single instance observing every chart's
+      // container; capture the one dispatcher + the observed elements so one
+      // layout change can deliver an entry per chart in a single callback.
+      let sharedCb: ((entries: unknown[]) => void) | null = null;
+      const observedEls: Element[] = [];
       (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
         constructor(cb: (entries: unknown[]) => void) {
-          cbs.push(cb);
+          sharedCb = cb;
         }
-        observe() {}
+        observe(el: Element) {
+          observedEls.push(el);
+        }
         unobserve() {}
         disconnect() {}
       };
@@ -794,12 +803,17 @@ describe("useFluxionCanvas resize forwarding", () => {
         </>,
       );
       for (const c of charts) c.posts.length = 0;
-      // One layout change fires every chart's observer in the same tick. Use a
-      // size that DIFFERS from the INIT size (happy-dom getBoundingClientRect is
-      // 0 → INIT falls back to 300×150), else the host's resize dedup correctly
-      // skips a no-op resize and nothing would forward.
+      // One layout change delivers an entry for every chart in the same tick.
+      // Use a size that DIFFERS from the INIT size (happy-dom
+      // getBoundingClientRect is 0 → INIT falls back to 300×150), else the host's
+      // resize dedup correctly skips a no-op resize and nothing would forward.
       act(() => {
-        for (const cb of cbs) cb([{ contentRect: { width: 320, height: 160 } }]);
+        sharedCb?.(
+          observedEls.map((el) => ({
+            target: el,
+            contentRect: { width: 320, height: 160 },
+          })),
+        );
       });
       const resizeCount = () =>
         charts.reduce(

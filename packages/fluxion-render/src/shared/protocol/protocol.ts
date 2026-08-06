@@ -351,10 +351,25 @@ export interface FluxionPoolStreamMsg {
 // Worker → Main messages (posted via self.postMessage inside the worker)
 // ────────────────────────────────────────────────────────────────────────
 
+/**
+ * Routing id for a solo (non-pooled) host — one host owns its worker, so no
+ * pool-assigned id exists. Used on BOTH sides (engine outbox keys, main-thread
+ * batch demux) so a solo host's updates route to it exactly like a pooled one.
+ */
+export const SOLO_HOST_ID = "__solo__";
+
 export const WorkerOp = {
   BOUNDS_UPDATE: 100,
   TICK_UPDATE: 101,
   RENDER_STATS: 102,
+  /**
+   * One coalesced worker→main frame carrying every host's pending
+   * bounds/tick/stats updates (see {@link BatchUpdateMsg}). Replaces the three
+   * per-host messages above on the wire so N hosts multiplexed onto one worker
+   * cost ONE post + ONE main-thread listener invocation per frame instead of
+   * up to 3N posts × N hostId-filtered listeners (O(N²) → O(N)).
+   */
+  BATCH_UPDATE: 103,
 } as const;
 export type WorkerOp = (typeof WorkerOp)[keyof typeof WorkerOp];
 
@@ -413,4 +428,29 @@ export interface RenderStatsMsg {
   windowMs: number;
 }
 
-export type WorkerMsg = BoundsUpdateMsg | TickUpdateMsg | RenderStatsMsg;
+/**
+ * One host's coalesced updates for a single frame. Each field is latest-wins
+ * (the last value the engine produced this frame) and present only when that
+ * kind fired — a follow-clock chart with stable y-bounds emits `{ ticks }` with
+ * no `bounds`, a fixed-bounds chart emits nothing and is absent from the batch.
+ */
+export interface BatchEntry {
+  hostId: string;
+  bounds?: { yMin: number; yMax: number; latestT: number };
+  ticks?: { xTicks: SerializedTick[]; yTicks: SerializedTick[]; xRawValues: number[] };
+  stats?: { renders: number; busyMs: number; windowMs: number };
+}
+
+/**
+ * The single worker→main message posted once per rendered frame (see
+ * {@link WorkerOp.BATCH_UPDATE}). `updates` holds one {@link BatchEntry} per
+ * host that produced any update this frame; the main-thread receiver demuxes
+ * by `hostId`. Bytes are identical to the sum of the per-host messages it
+ * replaces — batching changes framing and delivery cost, not payload.
+ */
+export interface BatchUpdateMsg {
+  op: typeof WorkerOp.BATCH_UPDATE;
+  updates: BatchEntry[];
+}
+
+export type WorkerMsg = BoundsUpdateMsg | TickUpdateMsg | RenderStatsMsg | BatchUpdateMsg;

@@ -88,6 +88,11 @@ export const MAX_SHED_STRIDE = MAX_STRIDE;
 
 export class FrameDriver {
   private readonly subs = new Set<FrameSubscriber>();
+  // Protocol-agnostic "end of a run frame" callbacks — fired after every
+  // subscriber has ticked, on run frames only (a skip frame does no work, so
+  // there is nothing to flush). The worker uses this to drain its outbound
+  // message batch once per frame regardless of which engines rendered.
+  private readonly afterFrameCbs = new Set<() => void>();
   private handle: number | null = null;
   // Which timer API scheduled `handle` — cancellation must match it even if the
   // globals change between schedule and cancel (tests delete/restore rAF).
@@ -118,6 +123,18 @@ export class FrameDriver {
     this.subs.add(sub);
   }
 
+  /**
+   * Register a callback fired once at the end of every RUN frame (after all
+   * subscribers tick, skipped on load-shed frames). Returns an unsubscribe.
+   * A throwing callback is isolated — it cannot kill the shared loop.
+   */
+  onAfterFrame(cb: () => void): () => void {
+    this.afterFrameCbs.add(cb);
+    return () => {
+      this.afterFrameCbs.delete(cb);
+    };
+  }
+
   /** Unregister a subscriber; cancels the pending frame when none remain. */
   remove(sub: FrameSubscriber): void {
     this.subs.delete(sub);
@@ -134,6 +151,7 @@ export class FrameDriver {
   dispose(): void {
     this.cancel();
     this.subs.clear();
+    this.afterFrameCbs.clear();
   }
 
   private schedule(): void {
@@ -201,6 +219,16 @@ export class FrameDriver {
         // wake) — treating a throw as keep-alive would let a permanently
         // broken subscriber spin the loop forever.
         console.error("[fluxion] frame subscriber error (frame skipped):", err);
+      }
+    }
+    // End-of-frame hooks (e.g. draining the worker's outbound message batch)
+    // run after every subscriber and are counted in this frame's busy time —
+    // the flush IS per-frame presenting work the busy governor should see.
+    for (const cb of this.afterFrameCbs) {
+      try {
+        cb();
+      } catch (err) {
+        console.error("[fluxion] after-frame callback error:", err);
       }
     }
     const end = performance.now();

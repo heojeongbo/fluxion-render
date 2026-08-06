@@ -559,4 +559,40 @@ describe("FrameDriver", () => {
     resetFrameDriver();
     expect(() => resetFrameDriver()).not.toThrow();
   });
+
+  describe("onAfterFrame", () => {
+    it("fires after every run frame, is isolated from throws, and unsubscribes", () => {
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const d = new FrameDriver();
+      let alive = true;
+      d.add(sub(() => alive));
+
+      const after = vi.fn();
+      const boom = vi.fn(() => {
+        throw new Error("after-frame boom");
+      });
+      const off = d.onAfterFrame(after);
+      d.onAfterFrame(boom);
+
+      d.wake();
+      vi.advanceTimersToNextTimer(); // one run frame
+      expect(after).toHaveBeenCalledTimes(1);
+      expect(boom).toHaveBeenCalledTimes(1);
+      // A throwing after-frame callback must not kill the shared loop.
+      expect(errSpy).toHaveBeenCalledWith(
+        "[fluxion] after-frame callback error:",
+        expect.any(Error),
+      );
+
+      off(); // unsubscribe `after`; `boom` stays registered
+      after.mockClear();
+      vi.advanceTimersToNextTimer(); // next run frame
+      expect(after).not.toHaveBeenCalled();
+      expect(boom.mock.calls.length).toBeGreaterThanOrEqual(2);
+
+      alive = false;
+      vi.advanceTimersByTime(100);
+      errSpy.mockRestore();
+    });
+  });
 });

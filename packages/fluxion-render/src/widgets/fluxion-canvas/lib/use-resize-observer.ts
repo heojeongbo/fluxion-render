@@ -1,4 +1,5 @@
 import { type RefObject, useEffect, useRef } from "react";
+import { observeResize, onDprChange } from "../../../shared/lib/resize-observer";
 
 export interface ResizeInfo {
   width: number;
@@ -35,7 +36,6 @@ export function useResizeObserver(
 
     const debounceMs = opts?.debounceMs ?? 100;
 
-    let mql: MediaQueryList | null = null;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Cached from the latest ResizeObserver entry so a DPR change can re-fire
@@ -61,41 +61,26 @@ export function useResizeObserver(
           }
         : emit;
 
-    const ro = new ResizeObserver((entries) => {
-      // Read the size the browser already computed for this batch — no
-      // getBoundingClientRect(), so N simultaneous mounts don't force N reflows.
-      const box = entries[entries.length - 1]?.contentRect;
-      if (box) {
-        lastWidth = box.width;
-        lastHeight = box.height;
-      }
+    // Shared ResizeObserver + DPR watcher (one of each page-wide) instead of a
+    // per-chart pair. The first measurement fires immediately; later ones and
+    // DPR changes go through the debounce.
+    const unobserve = observeResize(el, ({ width, height }) => {
+      lastWidth = width;
+      lastHeight = height;
       if (measured) {
         debouncedEmit();
       } else {
-        // First measurement fires immediately (don't wait out the debounce).
         measured = true;
         emit();
       }
     });
-    ro.observe(el);
-
-    const subscribeDpr = () => {
-      if (mql) mql.removeEventListener("change", handleDpr);
-      mql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
-      mql.addEventListener("change", handleDpr);
-    };
-    const handleDpr = () => {
-      debouncedEmit();
-      subscribeDpr();
-    };
-    subscribeDpr();
+    const unwatchDpr = onDprChange(debouncedEmit);
 
     return () => {
       cancelled = true;
       clearTimeout(timer);
-      ro.disconnect();
-      /* v8 ignore next -- mql is always assigned by subscribeDpr() (called unconditionally on mount), so the false arm is unreachable at cleanup */
-      if (mql) mql.removeEventListener("change", handleDpr);
+      unobserve();
+      unwatchDpr();
     };
   }, [ref]);
 }

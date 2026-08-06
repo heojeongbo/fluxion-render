@@ -1,9 +1,17 @@
 import { Engine } from "../../features/engine";
+import { getFrameDriver } from "../../shared/model/frame-driver";
+import { flushOutbound } from "../../shared/model/outbox";
 import type { FluxionPoolStreamMsg, HostMsg } from "../../shared/protocol";
-import { Op } from "../../shared/protocol";
+import { Op, SOLO_HOST_ID } from "../../shared/protocol";
 
-const SOLO_HOST_ID = "__solo__";
 const engines = new Map<string, Engine>();
+
+// Drain every engine's per-frame bounds/tick/stats updates into ONE BATCH_UPDATE
+// post per rendered frame (see shared/model/outbox.ts). This is the worker's
+// sole self.postMessage for worker→main updates; engines never post directly.
+getFrameDriver().onAfterFrame(() => {
+  flushOutbound((msg) => self.postMessage(msg));
+});
 
 self.onmessage = (e: MessageEvent<HostMsg>) => {
   try {

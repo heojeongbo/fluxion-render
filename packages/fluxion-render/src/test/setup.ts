@@ -10,7 +10,10 @@ import { resetFluxionDefaults } from "../features/host/model/fluxion-defaults";
 import { resetFlushScheduler } from "../shared/lib/flush-scheduler";
 import { labelMetaOf, resetLabelCache } from "../shared/lib/label-cache";
 import { resetOnScreenObserver } from "../shared/lib/onscreen-observer";
+import { resetResizeObserver } from "../shared/lib/resize-observer";
+import { resetBatchInbox } from "../shared/model/batch-inbox";
 import { resetFrameDriver } from "../shared/model/frame-driver";
+import { resetOutbox } from "../shared/model/outbox";
 
 // The frame singletons (shared flush scheduler, shared frame driver) and the
 // label-sprite cache hold module-level state. A test that leaves a frame armed
@@ -24,7 +27,10 @@ afterEach(() => {
   resetFrameDriver();
   resetLabelCache();
   resetOnScreenObserver();
+  resetResizeObserver();
   resetFluxionDefaults();
+  resetOutbox();
+  resetBatchInbox();
   fakeIntersectionObservers.length = 0;
 });
 

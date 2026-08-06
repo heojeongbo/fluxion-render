@@ -63,8 +63,9 @@ describe("useResizeObserver", () => {
     return <div ref={ref} style={{ width: 400, height: 300 }} />;
   }
 
+  // The shared observer demuxes by entry.target, so deliver the observed element.
   const deliver = (w: number, h: number) =>
-    roCb!([{ contentRect: { width: w, height: h } }]);
+    roCb!([{ target: observed, contentRect: { width: w, height: h } }]);
 
   it("observes the element and subscribes to dpr on mount", () => {
     render(<Harness onResize={vi.fn()} />);
@@ -137,14 +138,6 @@ describe("useResizeObserver", () => {
     expect(onResize).not.toHaveBeenCalled();
 
     if (realDpr) Object.defineProperty(window, "devicePixelRatio", realDpr);
-  });
-
-  it("a callback with no entries marks measured and fires with the cached 0×0", () => {
-    const onResize = vi.fn();
-    render(<Harness onResize={onResize} debounceMs={0} />);
-    roCb!([]); // entry undefined → size stays 0×0 (defensive `if (box)` false arm)
-    expect(onResize).toHaveBeenCalledTimes(1);
-    expect((onResize.mock.calls[0][0] as ResizeInfo).width).toBe(0);
   });
 
   it("does nothing when the ref is never attached to an element", () => {

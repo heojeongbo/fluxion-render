@@ -22,6 +22,7 @@ import { StepChartLayer } from "../../../entities/step-chart-layer";
 import { TrajectoryLayer } from "../../../entities/trajectory-layer";
 import { GlRenderer } from "../../../shared/gl/gl-renderer";
 import type { Layer } from "../../../shared/model/layer";
+import { enqueueBounds, enqueueStats, enqueueTicks } from "../../../shared/model/outbox";
 import { Scheduler } from "../../../shared/model/scheduler";
 import { Viewport } from "../../../shared/model/viewport";
 import type {
@@ -29,11 +30,9 @@ import type {
   HostMsg,
   LayerKind,
   RendererKind,
-  RenderStatsMsg,
   SetAxisCanvasMsg,
-  TickUpdateMsg,
 } from "../../../shared/protocol";
-import { Op, WorkerOp } from "../../../shared/protocol";
+import { Op, SOLO_HOST_ID } from "../../../shared/protocol";
 
 function createLayer(id: string, kind: LayerKind): Layer {
   switch (kind) {
@@ -137,6 +136,10 @@ export class Engine {
   private rsBusyMs = 0;
   private rsWindowStart = -1;
   private hostId: string | undefined;
+  /** Outbox routing key — solo hosts (no pool id) normalize to SOLO_HOST_ID. */
+  private get outHostId(): string {
+    return this.hostId ?? SOLO_HOST_ID;
+  }
   private lastSentYMin = Number.NaN;
   private lastSentYMax = Number.NaN;
   private lastSentXTickMs = 0;
@@ -521,17 +524,9 @@ export class Engine {
       this.lastSentYMin = yMin;
       this.lastSentYMax = yMax;
       if (this.emitBounds) {
-        try {
-          self.postMessage({
-            op: WorkerOp.BOUNDS_UPDATE,
-            hostId: this.hostId,
-            yMin,
-            yMax,
-            latestT: this.viewport.latestT,
-          });
-        } catch {
-          // Worker context may not support postMessage in tests
-        }
+        // Staged into the shared outbox; the worker entry drains it into one
+        // BATCH_UPDATE per frame (shared/model/outbox.ts).
+        enqueueBounds(this.outHostId, yMin, yMax, this.viewport.latestT);
       }
     }
 
@@ -646,17 +641,7 @@ export class Engine {
     if (this.rsWindowStart < 0) this.rsWindowStart = startMs;
     const windowMs = now - this.rsWindowStart;
     if (windowMs >= 1000) {
-      try {
-        self.postMessage({
-          op: WorkerOp.RENDER_STATS,
-          hostId: this.hostId,
-          renders: this.rsRenders,
-          busyMs: this.rsBusyMs,
-          windowMs,
-        } satisfies RenderStatsMsg);
-      } catch {
-        // Worker context may not support postMessage in tests
-      }
+      enqueueStats(this.outHostId, this.rsRenders, this.rsBusyMs, windowMs);
       this.rsRenders = 0;
       this.rsBusyMs = 0;
       this.rsWindowStart = now;
@@ -676,17 +661,7 @@ export class Engine {
     if (xChanged) this.lastSentXTickMs = now;
 
     const ticks = axisLayer.computeTicksForExport();
-    try {
-      self.postMessage({
-        op: WorkerOp.TICK_UPDATE,
-        hostId: this.hostId,
-        xTicks: ticks.xTicks,
-        yTicks: ticks.yTicks,
-        xRawValues: ticks.xRawValues,
-      } satisfies TickUpdateMsg);
-    } catch {
-      // Worker context may not support postMessage in tests
-    }
+    enqueueTicks(this.outHostId, ticks.xTicks, ticks.yTicks, ticks.xRawValues);
   }
 
   /**

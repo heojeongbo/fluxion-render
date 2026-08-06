@@ -1,9 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetFrameDriver } from "../../../shared/model/frame-driver";
+import { flushOutbound, resetOutbox } from "../../../shared/model/outbox";
 import { Scheduler } from "../../../shared/model/scheduler";
-import { Op, WorkerOp } from "../../../shared/protocol";
+import { type BatchEntry, Op, SOLO_HOST_ID } from "../../../shared/protocol";
 import { type FakeCtx, labelDraws } from "../../../test/setup";
 import { Engine } from "./engine";
+
+/**
+ * Drain the shared outbox into a flat list of per-host entries. The engine no
+ * longer calls `self.postMessage` directly — it stages bounds/tick/stats into
+ * the outbox, which the worker entry flushes as one BATCH_UPDATE per frame.
+ */
+function drainOutbox(): BatchEntry[] {
+  const entries: BatchEntry[] = [];
+  flushOutbound((msg) => entries.push(...msg.updates));
+  return entries;
+}
 
 /**
  * FakeOffscreenCanvas from test/setup.ts is installed globally, but we also
@@ -1783,8 +1795,8 @@ describe("Engine", () => {
       setMaxFpsSpy.mockRestore();
     });
 
-    it("emitBounds:false / emitTicks:false suppress worker→main posts", () => {
-      const postSpy = vi.spyOn(self, "postMessage").mockImplementation(() => {});
+    it("emitBounds:false / emitTicks:false suppress worker→main updates", () => {
+      resetOutbox();
       const engine = new Engine();
       const canvas = newCanvas(100, 100);
       engine.dispatch({
@@ -1798,30 +1810,28 @@ describe("Engine", () => {
       });
       addAxisAndLine(engine);
       flushFrame();
-      const ops = postSpy.mock.calls.map((c) => (c[0] as { op?: number })?.op);
-      expect(ops).not.toContain(WorkerOp.BOUNDS_UPDATE);
-      expect(ops).not.toContain(WorkerOp.TICK_UPDATE);
+      // Nothing staged for this solo engine → the frame's batch is empty.
+      expect(drainOutbox()).toEqual([]);
       engine.dispatch({ op: Op.DISPOSE });
-      postSpy.mockRestore();
     });
 
-    it("emitBounds / emitTicks default to true (posts both)", () => {
-      const postSpy = vi.spyOn(self, "postMessage").mockImplementation(() => {});
+    it("emitBounds / emitTicks default to true (stages both)", () => {
+      resetOutbox();
       const engine = new Engine();
       const canvas = newCanvas(100, 100);
       // No emit flags → defaults. No axis canvases → TICK_UPDATE fallback path.
       engine.dispatch({ op: Op.INIT, canvas, width: 100, height: 100, dpr: 1 });
       addAxisAndLine(engine);
       flushFrame();
-      const ops = postSpy.mock.calls.map((c) => (c[0] as { op?: number })?.op);
-      expect(ops).toContain(WorkerOp.BOUNDS_UPDATE);
-      expect(ops).toContain(WorkerOp.TICK_UPDATE);
+      const [entry] = drainOutbox();
+      expect(entry?.hostId).toBe(SOLO_HOST_ID); // solo engine normalizes its key
+      expect(entry?.bounds).toBeTruthy();
+      expect(entry?.ticks).toBeTruthy();
       engine.dispatch({ op: Op.DISPOSE });
-      postSpy.mockRestore();
     });
 
-    it("emitRenderStats posts RENDER_STATS once a ~1s render window elapses", () => {
-      const postSpy = vi.spyOn(self, "postMessage").mockImplementation(() => {});
+    it("emitRenderStats stages RENDER_STATS once a ~1s render window elapses", () => {
+      resetOutbox();
       let t = 0;
       const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => t);
       const engine = new Engine();
@@ -1835,11 +1845,7 @@ describe("Engine", () => {
       });
       addAxisAndLine(engine);
       flushFrame(); // first render at t=0 → opens the window, nothing emitted yet
-      const has = () =>
-        postSpy.mock.calls.some(
-          (c) => (c[0] as { op?: number })?.op === WorkerOp.RENDER_STATS,
-        );
-      expect(has()).toBe(false);
+      expect(drainOutbox().some((e) => e.stats)).toBe(false);
 
       t = 1200; // advance past the 1s window
       const buf = new Float32Array([0, 0, 100, 1]);
@@ -1850,21 +1856,18 @@ describe("Engine", () => {
         dtype: "f32",
         length: 4,
       });
-      flushFrame(); // render at t=1200 → windowMs ≥ 1000 → emit
+      flushFrame(); // render at t=1200 → windowMs ≥ 1000 → stage
 
-      const stats = postSpy.mock.calls
-        .map((c) => c[0] as { op: number; renders: number; windowMs: number })
-        .find((m) => m?.op === WorkerOp.RENDER_STATS);
+      const stats = drainOutbox().find((e) => e.stats)?.stats;
       expect(stats).toBeTruthy();
       expect(stats!.renders).toBeGreaterThanOrEqual(1);
       expect(stats!.windowMs).toBeGreaterThanOrEqual(1000);
       engine.dispatch({ op: Op.DISPOSE });
-      postSpy.mockRestore();
       nowSpy.mockRestore();
     });
 
-    it("does not post RENDER_STATS when emitRenderStats is off (default)", () => {
-      const postSpy = vi.spyOn(self, "postMessage").mockImplementation(() => {});
+    it("does not stage RENDER_STATS when emitRenderStats is off (default)", () => {
+      resetOutbox();
       let t = 0;
       const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => t);
       const engine = new Engine();
@@ -1887,10 +1890,8 @@ describe("Engine", () => {
         length: 4,
       });
       flushFrame();
-      const ops = postSpy.mock.calls.map((c) => (c[0] as { op?: number })?.op);
-      expect(ops).not.toContain(WorkerOp.RENDER_STATS);
+      expect(drainOutbox().some((e) => e.stats)).toBe(false);
       engine.dispatch({ op: Op.DISPOSE });
-      postSpy.mockRestore();
       nowSpy.mockRestore();
     });
   });

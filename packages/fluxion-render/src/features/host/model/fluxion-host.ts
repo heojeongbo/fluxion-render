@@ -7,20 +7,17 @@ import { getDefaultPool } from "../../../features/worker-pool";
 import { warnArityMismatch } from "../../../shared/lib/arity-guard";
 import { Emitter } from "../../../shared/lib/emitter";
 import { cancelHostFlush, requestHostFlush } from "../../../shared/lib/flush-scheduler";
+import { type BatchTarget, subscribeBatch } from "../../../shared/model/batch-inbox";
 import {
   type AxisStyle,
-  type BoundsUpdateMsg,
+  type BatchEntry,
   type DType,
   type FluxionPoolStreamMsg,
   type HostMsg,
   type LayerKind,
   Op,
   type RendererKind,
-  type RenderStatsMsg,
   type SerializedTick,
-  type TickUpdateMsg,
-  type WorkerMsg,
-  WorkerOp,
 } from "../../../shared/protocol";
 import { getFluxionDefaults } from "./fluxion-defaults";
 import {
@@ -271,6 +268,8 @@ export class FluxionHost {
     addEventListener?(type: string, listener: EventListener): void;
     removeEventListener?(type: string, listener: EventListener): void;
     readonly hostId?: string;
+    /** Present on a pooled handle — the shared Worker every co-host demuxes from. */
+    readonly sharedWorker?: BatchTarget;
   };
   private disposed = false;
   private readonly boundsEmitter = new Emitter<
@@ -282,16 +281,19 @@ export class FluxionHost {
   private readonly renderStatsEmitter = new Emitter<[stats: RenderStats]>();
   // Diagnostics — see getMetrics().
   private readonly metrics = new MetricsTracker();
-  private workerMsgHandler: EventListener | null = null;
+  private batchUnsub: (() => void) | null = null;
   private visibilityHandler: (() => void) | null = null;
 
   // ── Push coalescing (see FluxionHostOptions.coalesce) ───────────────────
   private readonly coalesce: boolean;
   private readonly coalesceMaxFloats: number;
-  // Per-layer staging: flat number[] of interleaved samples awaiting flush.
-  // Stride-agnostic — the worker's RingBuffer re-segments by its own stride,
-  // so concatenating same-layer chunks is byte-equivalent to N separate pushes.
-  private readonly pending = new Map<string, { chunks: number[]; floats: number }>();
+  // Per-layer staging: a growable Float32 vector of interleaved samples awaiting
+  // flush (`len` = valid elements). Stride-agnostic — the worker's RingBuffer
+  // re-segments by its own stride, so concatenating same-layer samples is
+  // byte-equivalent to N separate pushes. Writing scalars straight into the typed
+  // buffer avoids the per-sample `[t,y]` boxing of a `number[]`, and the whole
+  // buffer is transferred (zero-copy) on flush instead of copied.
+  private readonly pending = new Map<string, { buf: Float32Array; len: number }>();
   // Per-layer declared arity (stacked-area seriesCount / heatmap-stream yBins /
   // lidar stride), recorded from add/config so handles can warn on a mismatched
   // push. See `expectedArity` + `arity-guard`.
@@ -388,32 +390,24 @@ export class FluxionHost {
       this.post({ op: Op.SET_AXIS_STYLE, ...opts.axisStyle });
     }
 
-    // Listen for worker→main messages (bounds updates, etc.)
-    this.workerMsgHandler = (evt: Event) => {
-      const e = evt as MessageEvent<WorkerMsg>;
-      const msg = e.data;
-      if (!msg || typeof msg !== "object" || !("op" in msg)) return;
-      if (msg.op === WorkerOp.BOUNDS_UPDATE) {
-        const bu = msg as BoundsUpdateMsg;
-        this.metrics.recordBounds(bu.yMin, bu.yMax, bu.latestT);
-        this.boundsEmitter.emit(bu.yMin, bu.yMax, bu.latestT);
+    // Receive this host's slice of the worker's per-frame BATCH_UPDATE. In pool
+    // mode every co-host demuxes from the SHARED worker's single listener; solo
+    // hosts key on their own worker. The engine tags entries with the same
+    // hostId this host reports, so routing lines up in both modes.
+    const target = this.worker.sharedWorker ?? this.worker;
+    this.batchUnsub = subscribeBatch(target, this.hostId, (entry: BatchEntry) => {
+      if (entry.bounds) {
+        const { yMin, yMax, latestT } = entry.bounds;
+        this.metrics.recordBounds(yMin, yMax, latestT);
+        this.boundsEmitter.emit(yMin, yMax, latestT);
       }
-      if (msg.op === WorkerOp.TICK_UPDATE) {
-        const tu = msg as TickUpdateMsg;
-        this.tickEmitter.emit(tu.xTicks, tu.yTicks);
+      if (entry.ticks) {
+        this.tickEmitter.emit(entry.ticks.xTicks, entry.ticks.yTicks);
       }
-      if (msg.op === WorkerOp.RENDER_STATS) {
-        const rs = msg as RenderStatsMsg;
-        this.renderStatsEmitter.emit({
-          renders: rs.renders,
-          busyMs: rs.busyMs,
-          windowMs: rs.windowMs,
-        });
+      if (entry.stats) {
+        this.renderStatsEmitter.emit({ ...entry.stats });
       }
-    };
-    if (this.worker.addEventListener) {
-      this.worker.addEventListener("message", this.workerMsgHandler);
-    }
+    });
 
     // Forward page visibility to the worker (it has no `document`). While
     // hidden, the worker suspends the follow-clock continuous render loop;
@@ -855,15 +849,24 @@ export class FluxionHost {
     this.metrics.recordPush(id, values.length, values.length * 4);
     let p = this.pending.get(id);
     if (!p) {
-      p = { chunks: [], floats: 0 };
+      p = { buf: new Float32Array(Math.max(64, values.length * 8)), len: 0 };
       this.pending.set(id, p);
     }
-    const chunks = p.chunks;
-    for (let i = 0; i < values.length; i++) chunks.push(values[i]!);
-    p.floats += values.length;
+    const need = p.len + values.length;
+    if (need > p.buf.length) {
+      let cap = p.buf.length;
+      while (cap < need) cap *= 2;
+      const grown = new Float32Array(cap);
+      grown.set(p.buf.subarray(0, p.len));
+      p.buf = grown;
+    }
+    const buf = p.buf;
+    let n = p.len;
+    for (let i = 0; i < values.length; i++) buf[n++] = values[i]!;
+    p.len = n;
     // Backpressure: if a layer outruns the flush cadence, post now rather than
     // let the staging buffer grow unbounded. Never drops samples.
-    if (p.floats > this.coalesceMaxFloats) {
+    if (p.len > this.coalesceMaxFloats) {
       this.flushLayer(id);
     } else {
       this.scheduleFlush();
@@ -895,12 +898,11 @@ export class FluxionHost {
     const p = this.pending.get(id);
     if (!p) return;
     this.pending.delete(id);
-    // A pending entry only exists because stage() appended ≥1 sample's worth
-    // of scalars, so chunks is always non-empty here.
-    const buf = new Float32Array(p.chunks);
-    this.post({ op: Op.DATA, id, buffer: buf.buffer, dtype: "f32", length: buf.length }, [
-      buf.buffer,
-    ]);
+    // Transfer the whole staging buffer (zero-copy); the worker reads the first
+    // `len` elements. A pending entry only exists because stage() wrote ≥1
+    // sample's worth of scalars, so `len` is always > 0 here.
+    const buffer = p.buf.buffer as ArrayBuffer;
+    this.post({ op: Op.DATA, id, buffer, dtype: "f32", length: p.len }, [buffer]);
   }
 
   /**
@@ -1036,11 +1038,10 @@ export class FluxionHost {
       // worker may already be gone
     }
     this.disposed = true;
-    // Remove worker→main message listener
-    if (this.workerMsgHandler && this.worker.removeEventListener) {
-      this.worker.removeEventListener("message", this.workerMsgHandler);
-    }
-    this.workerMsgHandler = null;
+    // Unsubscribe from the shared batch inbox (removes the underlying worker's
+    // native listener only when this was the last host on it).
+    this.batchUnsub?.();
+    this.batchUnsub = null;
     /* v8 ignore next -- the no-handler / no-document arms are unreachable in the DOM test env */
     if (this.visibilityHandler && typeof document !== "undefined") {
       document.removeEventListener("visibilitychange", this.visibilityHandler);
