@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.13.1](https://github-personal/HeoJeongBo/fluxion-render/compare/fluxion-replay-v0.13.0...fluxion-replay-v0.13.1) (2026-08-06)
+
+
+### Bug Fixes
+
+* **render:** clear GL backing at init/resize so charts never flash black ([86f7c22](https://github-personal/HeoJeongBo/fluxion-render/commit/86f7c22e7bb4d00742bf67d5b072a3af44224ef7))
+* **render:** declare @heojeongbo/fluxion-worker as a runtime dependency ([056391c](https://github-personal/HeoJeongBo/fluxion-render/commit/056391ccddb81792a7423c83fbd4da4a2a1a3555))
+* **render:** defer recycle-overflow and pool-teardown disposes through the frame queue ([0946ce2](https://github-personal/HeoJeongBo/fluxion-render/commit/0946ce23af6ab71b85baf4112e24fb6ead2c9e7c))
+* **render:** fill the opaque 2d backing with bgColor at init so light charts never flash black ([49c696c](https://github-personal/HeoJeongBo/fluxion-render/commit/49c696cb41a2e3f8a12bac09baebda2568c189b3))
+* **render:** forward emitRenderStats in pool mode; add getLifecycleStats ([95dded1](https://github-personal/HeoJeongBo/fluxion-render/commit/95dded1fb15d771c5fb8d9435c1fc8bc0dbaf10d))
+* **render:** harden burst fixes — recycle key emitRenderStats, budget validation, idle-shrink clamps, hidden-tab drain ([6ed299b](https://github-personal/HeoJeongBo/fluxion-render/commit/6ed299b80e3667a8b5aaaec4436a359362ffab2f))
+* **render:** send Op.DISPOSE before flipping `disposed` so pool hosts tear down ([37394c9](https://github-personal/HeoJeongBo/fluxion-render/commit/37394c962a422628b4ea8dc8e9e8f0ec6dbefeca))
+* **render:** store GL line vertices as xMin-relative deltas for fp32 precision at large t ([9a537be](https://github-personal/HeoJeongBo/fluxion-render/commit/9a537befcf0056790a4546d3e7472db44e47c3c7))
+* **replay,render:** repair replay peer range + surface configureOnScreenObserver on /react; add CI ([09ae5b5](https://github-personal/HeoJeongBo/fluxion-render/commit/09ae5b50d3c3f0238b48c86a537c68db30607ae3))
+
+
+### Features
+
+* **examples:** automated many-chart bench page + playwright runner ([c7d4786](https://github-personal/HeoJeongBo/fluxion-render/commit/c7d4786ac2720a134643d43e6c2d4ac5154f7ee9))
+* **examples:** bench cost-attribution params (axes/labels/grid) ([6faa83e](https://github-personal/HeoJeongBo/fluxion-render/commit/6faa83ed606ab3392addf63166c8111127c0ebe5))
+* **examples:** light/dark Theme Switch demo showing live chart re-theming ([f3a1583](https://github-personal/HeoJeongBo/fluxion-render/commit/f3a15831f1b707eac639b1e2576db2e2a396a540))
+* **examples:** scroll-bench harness + shared-feed scroll-grid demo ([573930e](https://github-personal/HeoJeongBo/fluxion-render/commit/573930e0e4602ff97e0f1bf84d38294310c0c139))
+* **examples:** scroll-grid demo for pauseWhenOffscreen ([b3a50a9](https://github-personal/HeoJeongBo/fluxion-render/commit/b3a50a9a8b694a90ad12e386837531cbdbf9146b))
+* **render:** add FluxionThemeProvider + useFluxionTheme for reactive dark/light theming ([e0cee49](https://github-personal/HeoJeongBo/fluxion-render/commit/e0cee493b184049e048b9c0ff975f69e7732270c))
+* **render:** app-wide default host options via configureFluxionDefaults() ([0fa39f3](https://github-personal/HeoJeongBo/fluxion-render/commit/0fa39f3791df9634328755892979548667c035c4))
+* **render:** frame-budgeted, latest-wins resize scheduling ([f455a1f](https://github-personal/HeoJeongBo/fluxion-render/commit/f455a1fbca0be5a250b8bbf73d2cb38c55dd0516))
+* **render:** generic addLayer<K> + single-source-of-truth LayerConfigByKind ([618c129](https://github-personal/HeoJeongBo/fluxion-render/commit/618c129dec4c0aa412a6043fe6086df4cf9956da))
+* **render:** idle shrink of parked host backings ([3f632e9](https://github-personal/HeoJeongBo/fluxion-render/commit/3f632e9990394ce75f861e027934c8c0f5aae226))
+* **render:** inlineAxes — worker-drawn axes inside the main canvas ([1b990ca](https://github-personal/HeoJeongBo/fluxion-render/commit/1b990ca429b493058d19b2c5d388256e7fd8cc0a))
+* **render:** pause off-screen chart rendering (pauseWhenOffscreen, IntersectionObserver) ([9f17038](https://github-personal/HeoJeongBo/fluxion-render/commit/9f170389bd3e84dbfcc980f79c6ceed4e42ff176))
+* **render:** recycle-pool overflow stats + working-set warning ([252e18d](https://github-personal/HeoJeongBo/fluxion-render/commit/252e18d905886e1e8bc412c489934fc4bb610765)), closes [hi#water](https://github-personal/hi/issues/water)
+* **render:** renderer:'webgl' backend — stage 1 (context + clear + plumbing) ([77498b8](https://github-personal/HeoJeongBo/fluxion-render/commit/77498b84bcb3a31e0871202bbb2102171ff65f2e))
+* **render:** renderer:'webgl' backend — stage 2 (GL line layer) ([e8b38a2](https://github-personal/HeoJeongBo/fluxion-render/commit/e8b38a28dda93ff55cd008579e7d7d0ab1da764c))
+* **render:** renderer:'webgl' backend — stage 3 (GL grid, inline axes, label sprites) ([eb97a42](https://github-personal/HeoJeongBo/fluxion-render/commit/eb97a421177306aacd7ff90716e5bcbf09a543ca))
+* **render:** runtime setAxisStyle + declarative bg/axis reconcile for live theming ([e8d6448](https://github-personal/HeoJeongBo/fluxion-render/commit/e8d6448155eeed343d954b65620a9cd32d1f161d))
+
+
+### Performance Improvements
+
+* **render:** cadence-signal load shedding for compositor overload ([4bb2ebb](https://github-personal/HeoJeongBo/fluxion-render/commit/4bb2ebb221fa7a1d1e26939f87a75e499f553cd5))
+* **render:** cut per-sample hot-path cost (viewport projection memo, ring modulo, heatmap row-Y) + dedup cold-mount resize ([cbbd5d0](https://github-personal/HeoJeongBo/fluxion-render/commit/cbbd5d0787c4eaa3d84f8f19cf995c0e09fabf17))
+* **render:** label-sprite cache — raster each label once, blit per frame ([439b66f](https://github-personal/HeoJeongBo/fluxion-render/commit/439b66fa438457eed6a9a3aff52001bac12a7ce6))
+* **render:** main-thread scaling — shared observers, growable staging, batched worker messages ([4aa89e8](https://github-personal/HeoJeongBo/fluxion-render/commit/4aa89e86acee80d48d61f2c446c2e082409ee86f))
+* **render:** per-worker frame loop with load governor, shared flush ([69e27e7](https://github-personal/HeoJeongBo/fluxion-render/commit/69e27e73ad859324c80953f63975ef75168caf83))
+* **render:** x-tick cache, external-axis label dedupe, draw-path allocs ([be42a3a](https://github-personal/HeoJeongBo/fluxion-render/commit/be42a3a4bed77ced94b96993be8e7c1b5b23db98))
+
 # [0.13.0](https://github-personal/HeoJeongBo/fluxion-render/compare/fluxion-replay-v0.12.1...fluxion-replay-v0.13.0) (2026-07-01)
 
 
