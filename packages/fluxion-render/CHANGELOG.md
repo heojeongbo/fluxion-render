@@ -1,5 +1,25 @@
 # Changelog
 
+# [1.5.0](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v1.4.0...fluxion-render-v1.5.0) (2026-08-06)
+
+
+### Bug Fixes
+
+* **render:** store GL line vertices as xMin-relative deltas for fp32 precision at large t ([9a537be](https://github.com/HeoJeongBo/fluxion-render/commit/9a537befcf0056790a4546d3e7472db44e47c3c7))
+* **replay,render:** repair replay peer range + surface configureOnScreenObserver on /react; add CI ([09ae5b5](https://github.com/HeoJeongBo/fluxion-render/commit/09ae5b50d3c3f0238b48c86a537c68db30607ae3))
+
+
+### Features
+
+* **render:** add FluxionThemeProvider + useFluxionTheme for reactive dark/light theming ([e0cee49](https://github.com/HeoJeongBo/fluxion-render/commit/e0cee493b184049e048b9c0ff975f69e7732270c))
+* **render:** generic addLayer<K> + single-source-of-truth LayerConfigByKind ([618c129](https://github.com/HeoJeongBo/fluxion-render/commit/618c129dec4c0aa412a6043fe6086df4cf9956da))
+
+
+### Performance Improvements
+
+* **render:** cut per-sample hot-path cost (viewport projection memo, ring modulo, heatmap row-Y) + dedup cold-mount resize ([cbbd5d0](https://github.com/HeoJeongBo/fluxion-render/commit/cbbd5d0787c4eaa3d84f8f19cf995c0e09fabf17))
+* **render:** main-thread scaling — shared observers, growable staging, batched worker messages ([4aa89e8](https://github.com/HeoJeongBo/fluxion-render/commit/4aa89e86acee80d48d61f2c446c2e082409ee86f))
+
 # [1.4.0](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v1.3.0...fluxion-render-v1.4.0) (2026-08-03)
 
 
