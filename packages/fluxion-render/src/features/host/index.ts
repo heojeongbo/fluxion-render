@@ -22,6 +22,7 @@ export type {
   RecycleKeyParams,
 } from "./model/host-recycle-pool";
 export { createHostRecyclePool } from "./model/host-recycle-pool";
+export type { LayerConfigByKind } from "./model/layer-config-map";
 export {
   AreaLayerHandle,
   BarLayerHandle,

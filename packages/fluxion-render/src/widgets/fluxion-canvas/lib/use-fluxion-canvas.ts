@@ -1,31 +1,11 @@
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
-import type { AreaChartConfig } from "../../../entities/area-chart-layer";
-import type { AxisGridConfig } from "../../../entities/axis-grid-layer";
-import type { BarChartConfig } from "../../../entities/bar-chart-layer";
-import type { BoxPlotConfig } from "../../../entities/box-plot-layer";
-import type { CandlestickConfig } from "../../../entities/candlestick-layer";
-import type { EventMarkerConfig } from "../../../entities/event-marker-layer";
-import type { HeatmapConfig } from "../../../entities/heatmap-layer";
-import type { HeatmapStreamConfig } from "../../../entities/heatmap-stream-layer";
-import type { HistogramConfig } from "../../../entities/histogram-layer";
-import type { LidarScatterConfig } from "../../../entities/lidar-scatter-layer";
-import type { LineChartConfig } from "../../../entities/line-chart-layer";
-import type { LineChartStaticConfig } from "../../../entities/line-chart-static-layer";
-import type { OccupancyGridConfig } from "../../../entities/occupancy-grid-layer";
-import type { PolarConfig } from "../../../entities/polar-layer";
-import type { PoseArrowConfig } from "../../../entities/pose-arrow-layer";
-import type { ReferenceLineConfig } from "../../../entities/reference-line-layer";
-import type { ScatterChartConfig } from "../../../entities/scatter-chart-layer";
-import type { ScatterColoredConfig } from "../../../entities/scatter-colored-layer";
-import type { StackedAreaConfig } from "../../../entities/stacked-area-layer";
-import type { StepChartConfig } from "../../../entities/step-chart-layer";
-import type { TrajectoryConfig } from "../../../entities/trajectory-layer";
 import {
   FluxionHost,
   type FluxionHostOptions,
   getFluxionDefaults,
   type HostBundle,
   type HostRecyclePool,
+  type LayerConfigByKind,
 } from "../../../features/host";
 import { useFluxionThemeValueOrNull } from "../../../features/theme";
 import {
@@ -35,38 +15,20 @@ import {
   scheduleResize,
 } from "../../../shared/lib/lifecycle-scheduler";
 import { observeOnScreen } from "../../../shared/lib/onscreen-observer";
+import type { LayerKind } from "../../../shared/protocol";
 import { type ResizeInfo, useResizeObserver } from "./use-resize-observer";
 
 /**
- * Declarative layer spec used by `useFluxionCanvas` and `<FluxionCanvas/>`.
- *
- * Discriminated union: `kind` narrows `config` to the matching layer-specific
- * type, so wrong fields are caught at compile time. Prefer the layer factory
- * helpers (`lineLayer`, `axisGridLayer`, etc.) for ergonomic construction —
- * they encode the kind so callers don't repeat themselves.
+ * Declarative layer spec used by `useFluxionCanvas` and `<FluxionCanvas/>`: an
+ * `id` + `kind` + the config typed to that kind, so wrong fields are caught at
+ * compile time. Derived from {@link LayerConfigByKind} (the single kind→config
+ * source of truth), so it stays in lockstep with the imperative
+ * `host.addLayer<K>` — add a layer kind once, in the map, and both APIs pick it
+ * up.
  */
-export type FluxionLayerSpec =
-  | { id: string; kind: "line"; config?: LineChartConfig }
-  | { id: string; kind: "line-static"; config?: LineChartStaticConfig }
-  | { id: string; kind: "lidar"; config?: LidarScatterConfig }
-  | { id: string; kind: "axis-grid"; config?: AxisGridConfig }
-  | { id: string; kind: "scatter"; config?: ScatterChartConfig }
-  | { id: string; kind: "area"; config?: AreaChartConfig }
-  | { id: string; kind: "step"; config?: StepChartConfig }
-  | { id: string; kind: "bar"; config?: BarChartConfig }
-  | { id: string; kind: "candlestick"; config?: CandlestickConfig }
-  | { id: string; kind: "heatmap"; config?: HeatmapConfig }
-  | { id: string; kind: "event-marker"; config?: EventMarkerConfig }
-  | { id: string; kind: "scatter-colored"; config?: ScatterColoredConfig }
-  | { id: string; kind: "heatmap-stream"; config?: HeatmapStreamConfig }
-  | { id: string; kind: "reference-line"; config?: ReferenceLineConfig }
-  | { id: string; kind: "pose-arrow"; config?: PoseArrowConfig }
-  | { id: string; kind: "trajectory"; config?: TrajectoryConfig }
-  | { id: string; kind: "occupancy-grid"; config?: OccupancyGridConfig }
-  | { id: string; kind: "histogram"; config?: HistogramConfig }
-  | { id: string; kind: "stacked-area"; config?: StackedAreaConfig }
-  | { id: string; kind: "box-plot"; config?: BoxPlotConfig }
-  | { id: string; kind: "polar"; config?: PolarConfig };
+export type FluxionLayerSpec = {
+  [K in LayerKind]: { id: string; kind: K; config?: LayerConfigByKind[K] };
+}[LayerKind];
 
 export interface UseFluxionCanvasOptions {
   layers: FluxionLayerSpec[];

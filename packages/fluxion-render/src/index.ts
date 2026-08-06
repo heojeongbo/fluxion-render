@@ -39,6 +39,7 @@ export type {
   HostBundle,
   HostRecyclePool,
   HostRecyclePoolOptions,
+  LayerConfigByKind,
   LidarPoint,
   LidarStride,
   LineSample,

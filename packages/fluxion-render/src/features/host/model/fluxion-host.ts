@@ -20,6 +20,7 @@ import {
   type SerializedTick,
 } from "../../../shared/protocol";
 import { getFluxionDefaults } from "./fluxion-defaults";
+import type { LayerConfigByKind } from "./layer-config-map";
 import {
   AreaLayerHandle,
   BarLayerHandle,
@@ -552,21 +553,19 @@ export class FluxionHost {
   }
 
   /**
-   * Typed `addLayer` overloads.
+   * Add a layer of any {@link LayerKind}, with the config type checked against
+   * that kind via {@link LayerConfigByKind} — full autocomplete + typo detection
+   * for all 21 kinds (a dynamic `LayerKind` call widens `config` to the union).
    *
    * Prefer the kind-specific helpers below (`addLineLayer`, `addAxisLayer`,
-   * etc.) — they both type-check the config AND return a typed handle where
-   * applicable. This overload is retained for cases where the kind is chosen
-   * dynamically.
+   * etc.) when you want a typed handle back; this generic form is for the
+   * kind-chosen-dynamically case.
    */
-  addLayer(id: string, kind: "line", config?: LineChartConfig): void;
-  addLayer(id: string, kind: "line-static", config?: LineChartStaticConfig): void;
-  addLayer(id: string, kind: "lidar", config?: LidarScatterConfig): void;
-  addLayer(id: string, kind: "axis-grid", config?: AxisGridConfig): void;
-  // Dynamic fallback for code paths that pass a runtime `LayerKind` (e.g.
-  // `useFluxionCanvas({ layers: FluxionLayerSpec[] })`).
-  addLayer(id: string, kind: LayerKind, config?: unknown): void;
-  addLayer(id: string, kind: LayerKind, config?: unknown): void {
+  addLayer<K extends LayerKind>(
+    id: string,
+    kind: K,
+    config?: LayerConfigByKind[K],
+  ): void {
     // Defensive: drain any staged data for a recycled id before re-adding.
     this.flushLayer(id);
     this.trackArity(id, config);
@@ -602,17 +601,12 @@ export class FluxionHost {
   }
 
   /**
-   * Typed `configLayer` overloads — pick the config shape from the kind used
-   * when the layer was created. There's no runtime tag check; the caller is
-   * trusted to pass the right config for the right id.
+   * Reconfigure a layer. Since the kind was fixed at `addLayer` time and isn't
+   * repeated here, the config is typed as the union of every kind's config
+   * ({@link LayerConfigByKind}) — any valid layer config is accepted; the caller
+   * is trusted to pass the one matching this id's kind (no runtime tag check).
    */
-  configLayer(id: string, config: LineChartConfig): void;
-  configLayer(id: string, config: LineChartStaticConfig): void;
-  configLayer(id: string, config: LidarScatterConfig): void;
-  configLayer(id: string, config: AxisGridConfig): void;
-  // Dynamic fallback for helpers like `useLayerConfig` that carry an opaque
-  // config alongside the layer id.
-  configLayer(id: string, config: unknown): void;
+  configLayer(id: string, config: LayerConfigByKind[LayerKind]): void;
   configLayer(id: string, config: unknown): void {
     // A config change (e.g. capacity → new ring) must not land before queued
     // samples for this layer.
