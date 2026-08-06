@@ -27,6 +27,7 @@ import {
   type HostBundle,
   type HostRecyclePool,
 } from "../../../features/host";
+import { useFluxionThemeValueOrNull } from "../../../features/theme";
 import {
   cancelResize,
   enqueueDispose,
@@ -213,6 +214,15 @@ export function useFluxionCanvas(
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
+  // Theme context (bgColor + axisStyle), or null outside a FluxionThemeProvider.
+  // It underlays per-chart hostOptions (theme < hostOptions), so a dark/light
+  // toggle re-themes every chart. Mirrored into a ref for the mount effect —
+  // its themed bgColor must reach INIT so the opaque backing fills without a
+  // first-frame flash (same reason configureFluxionDefaults' bgColor does).
+  const theme = useFluxionThemeValueOrNull();
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
+
   // Serialized configs already applied to the worker, keyed by layer id.
   // Seeded at mount (addLayer carries the initial config) so the reconcile
   // effect below doesn't re-send what the worker already has.
@@ -253,7 +263,11 @@ export function useFluxionCanvas(
     // is constructed — so the key, the disposed-pool guard, and the INIT all see
     // the same effective options (a default `renderer`/`maxFps`/etc. must bucket
     // consistently). Per-chart fields still win.
-    const effectiveHostOptions = { ...getFluxionDefaults(), ...current.hostOptions };
+    const effectiveHostOptions = {
+      ...getFluxionDefaults(),
+      ...themeRef.current,
+      ...current.hostOptions,
+    };
     if (effectiveHostOptions.pool?.isDisposed) {
       setMountKey((k) => k + 1);
       return;
@@ -468,10 +482,12 @@ export function useFluxionCanvas(
   // remount. `hostOptions` is otherwise mount-only; these two are the parts a
   // theme switch flips. Seeded in `seedReconcile` (INIT/warm already sent the
   // current values), so an unchanged value never re-posts.
-  // Merge app-wide defaults the same way the mount effect does, so the seeded
-  // appliedBg/appliedAxis baselines and this reconcile compare against identical
-  // values (no drift, no redundant re-post when a field comes only from a default).
-  const effectiveBg = { ...getFluxionDefaults(), ...options.hostOptions };
+  // Merge app-wide defaults + theme the same way the mount effect does, so the
+  // seeded appliedBg/appliedAxis baselines and this reconcile compare against
+  // identical values (no drift, no redundant re-post when a field comes only
+  // from a default or theme). A theme change flips `theme` → re-render → this
+  // recompute → reconcile posts setBgColor/setAxisStyle to the live host.
+  const effectiveBg = { ...getFluxionDefaults(), ...theme, ...options.hostOptions };
   const bgColor = effectiveBg.bgColor;
   const axisStyle = effectiveBg.axisStyle;
   const axisStyleKey = JSON.stringify(axisStyle ?? null);

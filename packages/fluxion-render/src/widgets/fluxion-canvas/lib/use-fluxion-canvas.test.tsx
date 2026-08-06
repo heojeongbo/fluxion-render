@@ -7,6 +7,12 @@ import {
   resetFluxionDefaults,
 } from "../../../features/host";
 import {
+  darkTheme,
+  FluxionThemeProvider,
+  lightTheme,
+  useFluxionTheme,
+} from "../../../features/theme";
+import {
   configureLifecycleScheduler,
   flushLifecycleScheduler,
   resetLifecycleScheduler,
@@ -832,6 +838,77 @@ describe("useFluxionCanvas resize forwarding", () => {
       vi.useRealTimers();
       configureLifecycleScheduler({ resizePerFrame: 8 });
     }
+  });
+});
+
+describe("useFluxionCanvas + FluxionThemeProvider", () => {
+  let capturedSetMode: ((m: "light" | "dark" | "system") => void) | null = null;
+
+  function ThemedChart({
+    factory,
+    bgColor,
+  }: {
+    factory: () => Worker;
+    bgColor?: string;
+  }) {
+    capturedSetMode = useFluxionTheme().setMode;
+    const { containerRef } = useFluxionCanvas({
+      layers: [{ id: "line", kind: "line" }],
+      // Only set bgColor when provided — an explicit `undefined` would clobber
+      // the theme's bgColor on merge (same quirk configureFluxionDefaults has).
+      hostOptions: { workerFactory: factory, ...(bgColor !== undefined && { bgColor }) },
+      staggerMount: false,
+    });
+    return <div ref={containerRef} style={{ width: 200, height: 100 }} />;
+  }
+
+  const initOf = (posts: RecordedPost[]) =>
+    posts.find((p) => (p.msg as { op: number }).op === Op.INIT)?.msg as
+      | { bgColor?: string; axisStyle?: unknown }
+      | undefined;
+  const ops = (posts: RecordedPost[]) => posts.map((p) => (p.msg as { op: number }).op);
+
+  afterEach(() => {
+    capturedSetMode = null;
+  });
+
+  it("a provider's theme bgColor + axisStyle reach INIT (no first-frame flash)", () => {
+    const { factory, posts } = makeFakeWorkerFactory();
+    render(
+      <FluxionThemeProvider defaultMode="dark">
+        <ThemedChart factory={factory} />
+      </FluxionThemeProvider>,
+    );
+    // bgColor rides INIT (so the opaque backing fills synchronously); axisStyle
+    // follows as its own SET_AXIS_STYLE post right after.
+    expect(initOf(posts)?.bgColor).toBe(darkTheme.bgColor);
+    const axis = posts.find((p) => (p.msg as { op: number }).op === Op.SET_AXIS_STYLE);
+    expect(axis?.msg).toMatchObject(darkTheme.axisStyle!);
+  });
+
+  it("setMode re-themes the live chart (SET_BG_COLOR + SET_AXIS_STYLE, no remount)", () => {
+    const { factory, posts } = makeFakeWorkerFactory();
+    render(
+      <FluxionThemeProvider defaultMode="dark">
+        <ThemedChart factory={factory} />
+      </FluxionThemeProvider>,
+    );
+    posts.length = 0;
+    act(() => capturedSetMode!("light"));
+    const bg = posts.find((p) => (p.msg as { op: number }).op === Op.SET_BG_COLOR);
+    expect((bg!.msg as { color: string }).color).toBe(lightTheme.bgColor);
+    expect(ops(posts)).toContain(Op.SET_AXIS_STYLE);
+    expect(ops(posts)).not.toContain(Op.INIT); // reconciled, not remounted
+  });
+
+  it("a per-chart hostOptions.bgColor overrides the theme (theme < hostOptions)", () => {
+    const { factory, posts } = makeFakeWorkerFactory();
+    render(
+      <FluxionThemeProvider defaultMode="dark">
+        <ThemedChart factory={factory} bgColor="#123456" />
+      </FluxionThemeProvider>,
+    );
+    expect(initOf(posts)?.bgColor).toBe("#123456");
   });
 });
 

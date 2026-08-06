@@ -56,6 +56,16 @@ export {
   useSyncedTimeWindow,
   useTimeOrigin,
 } from "./features/synced-time";
+export {
+  darkTheme,
+  type FluxionTheme,
+  type FluxionThemeContextValue,
+  type FluxionThemeMode,
+  FluxionThemeProvider,
+  type FluxionThemeProviderProps,
+  lightTheme,
+  useFluxionTheme,
+} from "./features/theme";
 export * from "./index";
 export {
   type BadgeTone,
