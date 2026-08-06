@@ -18,7 +18,7 @@
   },
   "hooks": {
     "before:init": [
-      "node packages/fluxion-replay/scripts/check-render-peer.mjs",
+      "node scripts/check-render-peer.mjs",
       "pnpm --filter @heojeongbo/fluxion-replay typecheck",
       "pnpm --filter @heojeongbo/fluxion-replay test",
       "pnpm --filter @heojeongbo/fluxion-replay build"
