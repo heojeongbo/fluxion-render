@@ -117,4 +117,50 @@ describe("Viewport", () => {
       expect(v.yToPx(10)).toBe(10);
     });
   });
+
+  describe("projection coefficient cache", () => {
+    it("recomputes when bounds are MUTATED IN PLACE (finalizeBounds path)", () => {
+      const v = new Viewport();
+      v.setSize(100, 100, 1);
+      v.setBounds({ xMin: 0, xMax: 10, yMin: 0, yMax: 10 });
+      expect(v.xToPx(5)).toBe(50);
+      expect(v.yToPx(5)).toBe(50);
+      // AxisGridLayer.finalizeBounds mutates the SAME bounds object in place
+      // (not via setBounds) — the value-guard must notice and recompute.
+      v.bounds.xMin = -10;
+      v.bounds.xMax = 10;
+      v.bounds.yMin = -10;
+      v.bounds.yMax = 10;
+      expect(v.xToPx(0)).toBe(50); // (0-(-10))/20*100
+      expect(v.yToPx(0)).toBe(50);
+    });
+
+    it("recomputes when size / inset / yPad change", () => {
+      const v = new Viewport();
+      v.setSize(100, 100, 1);
+      v.setBounds({ xMin: 0, xMax: 10, yMin: 0, yMax: 10 });
+      expect(v.xToPx(10)).toBe(100);
+      v.setSize(200, 100, 1);
+      expect(v.xToPx(10)).toBe(200); // width change invalidates the x cache
+      v.insetLeft = 40;
+      expect(v.xToPx(0)).toBe(40); // inset change invalidates again
+
+      expect(v.yToPx(0)).toBe(100);
+      v.insetBottom = 20;
+      expect(v.yToPx(0)).toBe(80); // plotBottom moved up
+      v.yPadPx = 10;
+      expect(v.yToPx(10)).toBe(10); // pad change invalidates the y cache
+    });
+
+    it("cached repeat calls return identical values (no drift across a frame)", () => {
+      const v = new Viewport();
+      v.setSize(800, 260, 2);
+      v.setBounds({ xMin: 1000, xMax: 6000, yMin: -2, yMax: 3 });
+      const a = v.xToPx(3456.7);
+      const b = v.xToPx(3456.7); // second call hits the cache
+      expect(b).toBe(a);
+      const c = v.yToPx(0.42);
+      expect(v.yToPx(0.42)).toBe(c);
+    });
+  });
 });

@@ -51,6 +51,8 @@ export class HeatmapStreamLayer implements Layer {
   private colTs: Float32Array; // timestamps per column
   private head = 0;
   private count = 0;
+  // Persistent per-draw scratch: row pixel-Y by bin index (see draw()).
+  private _rowPy: Float32Array | null = null;
   // Cached auto value-range over the retained columns. Recomputed on setData
   // (when minValue/maxValue is auto) instead of rescanning O(cols×bins) every
   // draw — the ring only changes on setData, so the cache is always fresh.
@@ -171,7 +173,18 @@ export class HeatmapStreamLayer implements Layer {
 
     // Compute cell pixel dimensions.
     const cellH = viewport.plotHeight / bins;
+    const cellHpx = Math.ceil(cellH) + 1;
     const start = this.count < this.maxCols ? 0 : this.head;
+
+    // The row pixel-Y depends only on the bin index, not the column, so compute
+    // it ONCE per draw (was `yToPx` per cell — cols×bins calls for bins rows).
+    const dy = this.yMax - this.yMin;
+    if (!this._rowPy || this._rowPy.length !== bins) this._rowPy = new Float32Array(bins);
+    const rowPy = this._rowPy;
+    for (let b = 0; b < bins; b++) {
+      const yVal = this.yMin + (b / bins) * dy;
+      rowPy[b] = viewport.yToPx(yVal + dy / bins);
+    }
 
     // Draw columns oldest→newest, clipped to visible x range.
     for (let i = 0; i < this.count; i++) {
@@ -189,13 +202,11 @@ export class HeatmapStreamLayer implements Layer {
       }
 
       const base = slot * bins;
+      const left = px - cellW / 2;
       for (let b = 0; b < bins; b++) {
-        // y-bin 0 = bottom (yMin), b = bins-1 = top (yMax).
-        const yVal = this.yMin + (b / bins) * (this.yMax - this.yMin);
-        const py = viewport.yToPx(yVal + (this.yMax - this.yMin) / bins);
         const norm = Math.max(0, Math.min(1, (this.colData[base + b]! - vMin) / range));
         ctx.fillStyle = lutStrings[Math.floor(norm * 255)]!;
-        ctx.fillRect(px - cellW / 2, py, cellW, Math.ceil(cellH) + 1);
+        ctx.fillRect(left, rowPy[b]!, cellW, cellHpx);
       }
     }
   }

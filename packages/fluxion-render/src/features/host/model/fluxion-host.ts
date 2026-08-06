@@ -300,6 +300,14 @@ export class FluxionHost {
   // flush scheduler's Map on every sample. The actual frame scheduling is
   // shared across all hosts — see `shared/lib/flush-scheduler`.
   private flushScheduled = false;
+  // Last (width,height,dpr) sent to the worker (seeded from INIT). A newly
+  // laid-out cold chart's first ResizeObserver measurement usually equals the
+  // INIT size, and forwarding it would reallocate the GPU backing INIT just
+  // allocated — a redundant realloc per chart amplifying the mount burst. Skip
+  // resizes that don't change the size.
+  private _lastW = Number.NaN;
+  private _lastH = Number.NaN;
+  private _lastDpr = Number.NaN;
 
   constructor(canvas: HTMLCanvasElement, options: FluxionHostOptions = {}) {
     // App-wide defaults (configureFluxionDefaults) underlay the caller's options;
@@ -347,6 +355,10 @@ export class FluxionHost {
       },
       [offscreen],
     );
+    // Seed the resize dedup with the size INIT already applied.
+    this._lastW = width;
+    this._lastH = height;
+    this._lastDpr = dpr;
 
     // Transfer axis canvases to the Worker so they render in the same rAF cycle.
     // The webgl backend has no 2d axis-canvas path — warn and ignore them.
@@ -484,6 +496,11 @@ export class FluxionHost {
    */
   releaseBackings(): void {
     if (this.disposed) return;
+    // The worker shrinks the backing to 0×0; the next resize must re-allocate it
+    // even at the same size, so clear the dedup baseline.
+    this._lastW = Number.NaN;
+    this._lastH = Number.NaN;
+    this._lastDpr = Number.NaN;
     this.post({ op: Op.RELEASE_BACKING });
   }
 
@@ -972,6 +989,13 @@ export class FluxionHost {
   }
 
   resize(width: number, height: number, dpr: number): void {
+    if (this.disposed) return;
+    // Skip a resize that doesn't change the size — the worker would otherwise
+    // reallocate the GPU backing for the same dimensions (see `_lastW` note).
+    if (width === this._lastW && height === this._lastH && dpr === this._lastDpr) return;
+    this._lastW = width;
+    this._lastH = height;
+    this._lastDpr = dpr;
     this.flushAll();
     this.post({ op: Op.RESIZE, width, height, dpr });
   }

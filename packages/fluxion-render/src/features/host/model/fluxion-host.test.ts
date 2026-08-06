@@ -99,6 +99,42 @@ describe("FluxionHost", () => {
     plainHost.dispose();
   });
 
+  it("resize dedups the INIT size but forwards real changes and re-arms after releaseBackings", () => {
+    const { worker, posts } = makeFakeWorker();
+    const host = new FluxionHost(makeCanvas(400, 300), { workerFactory: () => worker });
+    const init = posts[0]!.msg as {
+      op: number;
+      width: number;
+      height: number;
+      dpr: number;
+    };
+    posts.length = 0;
+    const isResize = (p: { msg: unknown }) => (p.msg as { op: number }).op === Op.RESIZE;
+
+    // Same (w,h,dpr) as INIT → skipped (would realloc the backing for nothing).
+    host.resize(init.width, init.height, init.dpr);
+    expect(posts.filter(isResize)).toHaveLength(0);
+
+    // A real change forwards.
+    host.resize(init.width + 20, init.height, init.dpr);
+    expect(posts.filter(isResize)).toHaveLength(1);
+
+    // Same again → skipped.
+    host.resize(init.width + 20, init.height, init.dpr);
+    expect(posts.filter(isResize)).toHaveLength(1);
+
+    // releaseBackings (0×0) re-arms: the next same-size resize must re-allocate.
+    host.releaseBackings();
+    host.resize(init.width + 20, init.height, init.dpr);
+    expect(posts.filter(isResize)).toHaveLength(2);
+
+    // Resize after dispose is a no-op.
+    host.dispose();
+    posts.length = 0;
+    host.resize(999, 999, 3);
+    expect(posts.filter(isResize)).toHaveLength(0);
+  });
+
   it("sends INIT with OffscreenCanvas in the transfer list on construction", () => {
     const { worker, posts } = makeFakeWorker();
     const host = new FluxionHost(makeCanvas(400, 300), {

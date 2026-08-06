@@ -93,21 +93,70 @@ export class Viewport {
     this.observedYMax = Number.NEGATIVE_INFINITY;
   }
 
+  // Cached projection coefficients. `xToPx`/`yToPx` are the engine's hottest
+  // primitive (once per visible sample per layer per frame — tens of millions/s
+  // at scale). The affine is constant across a frame, so cache the multiplier
+  // and recompute it only when an input changed — collapsing a per-sample divide
+  // to one divide per axis per frame. Value-guarded on the live inputs (bounds
+  // is mutated in place by finalizeBounds), so it self-corrects with no explicit
+  // invalidation.
+  private _xMin = Number.NaN;
+  private _xMax = Number.NaN;
+  private _xW = Number.NaN;
+  private _xInset = Number.NaN;
+  private _xMul = 0;
+  private _yMin = Number.NaN;
+  private _yMax = Number.NaN;
+  private _yH = Number.NaN;
+  private _yInsetB = Number.NaN;
+  private _yPad = Number.NaN;
+  private _yMul = 0;
+  private _yBase = 0;
+
   xToPx(x: number): number {
     const { xMin, xMax } = this.bounds;
-    // `|| 1` guards a degenerate (xMin === xMax) span so the result is a finite
-    // pixel instead of NaN/Infinity (matches engine.ts's `yMax - yMin || 1`).
-    const span = xMax - xMin || 1;
-    return this.insetLeft + ((x - xMin) / span) * (this.widthPx - this.insetLeft);
+    const inset = this.insetLeft;
+    const w = this.widthPx;
+    if (
+      xMin !== this._xMin ||
+      xMax !== this._xMax ||
+      w !== this._xW ||
+      inset !== this._xInset
+    ) {
+      this._xMin = xMin;
+      this._xMax = xMax;
+      this._xW = w;
+      this._xInset = inset;
+      // `|| 1` guards a degenerate (xMin === xMax) span (matches engine's
+      // `yMax - yMin || 1`).
+      this._xMul = (w - inset) / (xMax - xMin || 1);
+    }
+    return inset + (x - xMin) * this._xMul;
   }
 
   yToPx(y: number): number {
     const { yMin, yMax } = this.bounds;
-    // `yPadPx` breathing room composes INSIDE the plot rect: data maps into
-    // `[pad, plotHeight - pad]` — identical to today when insetBottom is 0.
     const pad = this.yPadPx;
-    const usable = this.heightPx - this.insetBottom - pad * 2;
-    const span = yMax - yMin || 1;
-    return pad + usable - ((y - yMin) / span) * usable;
+    const h = this.heightPx;
+    const insetB = this.insetBottom;
+    if (
+      yMin !== this._yMin ||
+      yMax !== this._yMax ||
+      h !== this._yH ||
+      insetB !== this._yInsetB ||
+      pad !== this._yPad
+    ) {
+      this._yMin = yMin;
+      this._yMax = yMax;
+      this._yH = h;
+      this._yInsetB = insetB;
+      this._yPad = pad;
+      // `yPadPx` breathing room composes INSIDE the plot rect: data maps into
+      // `[pad, plotHeight - pad]` — identical to today when insetBottom is 0.
+      const usable = h - insetB - pad * 2;
+      this._yMul = usable / (yMax - yMin || 1);
+      this._yBase = pad + usable;
+    }
+    return this._yBase - (y - yMin) * this._yMul;
   }
 }

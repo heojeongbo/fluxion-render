@@ -91,10 +91,23 @@ export class RingBuffer {
   }
 
   forEach(fn: (data: Float32Array, offset: number, index: number) => void): void {
-    const start = this.count < this.capacity ? 0 : this.head;
-    for (let i = 0; i < this.count; i++) {
-      const slot = (start + i) % this.capacity;
-      fn(this.data, slot * this.stride, i);
+    // The retained records are at most two contiguous physical runs
+    // ([start, capacity) then [0, head)), so walk each with a plain incrementing
+    // offset — no per-element `% capacity` (this runs once per sample per 2d
+    // streaming draw/scan). Order and callback shape are identical to before.
+    const { count, capacity, stride, data } = this;
+    const start = count < capacity ? 0 : this.head;
+    const firstLen = Math.min(count, capacity - start);
+    let index = 0;
+    for (
+      let off = start * stride, end = (start + firstLen) * stride;
+      off < end;
+      off += stride
+    ) {
+      fn(data, off, index++);
+    }
+    for (let off = 0, end = (count - firstLen) * stride; off < end; off += stride) {
+      fn(data, off, index++);
     }
   }
 

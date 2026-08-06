@@ -794,9 +794,12 @@ describe("useFluxionCanvas resize forwarding", () => {
         </>,
       );
       for (const c of charts) c.posts.length = 0;
-      // One layout change fires every chart's observer in the same tick.
+      // One layout change fires every chart's observer in the same tick. Use a
+      // size that DIFFERS from the INIT size (happy-dom getBoundingClientRect is
+      // 0 → INIT falls back to 300×150), else the host's resize dedup correctly
+      // skips a no-op resize and nothing would forward.
       act(() => {
-        for (const cb of cbs) cb([{ contentRect: { width: 300, height: 150 } }]);
+        for (const cb of cbs) cb([{ contentRect: { width: 320, height: 160 } }]);
       });
       const resizeCount = () =>
         charts.reduce(
