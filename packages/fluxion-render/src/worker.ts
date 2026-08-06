@@ -38,7 +38,39 @@ export {
   defineWorker,
   defineWorkerWithState,
 } from "@heojeongbo/fluxion-worker";
-export { Engine } from "./features/engine";
+// Built-in layer classes, for a custom slim worker that registers only the
+// kinds it uses (bundler tree-shakes the rest). Pair each with `registerLayer`:
+//   registerLayer("line", (id) => new LineChartLayer(id))
+// Or call `registerDefaultLayers()` to register all of them (the default worker).
+export { AreaChartLayer } from "./entities/area-chart-layer";
+export { AxisGridLayer } from "./entities/axis-grid-layer";
+export { BarChartLayer } from "./entities/bar-chart-layer";
+export { BoxPlotLayer } from "./entities/box-plot-layer";
+export { CandlestickLayer } from "./entities/candlestick-layer";
+export { EventMarkerLayer } from "./entities/event-marker-layer";
+export { HeatmapLayer } from "./entities/heatmap-layer";
+export { HeatmapStreamLayer } from "./entities/heatmap-stream-layer";
+export { HistogramLayer } from "./entities/histogram-layer";
+export { LidarScatterLayer } from "./entities/lidar-scatter-layer";
+export { LineChartLayer } from "./entities/line-chart-layer";
+export { LineChartStaticLayer } from "./entities/line-chart-static-layer";
+export { OccupancyGridLayer } from "./entities/occupancy-grid-layer";
+export { PolarLayer } from "./entities/polar-layer";
+export { PoseArrowLayer } from "./entities/pose-arrow-layer";
+export { ReferenceLineLayer } from "./entities/reference-line-layer";
+export { ScatterChartLayer } from "./entities/scatter-chart-layer";
+export { ScatterColoredLayer } from "./entities/scatter-colored-layer";
+export { StackedAreaLayer } from "./entities/stacked-area-layer";
+export { StepChartLayer } from "./entities/step-chart-layer";
+export { TrajectoryLayer } from "./entities/trajectory-layer";
+export {
+  createLayer,
+  Engine,
+  hasLayer,
+  type LayerFactory,
+  registerDefaultLayers,
+  registerLayer,
+} from "./features/engine";
 export type {
   BoundsUpdateMsg,
   DType,

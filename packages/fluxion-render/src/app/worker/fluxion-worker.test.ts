@@ -7,6 +7,9 @@ vi.mock("../../features/engine", () => ({
   Engine: class {
     dispatch(): void {}
   },
+  // The worker registers all layer kinds at module load; a no-op is enough here
+  // (we assert message routing, not layer creation).
+  registerDefaultLayers: () => {},
 }));
 
 // Importing installs `self.onmessage` (the router under test).

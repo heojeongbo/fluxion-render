@@ -1,10 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetFrameDriver } from "../../../shared/model/frame-driver";
 import { flushOutbound, resetOutbox } from "../../../shared/model/outbox";
 import { Scheduler } from "../../../shared/model/scheduler";
 import { type BatchEntry, Op, SOLO_HOST_ID } from "../../../shared/protocol";
 import { type FakeCtx, labelDraws } from "../../../test/setup";
 import { Engine } from "./engine";
+import { registerDefaultLayers } from "./register-default-layers";
+
+// The engine builds layers through the registry now — register every built-in
+// kind once so these tests exercise all of them (the default worker does the same).
+beforeAll(() => registerDefaultLayers());
 
 /**
  * Drain the shared outbox into a flat list of per-host entries. The engine no

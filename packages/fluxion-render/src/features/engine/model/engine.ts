@@ -1,25 +1,9 @@
-import { AreaChartLayer } from "../../../entities/area-chart-layer";
+// AxisGridLayer is the ONE layer class engine.ts references directly (the
+// `isAxisGrid` instanceof guard), so it is always bundled — fine, axes are
+// universal. Every OTHER layer class is pulled in only by the registry
+// (register-default-layers), so a custom slim worker tree-shakes the unused ones.
 import { AxisGridLayer } from "../../../entities/axis-grid-layer";
-import { BarChartLayer } from "../../../entities/bar-chart-layer";
-import { BoxPlotLayer } from "../../../entities/box-plot-layer";
-import { CandlestickLayer } from "../../../entities/candlestick-layer";
-import { EventMarkerLayer } from "../../../entities/event-marker-layer";
-import { HeatmapLayer } from "../../../entities/heatmap-layer";
-import { HeatmapStreamLayer } from "../../../entities/heatmap-stream-layer";
-import { HistogramLayer } from "../../../entities/histogram-layer";
 import { LayerStack } from "../../../entities/layer-stack";
-import { LidarScatterLayer } from "../../../entities/lidar-scatter-layer";
-import { LineChartLayer } from "../../../entities/line-chart-layer";
-import { LineChartStaticLayer } from "../../../entities/line-chart-static-layer";
-import { OccupancyGridLayer } from "../../../entities/occupancy-grid-layer";
-import { PolarLayer } from "../../../entities/polar-layer";
-import { PoseArrowLayer } from "../../../entities/pose-arrow-layer";
-import { ReferenceLineLayer } from "../../../entities/reference-line-layer";
-import { ScatterChartLayer } from "../../../entities/scatter-chart-layer";
-import { ScatterColoredLayer } from "../../../entities/scatter-colored-layer";
-import { StackedAreaLayer } from "../../../entities/stacked-area-layer";
-import { StepChartLayer } from "../../../entities/step-chart-layer";
-import { TrajectoryLayer } from "../../../entities/trajectory-layer";
 import { GlRenderer } from "../../../shared/gl/gl-renderer";
 import type { Layer } from "../../../shared/model/layer";
 import { enqueueBounds, enqueueStats, enqueueTicks } from "../../../shared/model/outbox";
@@ -28,58 +12,11 @@ import { Viewport } from "../../../shared/model/viewport";
 import type {
   AxisStyle,
   HostMsg,
-  LayerKind,
   RendererKind,
   SetAxisCanvasMsg,
 } from "../../../shared/protocol";
 import { Op, SOLO_HOST_ID } from "../../../shared/protocol";
-
-function createLayer(id: string, kind: LayerKind): Layer {
-  switch (kind) {
-    case "line":
-      return new LineChartLayer(id);
-    case "line-static":
-      return new LineChartStaticLayer(id);
-    case "lidar":
-      return new LidarScatterLayer(id);
-    case "axis-grid":
-      return new AxisGridLayer(id);
-    case "scatter":
-      return new ScatterChartLayer(id);
-    case "area":
-      return new AreaChartLayer(id);
-    case "step":
-      return new StepChartLayer(id);
-    case "bar":
-      return new BarChartLayer(id);
-    case "candlestick":
-      return new CandlestickLayer(id);
-    case "heatmap":
-      return new HeatmapLayer(id);
-    case "event-marker":
-      return new EventMarkerLayer(id);
-    case "scatter-colored":
-      return new ScatterColoredLayer(id);
-    case "heatmap-stream":
-      return new HeatmapStreamLayer(id);
-    case "reference-line":
-      return new ReferenceLineLayer(id);
-    case "pose-arrow":
-      return new PoseArrowLayer(id);
-    case "trajectory":
-      return new TrajectoryLayer(id);
-    case "occupancy-grid":
-      return new OccupancyGridLayer(id);
-    case "histogram":
-      return new HistogramLayer(id);
-    case "stacked-area":
-      return new StackedAreaLayer(id);
-    case "box-plot":
-      return new BoxPlotLayer(id);
-    case "polar":
-      return new PolarLayer(id);
-  }
-}
+import { createLayer } from "./layer-registry";
 
 /** Type guard hoisted to module scope so render() doesn't allocate it per frame. */
 function isAxisGrid(l: Layer): l is AxisGridLayer {

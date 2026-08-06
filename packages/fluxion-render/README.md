@@ -1851,6 +1851,29 @@ import type {
 } from "@heojeongbo/fluxion-render/worker";
 ```
 
+**Slim worker bundle (tree-shaking layers).** The built-in worker registers all
+21 layer kinds, so its bundle includes every layer class. `Engine` creates
+layers through a registry, so a **custom worker can register only the kinds it
+uses** — the bundler (`sideEffects: false`) then drops the rest. For an app that
+only draws lines + axes, this trims most of the layer code:
+
+```ts
+// slim-worker.ts — supports only 'line' and 'axis-grid'
+import { Engine, registerLayer, LineChartLayer, AxisGridLayer, defineWorkerWithState }
+  from "@heojeongbo/fluxion-render/worker";
+
+registerLayer("line", (id) => new LineChartLayer(id));
+registerLayer("axis-grid", (id) => new AxisGridLayer(id));
+// (the other 19 layer classes are never imported → tree-shaken out)
+
+defineWorkerWithState(/* …dispatch to a `new Engine()` as shown below… */);
+```
+
+Point a chart's `workerFactory` at this script (solo mode) to use it. Adding a
+layer of an unregistered kind throws a clear error. Call `registerDefaultLayers()`
+to register all kinds (what the default worker does) — or `registerLayer(kind, factory)`
+with your OWN `Layer` subclass to add a custom layer type.
+
 ### Worker script
 
 ```ts

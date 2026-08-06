@@ -1,8 +1,13 @@
-import { Engine } from "../../features/engine";
+import { Engine, registerDefaultLayers } from "../../features/engine";
 import { getFrameDriver } from "../../shared/model/frame-driver";
 import { flushOutbound } from "../../shared/model/outbox";
 import type { FluxionPoolStreamMsg, HostMsg } from "../../shared/protocol";
 import { Op, SOLO_HOST_ID } from "../../shared/protocol";
+
+// The default worker supports every layer kind — register them all up front.
+// (A custom slim worker skips this and registers only what it uses, so the
+// bundler tree-shakes the rest.)
+registerDefaultLayers();
 
 const engines = new Map<string, Engine>();
 
