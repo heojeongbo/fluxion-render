@@ -17,7 +17,14 @@ npm install @heojeongbo/fluxion-render
 
 - **ESM-only.** The package ships ES modules (no CommonJS `require` build). Use a bundler or Node's native ESM.
 - **Browser baseline.** Rendering uses `OffscreenCanvas` + `canvas.transferControlToOffscreen()` in a Web Worker: **Chrome/Edge 69+, Firefox 105+, Safari 16.4+**. There is no main-thread fallback.
-- **Client-only.** The engine touches `Worker`, `OffscreenCanvas`, and (in `/react`) DOM refs — it does not run during SSR. In Next.js/Remix, render `<FluxionCanvas>` (and any `useFluxion*` hook) only on the client (`'use client'` + a mount guard); server-render a placeholder.
+- **Client-only.** The engine touches `Worker`, `OffscreenCanvas`, and (in `/react`) DOM refs — it does not run during SSR. In Next.js/Remix, render `<FluxionCanvas>` (and any `useFluxion*` hook) only on the client; server-render a placeholder. In **Next.js** the cleanest guard is a client-only dynamic import:
+
+  ```tsx
+  // ChartPanel.tsx starts with 'use client' and imports from '@heojeongbo/fluxion-render/react'
+  const ChartPanel = dynamic(() => import('./ChartPanel'), { ssr: false });
+  ```
+
+  In **Remix** wrap the chart in a `<ClientOnly>` (from `remix-utils`) or a mounted-state guard (`const [m, setM] = useState(false); useEffect(() => setM(true), [])`). Optionally feature-detect `typeof OffscreenCanvas !== 'undefined'` before mounting to degrade gracefully on unsupported browsers.
 - **Import paths:**
   - `@heojeongbo/fluxion-render` — framework-agnostic core: `FluxionHost`, `FluxionWorkerPool`, layer factories, protocol types. **No React.**
   - `@heojeongbo/fluxion-render/react` — a superset of the core **plus** all hooks/components. React apps import from here (core types like `AreaChartConfig` are re-exported, so one import is enough).
@@ -34,6 +41,19 @@ npm install @heojeongbo/fluxion-render
 - [Vanilla JS API](#vanilla-js-api) — `FluxionHost` / `FluxionWorkerPool` without React
 - [Data Format](#data-format) · [Custom Worker Script](#custom-worker-script-zero-copy-stream) · [Architecture](#architecture)
 - [Troubleshooting](#troubleshooting) · [Upgrading](#upgrading) · [Testing](#testing)
+
+### Recipes — jump to the answer
+
+| I want to… | Go to |
+| --- | --- |
+| Theme charts (light/dark toggle, `FluxionThemeProvider`) | [Theming](#theming-lightdark--colors-css-cant-reach) |
+| Set app-wide defaults once (`configureFluxionDefaults`) | [Theming → app-wide defaults](#theming-lightdark--colors-css-cant-reach) |
+| Render 100s of charts smoothly | [Performance / many charts](#performance--many-charts) |
+| Stop rendering scrolled-off charts | [`pauseWhenOffscreen`](#pausing-off-screen-charts-pausewhenoffscreen) |
+| Speed up Firefox with the GPU backend | [WebGL renderer](#webgl-renderer-renderer-webgl--the-firefox-prescription) |
+| Reuse hosts under mount/unmount churn | [`recyclePool`](#recycling-hosts-under-heavy-churn-recyclepool) |
+| Use it in Next.js / Remix (SSR) | [Requirements & entry points](#requirements--entry-points) |
+| Use it without React (vanilla) | [Vanilla JS API](#vanilla-js-api) |
 
 ---
 
@@ -555,6 +575,49 @@ these two on change (seeded at mount, so an unchanged value never re-posts
 across a large grid). Series colors already reconcile through the normal layer
 config path.
 
+**Batteries-included: `<FluxionThemeProvider>`.** Rather than thread `bgColor`
+and `axisStyle` through every chart, wrap a subtree once — every `FluxionCanvas`
+underneath inherits them from the theme, and a light/dark switch re-themes them
+all at once (no remount, thanks to the reconcile above). Precedence is
+`theme < per-chart hostOptions < axis props`, so a chart can still override.
+
+```tsx
+import { FluxionThemeProvider, useFluxionTheme } from '@heojeongbo/fluxion-render/react';
+
+// Wrap the app (or any chart subtree). `defaultMode="system"` tracks the OS
+// prefers-color-scheme and follows it live; use "light" / "dark" to pin.
+<FluxionThemeProvider defaultMode="system">
+  <Dashboard />
+</FluxionThemeProvider>;
+
+// A toggle anywhere inside — setMode re-themes every chart under the provider.
+function ThemeToggle() {
+  const { resolvedMode, setMode } = useFluxionTheme();
+  return (
+    <button onClick={() => setMode(resolvedMode === 'dark' ? 'light' : 'dark')}>
+      {resolvedMode === 'dark' ? '🌙 Dark' : '☀️ Light'}
+    </button>
+  );
+}
+```
+
+Customize the palettes with `themes` (a partial merges over the built-in
+`darkTheme` / `lightTheme`, so overriding one field keeps the rest):
+
+```tsx
+<FluxionThemeProvider
+  defaultMode="dark"
+  themes={{ dark: { bgColor: 'oklch(0.2 0.02 260)' } }} // keeps the preset axis style
+/>
+```
+
+The themed `bgColor` reaches INIT, so a first frame is correctly themed (no
+flash — same guarantee as `configureFluxionDefaults` below). The provider covers
+the canvas background + external/inline axis styling; **in-canvas grid/label
+colors** (the `axis-grid` layer's `gridColor`/`axisColor`/`labelColor`) are still
+per-layer — theme those via the layer config shown above. `useFluxionTheme()`
+returns `{ theme, mode, resolvedMode, setMode }` and throws outside a provider.
+
 **Pass `bgColor` at construction for a correct first frame.** The default
 canvas context is opaque, so the worker fills `bgColor` into the backing
 synchronously at INIT — a light-theme chart paints its background on the very
@@ -1069,6 +1132,27 @@ const layers = useMemo(() => [
 
 Structural changes (adding/removing layers, changing a layer's `kind`) are
 not reconciled — remount with a different `key` for those.
+
+### `<FluxionThemeProvider>` / `useFluxionTheme()`
+
+App-wide chart theming (see [Theming](#theming-lightdark--colors-css-cant-reach)).
+Supplies `bgColor` + `axisStyle` as the option-merge base for every
+`FluxionCanvas` below it, so a light/dark switch re-themes all charts with no
+remount.
+
+```tsx
+<FluxionThemeProvider
+  defaultMode?="system"    // "system" (tracks + follows prefers-color-scheme) | "light" | "dark"
+  themes?={{ light?, dark? }} // partial overrides merged over the built-in presets
+  onModeChange?={(mode) => …}  // fires on toggle or a live OS change
+>{children}</FluxionThemeProvider>;
+
+const { theme, mode, resolvedMode, setMode } = useFluxionTheme(); // throws outside a provider
+```
+
+`resolvedMode` is the concrete `"light" | "dark"` (`"system"` resolved); `setMode`
+drives a toggle. `darkTheme` / `lightTheme` (the presets) and the `FluxionTheme`
+type are exported for building custom palettes.
 
 ### `useFluxionStream(options)`
 
@@ -1600,7 +1684,8 @@ import { FluxionCanvas } from '@heojeongbo/fluxion-render/react';
 ```ts
 const host = new FluxionHost(canvas, opts?: FluxionHostOptions);
 
-// Layer management
+// Layer management — addLayer<K> types `config` to the kind (LayerConfigByKind),
+// so all 21 kinds get autocomplete + typo detection (not just line/axis-grid).
 host.addLayer(id, kind, config?)
 host.removeLayer(id)
 host.configLayer(id, config)
