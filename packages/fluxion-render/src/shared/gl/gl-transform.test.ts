@@ -7,6 +7,19 @@ function apply(t: ClipTransform, x: number, y: number): [number, number] {
   return [(x - t[0]!) * t[2]! + t[4]!, (y - t[1]!) * t[3]! + t[5]!];
 }
 
+/**
+ * Data-space vertices carry an xMin-relative delta (buildLineVertices), so the
+ * shader receives `x - xMin`, not raw `x`. This mirrors what the GPU sees.
+ */
+function applyData(
+  t: ClipTransform,
+  v: Viewport,
+  x: number,
+  y: number,
+): [number, number] {
+  return apply(t, x - v.bounds.xMin, y);
+}
+
 /** The clip-space point the 2d path's pixel coordinates land on. */
 function pxToClipSpace(v: Viewport, px: number, py: number): [number, number] {
   return [(2 * px) / v.widthPx - 1, 1 - (2 * py) / v.heightPx];
@@ -33,7 +46,7 @@ describe("gl-transform", () => {
       [3500, 0.5],
       [1234.5, -1.25],
     ] as const) {
-      const [cx, cy] = apply(t, x, y);
+      const [cx, cy] = applyData(t, v, x, y);
       const [ex, ey] = pxToClipSpace(v, v.xToPx(x), v.yToPx(y));
       expect(Math.abs(cx - ex)).toBeLessThan(1e-9);
       expect(Math.abs(cy - ey)).toBeLessThan(1e-9);
@@ -56,7 +69,7 @@ describe("gl-transform", () => {
       [2000, 4],
     ] as const) {
       // The 2d path draws yToPx(y + yOffset) — the transform must match that.
-      const [cx, cy] = apply(t, x, y);
+      const [cx, cy] = applyData(t, v, x, y);
       const [ex, ey] = pxToClipSpace(v, v.xToPx(x), v.yToPx(y + yOffset));
       expect(Math.abs(cx - ex)).toBeLessThan(1e-9);
       expect(Math.abs(cy - ey)).toBeLessThan(1e-9);
@@ -69,7 +82,7 @@ describe("gl-transform", () => {
     v.setBounds({ xMin: 5, xMax: 5, yMin: 1, yMax: 1 });
     const t = f64();
     dataToClip(v, 0, t);
-    const [cx, cy] = apply(t, 5, 1);
+    const [cx, cy] = applyData(t, v, 5, 1);
     const [ex, ey] = pxToClipSpace(v, v.xToPx(5), v.yToPx(1));
     expect(cx).toBeCloseTo(ex, 9);
     expect(cy).toBeCloseTo(ey, 9);
@@ -98,7 +111,7 @@ describe("gl-transform", () => {
       expect(Math.abs(cy - ey)).toBeLessThan(1e-9);
     }
     // x mapping is the shared plot mapping.
-    const [cx] = apply(t, 250, lo);
+    const [cx] = applyData(t, v, 250, lo);
     const [ex] = pxToClipSpace(v, v.xToPx(250), 0);
     expect(Math.abs(cx - ex)).toBeLessThan(1e-9);
   });
@@ -109,7 +122,7 @@ describe("gl-transform", () => {
     v.setBounds({ xMin: 5, xMax: 5, yMin: 0, yMax: 1 });
     const t = f64();
     laneToClip(v, 10, 50, 3, 3, t);
-    const [cx, cy] = apply(t, 5, 3);
+    const [cx, cy] = applyData(t, v, 5, 3);
     expect(Number.isFinite(cx)).toBe(true);
     expect(Number.isFinite(cy)).toBe(true);
   });
@@ -124,20 +137,28 @@ describe("gl-transform", () => {
     expect(apply(t, 160, 90)).toEqual([0, 0]);
   });
 
-  it("keeps sub-0.01px accuracy through fp32 storage at large host-relative t", () => {
+  it("keeps sub-0.01px accuracy through fp32 storage past the 2^24 ms cliff", () => {
     const v = new Viewport();
     v.setSize(800, 400, 2);
-    // ~3 hours of host-relative ms — the realistic worst case for fp32 t.
-    const t0 = 10_000_000;
+    // ~13.9 hours of host-relative ms — WELL past 2^24 (4.66 h), where a raw fp32
+    // `t` skips whole milliseconds and the shader's large-minus-large subtraction
+    // collapses adjacent samples. The delta VBO (t - xMin) sidesteps both.
+    const t0 = 50_000_000;
     v.setBounds({ xMin: t0, xMax: t0 + 5000, yMin: -1, yMax: 1 });
     const t = new Float32Array(6);
     dataToClip(v, 0, t);
     for (const x of [t0, t0 + 1234, t0 + 5000]) {
-      // fp32 vertex + fp32 coefficients, exactly what the GPU computes.
-      const cx = (Math.fround(x) - t[0]!) * t[2]! + t[4]!;
+      // fp32 delta vertex + fp32 coefficients, exactly what the GPU computes:
+      // buildLineVertices stores fround(x - xMin); the transform's x-origin is 0.
+      const vert = Math.fround(x - v.bounds.xMin);
+      const cx = (vert - t[0]!) * t[2]! + t[4]!;
       const expectedPx = v.xToPx(x);
       const gotPx = ((cx + 1) / 2) * v.widthPx;
       expect(Math.abs(gotPx - expectedPx)).toBeLessThan(0.01);
     }
+    // Sanity: the raw-t encoding this replaced loses a 1 ms distinction here
+    // (fp32 ulp at ~50 M ms is 4 ms), while the delta stores it exactly.
+    expect(Math.fround(t0 + 1)).toBe(Math.fround(t0)); // raw: 1 ms collapsed
+    expect(Math.fround(t0 + 1 - t0)).toBe(1); // delta: 1 ms preserved
   });
 });

@@ -13,7 +13,7 @@ function scratchFor(ring: RingBuffer): Float32Array {
 }
 
 describe("buildLineVertices", () => {
-  it("copies visible samples chronologically as raw [t, y] pairs", () => {
+  it("copies visible samples chronologically as [t - xMin, y] pairs (xMin 0 ⇒ raw)", () => {
     const ring = ringOf(8, [
       [0, 1],
       [100, 2],
@@ -23,11 +23,12 @@ describe("buildLineVertices", () => {
     const breaks: number[] = [];
     const n = buildLineVertices(ring, 0, undefined, out, breaks);
     expect(n).toBe(3);
+    // xMin = 0 → the delta equals raw t.
     expect(Array.from(out.subarray(0, 6))).toEqual([0, 1, 100, 2, 200, 3]);
     expect(breaks).toEqual([]);
   });
 
-  it("filters samples left of xMin", () => {
+  it("filters samples left of xMin and stores x as an xMin-relative delta", () => {
     const ring = ringOf(8, [
       [0, 1],
       [100, 2],
@@ -38,7 +39,8 @@ describe("buildLineVertices", () => {
     const breaks: number[] = [];
     const n = buildLineVertices(ring, 150, undefined, out, breaks);
     expect(n).toBe(2);
-    expect(Array.from(out.subarray(0, 4))).toEqual([200, 3, 300, 4]);
+    // Kept samples are 200 and 300; x is stored as t - 150 → 50 and 150.
+    expect(Array.from(out.subarray(0, 4))).toEqual([50, 3, 150, 4]);
   });
 
   it("records strip breaks at gaps larger than maxGapMs", () => {
@@ -94,6 +96,7 @@ describe("buildLineVertices", () => {
     const breaks: number[] = [];
     const n = buildLineVertices(ring, 0, undefined, out, breaks);
     expect(n).toBe(4);
+    // xMin = 0 → delta equals raw t.
     expect(Array.from(out.subarray(0, 8))).toEqual([200, 2, 300, 3, 400, 4, 500, 5]);
   });
 });

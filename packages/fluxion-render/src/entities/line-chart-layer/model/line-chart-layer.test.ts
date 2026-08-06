@@ -1108,7 +1108,7 @@ describe("LineChartLayer.drawGl", () => {
     expect(drawLineStrip).not.toHaveBeenCalled();
   });
 
-  it("streams raw [t, y] vertices with the dataToClip transform, parsed color, and dpr width", () => {
+  it("streams [t - xMin, y] vertices with the dataToClip transform, parsed color, and dpr width", () => {
     const { glr, drawLineStrip } = makeGlr();
     const vp = makeViewport();
     const layer = new LineChartLayer("l");
@@ -1119,6 +1119,7 @@ describe("LineChartLayer.drawGl", () => {
     const [verts, count, breaks, transform, color, opacity, widthPx] =
       drawLineStrip.mock.calls[0]!;
     expect(count).toBe(3);
+    // makeViewport uses xMin = 0, so the stored delta equals raw t here.
     expect(Array.from((verts as Float32Array).subarray(0, 6))).toEqual([
       0, 0, 100, 0.5, 200, -0.5,
     ]);

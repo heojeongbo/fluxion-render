@@ -754,8 +754,11 @@ describe("Engine", () => {
       expect(draws).toHaveLength(1);
       expect(draws[0]!.args[1]).toBe(0); // segment start
       expect(draws[0]!.args[2]).toBe(4); // all four samples in one strip
-      // The upload feeding the strip is the last bufferData before its draw —
-      // and must carry the raw samples verbatim.
+      // The upload feeding the strip is the last bufferData before its draw.
+      // Vertices are stored as xMin-relative deltas (see buildLineVertices), so
+      // y is verbatim and x preserves the original spacing (100 ms apart) —
+      // asserted relative to the first vertex so the exact time-window xMin
+      // never needs hardcoding.
       const stripIdx = gl.calls.findIndex(
         (c) => c.name === "drawArrays" && c.args[0] === gl.LINE_STRIP,
       );
@@ -763,7 +766,11 @@ describe("Engine", () => {
         .slice(0, stripIdx)
         .reverse()
         .find((c) => c.name === "bufferData")!;
-      expect(Array.from(upload.args[1] as Float32Array)).toEqual(Array.from(samples));
+      const up = Array.from(upload.args[1] as Float32Array);
+      expect([up[1], up[3], up[5], up[7]]).toEqual([0, 0.5, -0.5, 1]); // y verbatim
+      expect([up[2]! - up[0]!, up[4]! - up[0]!, up[6]! - up[0]!]).toEqual([
+        100, 200, 300,
+      ]);
       engine.dispatch({ op: Op.DISPOSE });
     });
 
