@@ -1,5 +1,6 @@
 import { type RefObject, useEffect, useRef } from "react";
 import type { AxisTick } from "../../../shared/lib/axis-ticks";
+import { currentDpr } from "../../../shared/lib/current-dpr";
 
 export interface AxisCanvasOptions {
   /** Tick label + tick line color. Default "#666". */
@@ -44,7 +45,7 @@ function redraw(
     opts: ResolvedOpts,
   ) => void,
 ): void {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = currentDpr();
   const rect = canvas.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) return;
   const targetW = Math.round(rect.width * dpr);
@@ -188,9 +189,10 @@ function drawX(
   ctx.clearRect(0, 0, w, h);
   const { color, font, tickSize, tickMargin } = opts;
 
-  // The x-axis canvas is intentionally wider than the chart canvas (via
-  // negative CSS margins set in FluxionCanvas) so that the first/last tick
-  // labels have room without clipping. Use the full canvas width directly.
+  // Ticks span the full canvas width. (An older comment here claimed
+  // `FluxionCanvas` widened this canvas with negative CSS margins so the
+  // first/last labels wouldn't clip — it doesn't, and never did: the axis
+  // canvas shares the chart's `1fr` grid column.)
 
   // Tick marks: short vertical lines at the top edge
   if (tickSize > 0) {

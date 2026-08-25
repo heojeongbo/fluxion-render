@@ -9,6 +9,8 @@
  * per-element callbacks, and a single DPR watcher fans out to all subscribers.
  */
 
+import { currentDpr } from "./current-dpr";
+
 export interface ResizeSize {
   width: number;
   height: number;
@@ -58,7 +60,7 @@ const onDprEvt = () => {
 };
 function resubscribeDpr(): void {
   if (mql) mql.removeEventListener("change", onDprEvt);
-  mql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+  mql = window.matchMedia(`(resolution: ${currentDpr()}dppx)`);
   mql.addEventListener("change", onDprEvt);
 }
 

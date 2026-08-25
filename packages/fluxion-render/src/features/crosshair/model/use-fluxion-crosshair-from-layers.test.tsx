@@ -40,7 +40,6 @@ describe("useFluxionCrosshairFromLayers", () => {
       xMode: "time",
       timeWindowMs: 4000,
       timeOrigin: 1_000_000,
-      yPadPx: 8,
     });
   });
 
@@ -53,12 +52,16 @@ describe("useFluxionCrosshairFromLayers", () => {
     expect((received.opts as { timeWindowMs?: number }).timeWindowMs).toBeUndefined();
   });
 
-  it("an explicit yPadPx overrides the axis spec value", () => {
+  it("does not forward the deprecated yPadPx — it has no effect downstream", () => {
     const layers: FluxionLayerSpec[] = [
       axisGridLayer("axis", { xMode: "time", yPadPx: 8 }),
     ];
+    // `useFluxionCrosshair` never inverts pointer Y into a data value (the
+    // reported `y` comes from the nearest cached sample), so there is no
+    // y-padding to compensate for. The option stays accepted for source
+    // compatibility but is deliberately not plumbed through.
     renderHook(() => useFluxionCrosshairFromLayers({ host, cache, layers, yPadPx: 2 }));
-    expect((received.opts as { yPadPx?: number }).yPadPx).toBe(2);
+    expect((received.opts as { yPadPx?: number }).yPadPx).toBeUndefined();
   });
 
   it("forwards the explicit cache when provided", () => {

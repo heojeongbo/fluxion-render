@@ -1533,7 +1533,6 @@ const { chartRef, state, push } = useFluxionCrosshairFromLayers({
   host,                 // FluxionHost | null
   layers,               // same array passed to <FluxionCanvas>; cache auto-registers from it
   axisLayerId: 'axis',  // default 'axis'
-  yPadPx: 8,            // match the axis layer's yPadPx
   yFormat: (y) => y.toFixed(3),
 });
 

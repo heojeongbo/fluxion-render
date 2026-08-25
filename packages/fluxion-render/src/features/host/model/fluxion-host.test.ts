@@ -1043,6 +1043,80 @@ describe("FluxionHost", () => {
     host.dispose();
   });
 
+  it("measures the canvas BEFORE transferControlToOffscreen", () => {
+    const { worker, posts } = makeFakeWorker();
+    const canvas = makeCanvas(0, 0);
+    // `transferControlToOffscreen()` hands the element's rendering to the
+    // worker; from that point its box can read back as 0 until the next reflow,
+    // so a measurement taken AFTERWARDS falls through to the 300x150 default.
+    // That undersized backing, CSS-stretched to the real box, is the "first
+    // frame is drawn zoomed in, then corrects itself" report.
+    let transferred = false;
+    canvas.getBoundingClientRect = () =>
+      ({
+        width: transferred ? 0 : 800,
+        height: transferred ? 0 : 400,
+      }) as DOMRect;
+    const realTransfer = canvas.transferControlToOffscreen.bind(canvas);
+    canvas.transferControlToOffscreen = () => {
+      transferred = true;
+      return realTransfer();
+    };
+
+    const host = new FluxionHost(canvas, { workerFactory: () => worker });
+    const init = posts.find((p) => (p.msg as { op: number }).op === Op.INIT)!.msg as {
+      width: number;
+      height: number;
+    };
+    expect(init.width).toBe(800);
+    expect(init.height).toBe(400);
+    host.dispose();
+  });
+
+  it("dedups a sub-pixel resize that maps to the same device pixels", () => {
+    const { worker, posts } = makeFakeWorker();
+    const canvas = makeCanvas(0, 0);
+    canvas.getBoundingClientRect = () =>
+      ({ width: 168, height: 156.79998779296875 }) as DOMRect;
+    const host = new FluxionHost(canvas, { workerFactory: () => worker });
+    const init = posts.find((p) => (p.msg as { op: number }).op === Op.INIT)!.msg as {
+      dpr: number;
+    };
+    posts.length = 0;
+    const resizes = () => posts.filter((p) => (p.msg as { op: number }).op === Op.RESIZE);
+
+    // The canvas's bounding rect and the container's contentRect can disagree
+    // in the last floating-point digit (measured in Firefox). That is not a
+    // size change — reallocating every chart's GPU backing for it would
+    // amplify exactly the mount burst the resize lane exists to spread out.
+    host.resize(168, 156.8000030517578, init.dpr);
+    expect(resizes()).toHaveLength(0);
+
+    // A change that really does cross a device pixel still gets through.
+    host.resize(168, 158, init.dpr);
+    expect(resizes()).toHaveLength(1);
+    host.dispose();
+  });
+
+  it("an unmeasurable INIT leaves the resize dedup unseeded", () => {
+    const { worker, posts } = makeFakeWorker();
+    const host = new FluxionHost(makeCanvas(0, 0), { workerFactory: () => worker });
+    const init = posts.find((p) => (p.msg as { op: number }).op === Op.INIT)!.msg as {
+      width: number;
+      height: number;
+      dpr: number;
+    };
+    posts.length = 0;
+    // The first REAL measurement happens to equal the 300x150 placeholder.
+    // Seeding the dedup from a size nothing ever measured would swallow it and
+    // leave the chart at the wrong scale forever.
+    host.resize(init.width, init.height, init.dpr);
+    expect(posts.filter((p) => (p.msg as { op: number }).op === Op.RESIZE)).toHaveLength(
+      1,
+    );
+    host.dispose();
+  });
+
   it("registers a visibilitychange listener and forwards SET_VISIBLE; removes it on dispose", () => {
     const docListeners: Record<string, EventListener[]> = {};
     const addSpy = vi

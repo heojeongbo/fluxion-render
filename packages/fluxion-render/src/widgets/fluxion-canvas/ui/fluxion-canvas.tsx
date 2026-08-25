@@ -10,8 +10,6 @@ import type {
   FluxionHostOptions,
   HostRecyclePool,
 } from "../../../features/host";
-import { useXAxisCanvas, useYAxisCanvas } from "../lib/use-axis-canvas";
-import { useAxisTicks } from "../lib/use-axis-ticks";
 import { type FluxionLayerSpec, useFluxionCanvas } from "../lib/use-fluxion-canvas";
 
 export interface FluxionCanvasProps {
@@ -70,8 +68,11 @@ export interface FluxionCanvasProps {
    */
   inlineAxes?: boolean;
   /**
-   * ID of the axis-grid layer used for external axis rendering.
-   * Required when `externalAxes` is `true` (default).
+   * @deprecated No effect. It only ever fed the React-side axis path, which
+   * was already dead code (its canvas refs were never attached). With
+   * `externalAxes` the WORKER draws the axis canvases from the axis-grid layer
+   * it already holds, so no id is needed. Accepted so existing call sites keep
+   * compiling.
    */
   axisLayerId?: string;
   /** Width of the y-axis canvas in px. Default: 60. */
@@ -115,7 +116,6 @@ export const FluxionCanvas = forwardRef<FluxionCanvasHandle, FluxionCanvasProps>
       pauseWhenOffscreen,
       externalAxes = true,
       inlineAxes = false,
-      axisLayerId = "",
       yAxisWidth = 60,
       xAxisHeight = 30,
       axisColor,
@@ -159,24 +159,21 @@ export const FluxionCanvas = forwardRef<FluxionCanvasHandle, FluxionCanvasProps>
 
     useImperativeHandle(ref, () => ({ getHost: () => host }), [host]);
 
-    // Legacy React-side axis rendering path (externalAxes=false).
-    // Hooks must be called unconditionally — they no-op when host/ticks are absent.
-    const tickSet = useAxisTicks(
-      layers,
-      axisLayerId,
-      useExternal || inlineAxes ? null : host,
-    );
-    const legacyYCanvasRef = useYAxisCanvas(tickSet?.yTicks ?? [], axisStyle);
-    const legacyXCanvasRef = useXAxisCanvas(
-      xAxisHeight > 0 ? (tickSet?.xTicks ?? []) : [],
-      axisStyle,
-    );
+    // NOTE: there is deliberately no React-side axis rendering here any more.
+    // `useAxisTicks` + `useXAxisCanvas`/`useYAxisCanvas` used to be called on
+    // every render, but their returned refs were `void`-ed on BOTH branches
+    // below and never attached to an element — so the work was thrown away.
+    // Under `externalAxes={false}` that was not free: `useAxisTicks` received
+    // the host, which made the worker post TICK_UPDATE every frame (`emitTicks`
+    // defaults to true) and re-render this component on every tick change, all
+    // to feed a canvas that did not exist.
+    //
+    // The three hooks remain exported from `/react` for consumers who want to
+    // draw their own axes — only this dead internal wiring is gone.
 
     // Inline mode (and externalAxes=false): a single full-container div —
     // the worker draws everything, including inline margins, on ONE canvas.
     if (inlineAxes || !externalAxes) {
-      void legacyYCanvasRef;
-      void legacyXCanvasRef;
       return (
         <div
           ref={containerRef}
@@ -194,9 +191,6 @@ export const FluxionCanvas = forwardRef<FluxionCanvasHandle, FluxionCanvasProps>
     }
 
     // externalAxes=true — Worker renders both axis canvases.
-    void legacyYCanvasRef;
-    void legacyXCanvasRef;
-
     return (
       <div
         className={className}

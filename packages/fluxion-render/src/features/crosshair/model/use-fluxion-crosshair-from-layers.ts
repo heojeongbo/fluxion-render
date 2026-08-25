@@ -29,7 +29,7 @@ export interface UseFluxionCrosshairFromLayersOptions {
   overrides?: Record<string, CachedLayerOptions>;
   /** Axis layer id to read time-window config from. Default `"axis"`. */
   axisLayerId?: string;
-  /** Vertical inset matching the axis layer's `yPadPx`. */
+  /** @deprecated No effect — see `UseFluxionCrosshairOptions.yPadPx`. */
   yPadPx?: number;
   xFormat?: (t: number) => string;
   yFormat?: (y: number) => string;
@@ -58,16 +58,7 @@ export interface UseFluxionCrosshairFromLayersResult extends UseFluxionCrosshair
 export function useFluxionCrosshairFromLayers(
   opts: UseFluxionCrosshairFromLayersOptions,
 ): UseFluxionCrosshairFromLayersResult {
-  const {
-    host,
-    cache,
-    layers,
-    overrides,
-    axisLayerId = "axis",
-    yPadPx,
-    xFormat,
-    yFormat,
-  } = opts;
+  const { host, cache, layers, overrides, axisLayerId = "axis", xFormat, yFormat } = opts;
   const axisConfig = getAxisSpec(layers, axisLayerId)?.config;
 
   // Always create an internal cache (hooks run unconditionally); use the
@@ -82,7 +73,6 @@ export function useFluxionCrosshairFromLayers(
     timeWindowMs: axisConfig?.timeWindowMs,
     timeOrigin: axisConfig?.timeOrigin,
     xRange: axisConfig?.xRange,
-    yPadPx: yPadPx ?? axisConfig?.yPadPx,
     xFormat,
     yFormat,
   });

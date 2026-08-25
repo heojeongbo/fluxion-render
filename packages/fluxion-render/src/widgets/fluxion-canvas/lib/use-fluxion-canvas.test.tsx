@@ -746,8 +746,109 @@ describe("useFluxionCanvas resize forwarding", () => {
     render(<Harness workerFactory={factory} />);
     posts.length = 0;
     deliver(0, 0);
+    deliver(200, 0); // only the HEIGHT is zero — the other half of the guard
     flushLifecycleScheduler();
     expect(ops(posts)).not.toContain(Op.RESIZE);
+  });
+
+  it("adopts a measurement delivered before the staggered host existed", () => {
+    const { factory, posts } = makeFakeWorkerFactory();
+    // `staggerMount` defers host creation through the lifecycle scheduler —
+    // exactly the position chart #5+ of a grid is in (mount budget is
+    // perFrame = 4), because ResizeObserver notifications are delivered AFTER
+    // rAF callbacks in the same frame. The observer's first delivery is the
+    // debounce-exempt one, so losing it costs ~120-140ms at the wrong scale.
+    render(<Harness workerFactory={factory} staggerMount />);
+    deliver(320, 160);
+    expect(posts).toHaveLength(0); // no host yet — nothing posted at all
+    act(() => flushLifecycleScheduler());
+    const resizes = posts.filter((p) => (p.msg as { op: number }).op === Op.RESIZE);
+    expect(resizes).toHaveLength(1); // applied at creation, not via the lane
+    expect(resizes[0]!.msg).toMatchObject({ width: 320, height: 160 });
+  });
+
+  it("charts past the per-frame mount budget still adopt their FIRST measurement", () => {
+    vi.useFakeTimers();
+    try {
+      // 3 charts, 1 mount per frame → charts 2 and 3 are created on frames
+      // AFTER the single observer tick below. This is the user-reported grid.
+      configureLifecycleScheduler({ perFrame: 1 });
+      let sharedCb: ((entries: unknown[]) => void) | null = null;
+      const observedEls: Element[] = [];
+      (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+        constructor(cb: (entries: unknown[]) => void) {
+          sharedCb = cb;
+        }
+        observe(el: Element) {
+          observedEls.push(el);
+        }
+        unobserve() {}
+        disconnect() {}
+      };
+      const charts = Array.from({ length: 3 }, () => makeFakeWorkerFactory());
+      render(
+        <>
+          {charts.map((c, i) => (
+            <Harness key={i} workerFactory={c.factory} staggerMount />
+          ))}
+        </>,
+      );
+      // ONE observer tick, before any host exists. No debounce is advanced
+      // below, so this is the only measurement these charts ever receive.
+      act(() => {
+        sharedCb?.(
+          observedEls.map((el) => ({
+            target: el,
+            contentRect: { width: 320, height: 160 },
+          })),
+        );
+      });
+      act(() => vi.advanceTimersByTime(20));
+      act(() => vi.advanceTimersByTime(20));
+      act(() => vi.advanceTimersByTime(20));
+      for (const c of charts) {
+        const r = c.posts.filter((p) => (p.msg as { op: number }).op === Op.RESIZE);
+        expect(r).toHaveLength(1);
+        expect(r[0]!.msg).toMatchObject({ width: 320, height: 160 });
+      }
+    } finally {
+      vi.useRealTimers();
+      configureLifecycleScheduler({ perFrame: 4 });
+    }
+  });
+
+  it("a warm (recycled) host adopts the observer measurement on re-parent", () => {
+    function RecycleHarness({
+      workerFactory,
+      recyclePool,
+    }: {
+      workerFactory: () => Worker;
+      recyclePool: ReturnType<typeof createHostRecyclePool>;
+    }) {
+      const { containerRef } = useFluxionCanvas({
+        layers: [{ id: "line", kind: "line" }],
+        hostOptions: { workerFactory },
+        recyclePool,
+      });
+      return <div ref={containerRef} style={{ width: 200, height: 100 }} />;
+    }
+    const { factory, posts } = makeFakeWorkerFactory();
+    const pool = createHostRecyclePool();
+    const first = render(<RecycleHarness workerFactory={factory} recyclePool={pool} />);
+    act(() => flushLifecycleScheduler());
+    first.unmount(); // parks the host
+    posts.length = 0;
+    // Remount borrows the warm bundle, with reactivation deferred (staggerMount
+    // is on by default). The observer reports the new slot's size BEFORE the
+    // reactivation runs, so the very first resize the warm host receives must
+    // be that measurement — not the border-box `measure(container)` fallback,
+    // which reads 0x0 here and disagrees with every later resize anyway.
+    render(<RecycleHarness workerFactory={factory} recyclePool={pool} />);
+    deliver(480, 240);
+    act(() => flushLifecycleScheduler());
+    const resizes = posts.filter((p) => (p.msg as { op: number }).op === Op.RESIZE);
+    expect(resizes[0]!.msg).toMatchObject({ width: 480, height: 240 });
+    pool.dispose();
   });
 
   it("parking (recycle) also drops the pending resize — no stale RESIZE reaches a parked host", () => {
@@ -954,6 +1055,39 @@ describe("useFluxionCanvas theme reconcile (bgColor / axisStyle)", () => {
     posts.length = 0;
     rerender(<ThemeHarness workerFactory={factory} bgColor="#ffffff" />);
     expect(ops(posts)).not.toContain(Op.SET_BG_COLOR); // seeded → no spam
+  });
+
+  it("a recycled (warm) host re-applies axisStyle on reactivation", () => {
+    function RecycleThemeHarness({
+      workerFactory,
+      recyclePool,
+    }: {
+      workerFactory: () => Worker;
+      recyclePool: ReturnType<typeof createHostRecyclePool>;
+    }) {
+      const { containerRef } = useFluxionCanvas({
+        layers: [{ id: "line", kind: "line" }],
+        hostOptions: { workerFactory, axisStyle: { color: "#8a8f98" } },
+        recyclePool,
+        staggerMount: false,
+      });
+      return <div ref={containerRef} style={{ width: 200, height: 100 }} />;
+    }
+    const { factory, posts } = makeFakeWorkerFactory();
+    const pool = createHostRecyclePool();
+    const first = render(
+      <RecycleThemeHarness workerFactory={factory} recyclePool={pool} />,
+    );
+    first.unmount(); // parks the host — Engine.reset() WIPES axisStyle worker-side
+    posts.length = 0;
+    render(<RecycleThemeHarness workerFactory={factory} recyclePool={pool} />);
+    // Reactivation must re-send it. Without this the recycled chart's axis
+    // silently reverts to the engine default (#666) while every other chart in
+    // the grid stays themed — and `seedReconcile` baselines the style as
+    // "already applied", so the reconcile effect never repairs it either.
+    const axis = posts.find((p) => (p.msg as { op: number }).op === Op.SET_AXIS_STYLE);
+    expect(axis?.msg).toMatchObject({ color: "#8a8f98" });
+    pool.dispose();
   });
 
   it("re-sends SET_AXIS_STYLE on an axisStyle change without a remount", () => {

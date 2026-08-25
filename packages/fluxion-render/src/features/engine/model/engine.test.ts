@@ -1146,6 +1146,44 @@ describe("Engine", () => {
       engine.dispatch({ op: Op.DISPOSE });
     });
 
+    it("draws the axis strips over their whole backing at a fractional dpr", () => {
+      // dpr 1.25 with the default 30px strip is the case with no coverage:
+      // round(30 * 1.25) = 38 device px = 30.4 CSS px, so a draw sized from the
+      // nominal 30 leaves the last half-device-row holding the previous frame.
+      const engine = new Engine();
+      const canvas = newCanvas(100, 100);
+      engine.dispatch({ op: Op.INIT, canvas, width: 100, height: 100, dpr: 1 });
+      engine.dispatch({
+        op: Op.ADD_LAYER,
+        id: "axis",
+        kind: "axis-grid",
+        config: { yRange: [0, 10] },
+      });
+      const xAxisCanvas = newCanvas(100, 30);
+      const yAxisCanvas = newCanvas(60, 100);
+      engine.dispatch({
+        op: Op.SET_AXIS_CANVAS,
+        xAxisCanvas: xAxisCanvas as unknown as OffscreenCanvas,
+        yAxisCanvas: yAxisCanvas as unknown as OffscreenCanvas,
+        xAxisHeight: 30,
+        yAxisWidth: 60,
+      });
+      engine.dispatch({ op: Op.RESIZE, width: 200, height: 150, dpr: 1.25 });
+      expect(xAxisCanvas.height).toBe(38); // round(30 * 1.25), not 37.5
+      expect(yAxisCanvas.width).toBe(75); // round(60 * 1.25) — exact
+
+      const xCtx = (xAxisCanvas as unknown as { getContext: () => FakeCtx }).getContext();
+      xCtx.calls.length = 0;
+      flushFrame();
+      // The strip is cleared over its FULL backing height (38 / 1.25 = 30.4),
+      // not the nominal 30 the option carries — otherwise the last
+      // half-device-row keeps the previous frame.
+      const clears = xCtx.calls.filter((c) => c.name === "clearRect");
+      expect(clears.length).toBeGreaterThan(0);
+      expect(clears[0]!.args[3]).toBeCloseTo(38 / 1.25, 6);
+      engine.dispatch({ op: Op.DISPOSE });
+    });
+
     it("skips the y-axis canvas on pure continuous frames (bounds unchanged)", () => {
       const engine = new Engine();
       const canvas = newCanvas(100, 100);

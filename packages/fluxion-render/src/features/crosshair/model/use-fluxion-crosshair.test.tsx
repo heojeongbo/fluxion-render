@@ -9,8 +9,11 @@ import {
   useFluxionCrosshair,
 } from "./use-fluxion-crosshair";
 
-// Override the no-op FakeResizeObserver from setup.ts with one that fires immediately.
-// This ensures sizeRef is seeded correctly when the hook calls el.clientWidth.
+// Override the no-op FakeResizeObserver from setup.ts with one that fires
+// immediately, so the hook's size is delivered rather than left at its seed.
+// `target` is required: the hook goes through the SHARED observer
+// (`shared/lib/resize-observer`), which demuxes entries by `entry.target` — an
+// entry without one is silently dropped.
 type ROCallback = (entries: ResizeObserverEntry[]) => void;
 class FiringResizeObserver {
   private cb: ROCallback;
@@ -20,6 +23,7 @@ class FiringResizeObserver {
   observe(el: Element): void {
     this.cb([
       {
+        target: el,
         contentRect: { width: el.clientWidth || 200, height: el.clientHeight || 100 },
       } as ResizeObserverEntry,
     ]);

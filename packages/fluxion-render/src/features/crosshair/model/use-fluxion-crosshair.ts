@@ -1,4 +1,5 @@
 import { type RefObject, useEffect, useRef, useState } from "react";
+import { observeResize } from "../../../shared/lib/resize-observer";
 import type { FluxionHost } from "../../host";
 import type { HoverDataCache } from "./hover-data-cache";
 
@@ -24,6 +25,15 @@ export interface UseFluxionCrosshairOptions {
   timeWindowMs?: number;
   timeOrigin?: number;
   xRange?: [number, number];
+  /**
+   * @deprecated No effect — accepted only so existing call sites keep compiling.
+   *
+   * It would matter if the crosshair inverted the pointer's Y into a data value,
+   * since the plot insets its y range by `yPadPx`. It doesn't: the reported `y`
+   * comes from the NEAREST SAMPLE in the hover cache (`findNearest`), and the
+   * overlay draws its horizontal rule at the raw pointer Y. Nothing here maps
+   * pixels back to a y value, so there is no padding to compensate for.
+   */
   yPadPx?: number;
   /**
    * Left plot inset in CSS px. Set this to the chart's `yAxisWidth` when the
@@ -59,7 +69,6 @@ export function useFluxionCrosshair(
     timeWindowMs,
     timeOrigin = 0,
     xRange,
-    yPadPx = 0,
     insetLeft = 0,
     xFormat,
     yFormat,
@@ -74,8 +83,6 @@ export function useFluxionCrosshair(
   const sizeRef = useRef({ width: 1, height: 1 });
 
   // Stable option refs
-  const yPadPxRef = useRef(yPadPx);
-  yPadPxRef.current = yPadPx;
   const insetLeftRef = useRef(insetLeft);
   insetLeftRef.current = insetLeft;
   const xFormatRef = useRef(xFormat);
@@ -119,20 +126,18 @@ export function useFluxionCrosshair(
     /* v8 ignore start -- chartRef is always attached once mounted; null-ref guard */
     if (!el) return;
     /* v8 ignore stop */
-    // Seed size immediately so first pointermove has correct dimensions.
-    sizeRef.current = { width: el.clientWidth, height: el.clientHeight };
-    const ro = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      /* v8 ignore start -- ResizeObserver always delivers at least one entry */
-      if (!entry) return;
-      /* v8 ignore stop */
-      sizeRef.current = {
-        width: entry.contentRect.width,
-        height: entry.contentRect.height,
-      };
+    // Seed size immediately so the first pointermove has real dimensions.
+    // `getBoundingClientRect` rather than `clientWidth`: the latter truncates
+    // to an integer, so a 284.5px element seeded 284 and mapped pointer→data
+    // ~0.2% off until the observer's first delivery replaced it.
+    const seed = el.getBoundingClientRect();
+    sizeRef.current = { width: seed.width, height: seed.height };
+    // Shared page-wide observer, not a per-chart `new ResizeObserver` — a grid
+    // of N crosshair charts otherwise installs N observers, which is exactly
+    // what `shared/lib/resize-observer` exists to avoid.
+    return observeResize(el, ({ width, height }) => {
+      sizeRef.current = { width, height };
     });
-    ro.observe(el);
-    return () => ro.disconnect();
   }, []);
 
   // Pointer event listeners.

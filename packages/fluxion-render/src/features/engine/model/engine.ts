@@ -473,10 +473,16 @@ export class Engine {
     if (axisLayer) {
       if (this.xAxisCtx && this.xAxisCanvas) {
         this.xAxisCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        // BOTH dimensions come from the backing, not from `xAxisHeight`. The
+        // backing is `round(xAxisHeight * dpr)` device px, which at a
+        // fractional dpr is not `xAxisHeight * dpr` exactly — e.g. the default
+        // 30 at dpr 1.25 rounds 37.5 up to 38, i.e. 30.4 CSS px. Passing the
+        // nominal 30 made the layer clear and fill 30 of those 30.4 px, leaving
+        // the bottom half-device-row holding the previous frame.
         axisLayer.drawXAxis(
           this.xAxisCtx,
           this.xAxisCanvas.width / dpr,
-          this.xAxisHeight,
+          this.xAxisCanvas.height / dpr,
           this.axisStyle,
           dpr,
         );
@@ -486,9 +492,10 @@ export class Engine {
       // frame, only the x-axis scrolls — skip the y-axis fill+text entirely.
       if (this.yAxisCtx && this.yAxisCanvas && (dirty || boundsChanged)) {
         this.yAxisCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        // Backing-derived on both axes, same reason as drawXAxis above.
         axisLayer.drawYAxis(
           this.yAxisCtx,
-          this.yAxisWidth,
+          this.yAxisCanvas.width / dpr,
           this.yAxisCanvas.height / dpr,
           this.axisStyle,
           this.viewport.yPadPx,

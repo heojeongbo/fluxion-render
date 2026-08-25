@@ -15,7 +15,11 @@ export interface HostBundle {
   yAxisCanvas?: HTMLCanvasElement;
   /** Recycle bucket this bundle belongs to — stamped once at cold create. */
   key: string;
-  /** Last bg color applied, so an acquire can skip a redundant `setBgColor`. */
+  /**
+   * @deprecated Never read and never written — the acquire path re-sends
+   * `bgColor` unconditionally. Kept only so removing it from this exported
+   * interface can't break a consumer's type, and will go in the next major.
+   */
   bgColor?: string;
 }
 
@@ -260,10 +264,21 @@ export function createHostRecyclePool(
       // Engine.reset(), never re-sent on warm reuse — so a stats-on chart must
       // never inherit a stats-off engine (or vice versa).
       o.emitRenderStats ? "r1" : "r0",
-      // Inline-axes margins are baked into the engine's viewport at INIT —
-      // a warm inline host (or one with different margins) must never be
-      // handed to a mount expecting a different plot rect.
-      o.inlineAxes ? `i${o.xAxisHeight ?? 30}x${o.yAxisWidth ?? 60}` : "-",
+      // Axis strip dimensions are construction-fixed on BOTH paths, so they
+      // bucket unconditionally. Inline mode bakes them into the viewport's
+      // insets at INIT; external mode sends them once via SET_AXIS_CANVAS and
+      // `Engine.resizeAxisCanvases` keeps re-deriving the strip backing from
+      // them on every later resize. Neither is ever re-sent on warm reuse, so a
+      // 40px-axis chart borrowing an 80px-axis host would render its strip at
+      // the wrong size permanently — the main canvas being correct makes it
+      // subtle rather than obvious.
+      o.inlineAxes ? "i" : "e",
+      `a${o.xAxisHeight ?? 30}x${o.yAxisWidth ?? 60}`,
+      // Also construction-fixed (`private readonly` on FluxionHost): a chart
+      // that opted out of coalescing for latency must not inherit a coalescing
+      // host, nor a coalescing chart a per-sample-posting one.
+      o.coalesce === false ? "c0" : "c1",
+      `m${o.coalesceMaxFloats ?? 1_000_000}`,
       // A webgl engine's canvas is permanently moded to webgl — it must never
       // be recycled into a 2d mount (and vice versa).
       o.renderer === "webgl" ? "gl" : "2d",

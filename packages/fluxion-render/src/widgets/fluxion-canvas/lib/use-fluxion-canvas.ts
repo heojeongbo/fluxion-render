@@ -8,12 +8,14 @@ import {
   type LayerConfigByKind,
 } from "../../../features/host";
 import { useFluxionThemeValueOrNull } from "../../../features/theme";
+import { currentDpr } from "../../../shared/lib/current-dpr";
 import {
   cancelResize,
   enqueueDispose,
   enqueueMount,
   scheduleResize,
 } from "../../../shared/lib/lifecycle-scheduler";
+import { mergeAxisStyle } from "../../../shared/lib/merge-axis-style";
 import { observeOnScreen } from "../../../shared/lib/onscreen-observer";
 import type { LayerKind } from "../../../shared/protocol";
 import { type ResizeInfo, useResizeObserver } from "./use-resize-observer";
@@ -126,10 +128,7 @@ function makeAxisCanvas(container: HTMLDivElement): HTMLCanvasElement {
 /** Current pixel size + DPR of a container, for an immediate post-reparent resize. */
 function measure(el: HTMLElement): { width: number; height: number; dpr: number } {
   const rect = el.getBoundingClientRect();
-  /* v8 ignore start -- devicePixelRatio is always defined in the DOM test env; SSR fallback */
-  const dpr = typeof devicePixelRatio === "number" ? devicePixelRatio : 1;
-  /* v8 ignore stop */
-  return { width: rect.width, height: rect.height, dpr };
+  return { width: rect.width, height: rect.height, dpr: currentDpr() };
 }
 
 /** Remove a canvas from its container if still attached (re-parent / unmount safe). */
@@ -207,6 +206,17 @@ export function useFluxionCanvas(
   // initial callback can fire before then). Optimistic true so a chart mounted
   // in view renders immediately.
   const onScreenRef = useRef(true);
+  // Latest size the ResizeObserver reported, latched even while no host exists.
+  // Under `staggerMount` (the default) host creation is deferred through the
+  // lifecycle scheduler's per-frame mount budget, and ResizeObserver
+  // notifications are delivered AFTER rAF callbacks in the same frame — so in a
+  // grid every chart past the budget had NO host when the observer's first
+  // (debounce-exempt) delivery landed, and `handleResize` dropped it on the
+  // floor. `use-resize-observer` has already spent its undebounced fast path by
+  // then, so the next correction costs a 100ms debounce + a resize-lane frame +
+  // a worker frame — the chart renders at the INIT scale until then. The
+  // deferred `work()` below applies this latch the instant the host exists.
+  const lastResizeRef = useRef<ResizeInfo | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -230,6 +240,15 @@ export function useFluxionCanvas(
       ...themeRef.current,
       ...current.hostOptions,
     };
+    // `axisStyle` is nested, so the spread above would let the LAST contributor
+    // erase the whole object instead of overriding single fields — and
+    // `<FluxionCanvas>` always contributes one (all-`undefined` when no axis*
+    // prop was passed). Merge per field instead. See `mergeAxisStyle`.
+    effectiveHostOptions.axisStyle = mergeAxisStyle(
+      getFluxionDefaults().axisStyle,
+      themeRef.current?.axisStyle,
+      current.hostOptions?.axisStyle,
+    );
     if (effectiveHostOptions.pool?.isDisposed) {
       setMountKey((k) => k + 1);
       return;
@@ -293,9 +312,20 @@ export function useFluxionCanvas(
         if (effectiveHostOptions.bgColor !== undefined) {
           host.setBgColor(effectiveHostOptions.bgColor);
         }
+        // `Engine.reset()` wipes axisStyle on park, and only the CONSTRUCTOR
+        // otherwise sends it — so without this a recycled chart's worker-drawn
+        // axis reverts to the engine default while the rest of the grid stays
+        // themed. `seedReconcile()` below then baselines the style as already
+        // applied, so the reconcile effect would never repair it either.
+        if (effectiveHostOptions.axisStyle) {
+          host.setAxisStyle(effectiveHostOptions.axisStyle);
+        }
         // Re-parent may have landed in a differently-sized slot — resize now
-        // instead of waiting for the debounced ResizeObserver.
-        const size = measure(container);
+        // instead of waiting for the debounced ResizeObserver. Prefer the
+        // observer's latest measurement (the same content box every later
+        // resize uses); fall back to measuring the container only when nothing
+        // has been reported for this mount yet.
+        const size = lastResizeRef.current ?? measure(container);
         host.resize(size.width, size.height, size.dpr);
         host.setVisible(true);
         seedReconcile();
@@ -321,6 +351,16 @@ export function useFluxionCanvas(
           yAxisElement: yAxisCanvas,
         });
         for (const l of current.layers) host.addLayer(l.id, l.kind, l.config);
+        // Adopt a measurement the observer already delivered while this chart
+        // was still queued behind the mount budget. Applied SYNCHRONOUSLY, not
+        // through the resize lane: this is the chart's FIRST correct size, and
+        // it is already bounded by the mount budget (at most `perFrame` per
+        // frame), so it cannot reintroduce the grid-wide realloc spike the lane
+        // exists to prevent. When INIT measured correctly this normally equals
+        // what it already applied and the host's own dedup drops it — zero
+        // extra postMessages in the healthy case.
+        const latest = lastResizeRef.current;
+        if (latest) host.resize(latest.width, latest.height, latest.dpr);
         seedReconcile();
         bundleRef.current = {
           host,
@@ -451,7 +491,13 @@ export function useFluxionCanvas(
   // recompute → reconcile posts setBgColor/setAxisStyle to the live host.
   const effectiveBg = { ...getFluxionDefaults(), ...theme, ...options.hostOptions };
   const bgColor = effectiveBg.bgColor;
-  const axisStyle = effectiveBg.axisStyle;
+  // Same per-field merge the mount effect uses — the two MUST agree or the
+  // seeded `appliedAxisRef` baseline and this comparison drift apart.
+  const axisStyle = mergeAxisStyle(
+    getFluxionDefaults().axisStyle,
+    theme?.axisStyle,
+    options.hostOptions?.axisStyle,
+  );
   const axisStyleKey = JSON.stringify(axisStyle ?? null);
   useEffect(() => {
     if (!host) return;
@@ -473,10 +519,13 @@ export function useFluxionCanvas(
     // resize, DPR flip) fires EVERY chart's ResizeObserver in the same tick,
     // and applying them all at once would reallocate every chart's GPU backing
     // in a single frame — the per-chart debounce can't spread that burst.
+    // A detached / pre-layout element reports 0x0 — never latch or forward it.
+    if (info.width <= 0 || info.height <= 0) return;
+    // Latch FIRST, unconditionally: a measurement delivered before the deferred
+    // host exists must not be lost (see `lastResizeRef`).
+    lastResizeRef.current = info;
     const instance = hostRef.current;
-    if (instance && info.width > 0 && info.height > 0) {
-      scheduleResize(instance, info);
-    }
+    if (instance) scheduleResize(instance, info);
   }, []);
 
   useResizeObserver(containerRef, handleResize);

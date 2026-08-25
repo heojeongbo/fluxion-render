@@ -1,6 +1,7 @@
 import { act, render } from "@testing-library/react";
 import { createRef, StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { darkTheme, FluxionThemeProvider } from "../../../features/theme";
 import { resetLifecycleScheduler } from "../../../shared/lib/lifecycle-scheduler";
 import { Op } from "../../../shared/protocol";
 import { FluxionCanvas, type FluxionCanvasHandle } from "./fluxion-canvas";
@@ -173,6 +174,49 @@ describe("FluxionCanvas", () => {
     expect((axis!.msg as { color: string }).color).toBe("#e6e6e6");
     // No new INIT — a theme flip must not tear the chart down.
     expect(posts.map((p) => (p.msg as { op: number }).op)).not.toContain(Op.INIT);
+    resetLifecycleScheduler();
+  });
+
+  it("a provider theme's axisStyle survives the component's own axis props", () => {
+    const { factory, posts } = makeFakeWorkerFactory();
+    // The component always builds an `axisStyle` object from its axis* props.
+    // With none passed every field is `undefined` — and a shallow merge would
+    // let that empty object REPLACE the provider's axisStyle, so the worker
+    // would keep its built-in #666 and a light/dark toggle would only ever
+    // change bgColor.
+    render(
+      <FluxionThemeProvider defaultMode="dark">
+        <FluxionCanvas
+          hostOptions={{ workerFactory: factory }}
+          staggerMount={false}
+          layers={[{ id: "axis", kind: "axis-grid" }]}
+        />
+      </FluxionThemeProvider>,
+    );
+    const axis = posts.find((p) => (p.msg as { op: number }).op === Op.SET_AXIS_STYLE);
+    expect(axis?.msg).toMatchObject(darkTheme.axisStyle!);
+    resetLifecycleScheduler();
+  });
+
+  it("an explicit axis prop still wins over the provider theme", () => {
+    const { factory, posts } = makeFakeWorkerFactory();
+    render(
+      <FluxionThemeProvider defaultMode="dark">
+        <FluxionCanvas
+          hostOptions={{ workerFactory: factory }}
+          staggerMount={false}
+          layers={[{ id: "axis", kind: "axis-grid" }]}
+          axisColor="#ff00ff"
+        />
+      </FluxionThemeProvider>,
+    );
+    const axis = posts.find((p) => (p.msg as { op: number }).op === Op.SET_AXIS_STYLE);
+    // Per-chart prop overrides the theme's color, but the theme's other axis
+    // fields (bgColor) must still come through.
+    expect(axis?.msg).toMatchObject({
+      color: "#ff00ff",
+      bgColor: darkTheme.axisStyle!.bgColor!,
+    });
     resetLifecycleScheduler();
   });
 });

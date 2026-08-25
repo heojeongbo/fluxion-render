@@ -1,4 +1,5 @@
 import { type RefObject, useEffect, useRef } from "react";
+import { currentDpr } from "../../../shared/lib/current-dpr";
 import { observeResize, onDprChange } from "../../../shared/lib/resize-observer";
 
 export interface ResizeInfo {
@@ -49,7 +50,7 @@ export function useResizeObserver(
       onResizeRef.current({
         width: lastWidth,
         height: lastHeight,
-        dpr: window.devicePixelRatio || 1,
+        dpr: currentDpr(),
       });
     };
 

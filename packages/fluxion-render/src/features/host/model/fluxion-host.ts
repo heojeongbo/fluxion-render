@@ -5,6 +5,7 @@ import type { LineChartStaticConfig } from "../../../entities/line-chart-static-
 import type { FluxionWorkerPool } from "../../../features/worker-pool";
 import { getDefaultPool } from "../../../features/worker-pool";
 import { warnArityMismatch } from "../../../shared/lib/arity-guard";
+import { currentDpr } from "../../../shared/lib/current-dpr";
 import { Emitter } from "../../../shared/lib/emitter";
 import { cancelHostFlush, requestHostFlush } from "../../../shared/lib/flush-scheduler";
 import { type BatchTarget, subscribeBatch } from "../../../shared/model/batch-inbox";
@@ -303,13 +304,21 @@ export class FluxionHost {
   // flush scheduler's Map on every sample. The actual frame scheduling is
   // shared across all hosts — see `shared/lib/flush-scheduler`.
   private flushScheduled = false;
-  // Last (width,height,dpr) sent to the worker (seeded from INIT). A newly
+  // Last size sent to the worker, in DEVICE pixels (seeded from INIT). A newly
   // laid-out cold chart's first ResizeObserver measurement usually equals the
   // INIT size, and forwarding it would reallocate the GPU backing INIT just
   // allocated — a redundant realloc per chart amplifying the mount burst. Skip
   // resizes that don't change the size.
-  private _lastW = Number.NaN;
-  private _lastH = Number.NaN;
+  //
+  // Device pixels, not CSS pixels, because that is what actually decides
+  // whether the worker reallocates (`Engine.resize` rounds to device px by the
+  // same formula). Comparing raw CSS px lets sub-pixel layout noise through:
+  // the canvas's `getBoundingClientRect()` and the container's `contentRect`
+  // can disagree in the last floating-point digit (measured in Firefox:
+  // 156.79998779296875 vs 156.8000030517578), which is not a real size change
+  // but would reallocate every chart's backing anyway.
+  private _lastDevW = Number.NaN;
+  private _lastDevH = Number.NaN;
   private _lastDpr = Number.NaN;
 
   constructor(canvas: HTMLCanvasElement, options: FluxionHostOptions = {}) {
@@ -330,13 +339,27 @@ export class FluxionHost {
       /* v8 ignore stop */
     }
 
-    const offscreen = canvas.transferControlToOffscreen();
-    /* v8 ignore start -- devicePixelRatio is always defined in the DOM test env; SSR fallback */
-    const dpr = typeof devicePixelRatio === "number" ? devicePixelRatio : 1;
-    /* v8 ignore stop */
+    const dpr = currentDpr();
+    // MEASURE BEFORE TRANSFERRING. `transferControlToOffscreen()` hands the
+    // element's rendering to the worker; from that point its intrinsic size is
+    // the OffscreenCanvas's (300x150 for an attribute-less canvas) and the box
+    // can read back as 0 until the next reflow. A measurement taken AFTERWARDS
+    // therefore falls through to the defaults below, and that undersized
+    // backing — CSS-stretched to the real box — is the "first frame is drawn
+    // zoomed in, then corrects itself" report. Moving the read one line up
+    // costs nothing: it is the same single layout flush either way.
     const rect = canvas.getBoundingClientRect();
-    const width = rect.width || canvas.width || 300;
-    const height = rect.height || canvas.height || 150;
+    const measuredW = rect.width || canvas.width;
+    const measuredH = rect.height || canvas.height;
+    // Whether we actually learned the element's size. A canvas in a
+    // display:none / not-yet-laid-out subtree measures 0; INIT still needs SOME
+    // size (a 0 viewport would drive degenerate scale math in every layer for
+    // an element nobody can see), so keep the HTML canvas defaults — but
+    // remember that they were invented, for the dedup seeding below.
+    const measured = measuredW > 0 && measuredH > 0;
+    const width = measuredW || 300;
+    const height = measuredH || 150;
+    const offscreen = canvas.transferControlToOffscreen();
 
     this.post(
       {
@@ -358,10 +381,16 @@ export class FluxionHost {
       },
       [offscreen],
     );
-    // Seed the resize dedup with the size INIT already applied.
-    this._lastW = width;
-    this._lastH = height;
-    this._lastDpr = dpr;
+    // Seed the resize dedup with the size INIT already applied — but ONLY when
+    // that size came from a real measurement. A fallback INIT means "size
+    // unknown"; seeding 300/150 would make `resize()` silently swallow the
+    // first real measurement if it happened to equal the placeholder, and the
+    // chart would never correct. Leaving the baseline NaN forwards it.
+    if (measured) {
+      this._lastDevW = Math.round(width * dpr);
+      this._lastDevH = Math.round(height * dpr);
+      this._lastDpr = dpr;
+    }
 
     // Transfer axis canvases to the Worker so they render in the same rAF cycle.
     // The webgl backend has no 2d axis-canvas path — warn and ignore them.
@@ -493,8 +522,8 @@ export class FluxionHost {
     if (this.disposed) return;
     // The worker shrinks the backing to 0×0; the next resize must re-allocate it
     // even at the same size, so clear the dedup baseline.
-    this._lastW = Number.NaN;
-    this._lastH = Number.NaN;
+    this._lastDevW = Number.NaN;
+    this._lastDevH = Number.NaN;
     this._lastDpr = Number.NaN;
     this.post({ op: Op.RELEASE_BACKING });
   }
@@ -986,11 +1015,17 @@ export class FluxionHost {
 
   resize(width: number, height: number, dpr: number): void {
     if (this.disposed) return;
-    // Skip a resize that doesn't change the size — the worker would otherwise
-    // reallocate the GPU backing for the same dimensions (see `_lastW` note).
-    if (width === this._lastW && height === this._lastH && dpr === this._lastDpr) return;
-    this._lastW = width;
-    this._lastH = height;
+    // Skip a resize that doesn't change the backing — the worker would
+    // otherwise reallocate the GPU backing for the same dimensions. Compared in
+    // device px so sub-pixel layout noise can't force a realloc (see the
+    // `_lastDevW` note).
+    const devW = Math.round(width * dpr);
+    const devH = Math.round(height * dpr);
+    if (devW === this._lastDevW && devH === this._lastDevH && dpr === this._lastDpr) {
+      return;
+    }
+    this._lastDevW = devW;
+    this._lastDevH = devH;
     this._lastDpr = dpr;
     this.flushAll();
     this.post({ op: Op.RESIZE, width, height, dpr });
