@@ -40,7 +40,19 @@ export const THEME = {
   },
 } as const;
 
-export type DemoTheme = typeof THEME;
+/**
+ * Same SHAPE as {@link THEME}, but every colour widened to `string`.
+ *
+ * `THEME` is `as const`, so `typeof THEME` gives literal types ("#f8f9fb" &c.)
+ * — a `DemoTheme` could then only ever hold the light palette's exact values,
+ * and `THEME_DARK` below wouldn't type-check. Vite doesn't type-check on build,
+ * so this went unnoticed until the examples were added to `pnpm typecheck`.
+ */
+export type DemoTheme = {
+  readonly [Section in keyof typeof THEME]: {
+    readonly [Token in keyof (typeof THEME)[Section]]: string;
+  };
+};
 
 /**
  * Dark counterpart to {@link THEME}, same shape. The `chart.*` values are what
