@@ -1,6 +1,6 @@
 {
   "name": "@heojeongbo/fluxion-render",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "High-performance OffscreenCanvas rendering engine for real-time robotics data (charts, LiDAR, streaming).",
   "type": "module",
   "sideEffects": false,
