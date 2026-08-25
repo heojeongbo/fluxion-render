@@ -1,0 +1,122 @@
+name: Release
+
+# Publishing is the only moment in this repo where a mistake is expensive: the
+# packages are consumed by downstream apps, so a broken publish is visible to
+# users and cannot be un-published after 72h. That is why the checks live here
+# rather than on every push to main (see ci.yml).
+#
+# Trigger: the tags `release-it` pushes, e.g. `fluxion-render-v1.6.0`.
+on:
+  push:
+    tags:
+      - "fluxion-render-v*"
+      - "fluxion-worker-v*"
+      - "fluxion-replay-v*"
+  # Re-run a failed publish for an existing tag without re-tagging.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish, e.g. fluxion-render-v1.6.0"
+        required: true
+
+permissions:
+  contents: read
+  # Required for npm provenance — links the published tarball to this workflow
+  # run and this commit, and is what lets the token below be a short-lived
+  # OIDC-backed credential rather than a long-lived one on someone's laptop.
+  id-token: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      # Map the tag to the package it names. `fluxion-render-v1.6.0` →
+      # directory `packages/fluxion-render`, npm name `@heojeongbo/fluxion-render`.
+      - name: Resolve package from tag
+        id: pkg
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          SLUG="${TAG%-v*}"                      # fluxion-render
+          VERSION="${TAG##*-v}"                  # 1.6.0
+          DIR="packages/$SLUG"
+          if [ ! -f "$DIR/package.json" ]; then
+            echo "::error::tag '$TAG' does not map to a package directory ($DIR)"
+            exit 1
+          fi
+          NAME=$(node -p "require('./$DIR/package.json').name")
+          PKGVER=$(node -p "require('./$DIR/package.json').version")
+          # The tag must match the version committed at that tag, otherwise the
+          # tag and the tarball would disagree about what was released.
+          if [ "$PKGVER" != "$VERSION" ]; then
+            echo "::error::tag says v$VERSION but $DIR/package.json is $PKGVER"
+            exit 1
+          fi
+          echo "dir=$DIR"   >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing $NAME@$VERSION from $DIR"
+
+      - run: pnpm install --frozen-lockfile
+
+      # Verify the WHOLE workspace, not just the package being published.
+      # `fluxion-replay` peer-depends on any `fluxion-render` 1.x and imports
+      # its source in tests, so a render-only gate can ship a render change that
+      # breaks replay. Build first: replay resolves render through dist/.
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm lint
+
+      # Pack with pnpm, publish with npm — each does the half the other can't.
+      # `fluxion-render` depends on `@heojeongbo/fluxion-worker: workspace:^`;
+      # only pnpm rewrites that to a real range (verified: -> "^0.6.0"), so a
+      # plain `npm publish` would ship an uninstallable package.json. Only npm
+      # generates provenance, and it accepts a prebuilt tarball — so pack first,
+      # then publish that exact tarball.
+      - name: "Pack (rewrites workspace: ranges)"
+        id: pack
+        run: |
+          set -euo pipefail
+          pnpm pack --pack-destination "$RUNNER_TEMP"
+          TGZ=$(ls "$RUNNER_TEMP"/*.tgz)
+          echo "Packed $TGZ"
+          node -e "
+            const { execSync } = require('node:child_process');
+            const raw = execSync('tar -xzOf \"$TGZ\" package/package.json').toString();
+            const deps = JSON.parse(raw).dependencies ?? {};
+            const bad = Object.entries(deps).filter(([, v]) => String(v).startsWith('workspace:'));
+            if (bad.length) {
+              console.error('::error::unresolved workspace ranges in the tarball: ' + JSON.stringify(bad));
+              process.exit(1);
+            }
+          "
+          echo "tgz=$TGZ" >> "$GITHUB_OUTPUT"
+        working-directory: ${{ steps.pkg.outputs.dir }}
+
+      - name: Publish to npm
+        run: npm publish "${{ steps.pack.outputs.tgz }}" --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "### Published \`${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- npm: https://www.npmjs.com/package/${{ steps.pkg.outputs.name }}/v/${{ steps.pkg.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Built with provenance from this workflow run." >> "$GITHUB_STEP_SUMMARY"

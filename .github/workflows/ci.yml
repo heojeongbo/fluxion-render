@@ -1,31 +1,51 @@
 name: CI
 
+# Deliberately NOT run on every push to main.
+#
+# `main` has no branch protection and this repo has never used a pull request —
+# every commit lands by direct push. A check that runs after the code is already
+# on main gates nothing; it is a notification, and this one demonstrably wasn't
+# read (it failed 100% of its runs for three weeks, weekly failure emails
+# included, and nothing happened). The checks that actually protect users now
+# run where a mistake is expensive: release.yml verifies the whole workspace
+# immediately before publishing, and release-it runs the same suite locally
+# before it will even create a tag.
+#
+# What's left here is the clean-environment sweep local development never does:
+# a frozen-lockfile install from a fresh checkout, a dependency-ordered build,
+# and the examples' typecheck. Weekly catches drift (a transitive dependency, a
+# runner image change); `workflow_dispatch` is there for on-demand runs; and
+# `pull_request` means the moment PRs are adopted, this becomes a real gate with
+# no further changes.
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
   schedule:
-    - cron: "0 6 * * 1" # weekly coverage sweep (Mon 06:00 UTC)
+    - cron: "0 6 * * 1" # weekly drift sweep (Mon 06:00 UTC)
 
 # Cancel superseded runs on the same ref.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Read-only by default; no job here writes to the repo.
+permissions:
+  contents: read
+
 jobs:
   build-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
+      # No `version:` input on purpose — `packageManager` in package.json is the
+      # single source of truth. Specifying BOTH makes pnpm/action-setup abort
+      # with "Multiple versions of pnpm specified".
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
@@ -36,26 +56,35 @@ jobs:
 
       - run: pnpm typecheck
 
-      - run: pnpm test
+      # render + worker run WITH coverage on every push: measured at +1s over a
+      # plain run (6s→7s and 1s→1s), which is cheap enough that the thresholds
+      # in their vitest.config.ts actually guard every change instead of only
+      # the weekly sweep. replay is excluded on purpose — see the coverage job.
+      #
+      # NOTE: it must be `run test:coverage`, not `pnpm --filter X vitest ...`.
+      # The latter makes pnpm look for a script NAMED "vitest", print "None of
+      # the selected packages has a vitest script", and exit 0 — a green check
+      # that ran nothing. That is what the old coverage job did.
+      - run: pnpm --filter @heojeongbo/fluxion-render run test:coverage
+      - run: pnpm --filter @heojeongbo/fluxion-worker run test:coverage
+      - run: pnpm --filter @heojeongbo/fluxion-replay run test
 
       - run: pnpm lint
 
-  # Per-package coverage runs on a schedule / manual trigger — it is the slow
-  # path (v8 instrumentation) and the 100%-line contract is what it guards.
+  # replay coverage only, on a schedule / manual trigger. v8 instrumentation
+  # takes it from 12s to 40s (3.3x), and that slowdown is exactly what makes
+  # `scenarios/09-*.test.ts` timing-flaky (see CLAUDE.md) — so it stays off the
+  # per-push path where a flake would block every merge.
   coverage:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
         with:
-          version: 9
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm --filter @heojeongbo/fluxion-render vitest run --coverage
-      - run: pnpm --filter @heojeongbo/fluxion-worker vitest run --coverage
-      - run: pnpm --filter @heojeongbo/fluxion-replay vitest run --coverage
+      - run: pnpm --filter @heojeongbo/fluxion-replay run test:coverage

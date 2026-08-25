@@ -39,7 +39,9 @@ pnpm lint:fix    # biome check --write . (formatter + import sort; linter disabl
 ## Testing & coverage
 
 - Coverage runs per package (no root script): `cd packages/<pkg> && pnpm vitest run --coverage`. Build render first (`pnpm --filter @heojeongbo/fluxion-render build`) so replay resolves it.
-- Enforced thresholds (`vitest.config.ts`): render = 100% stmts/funcs/lines, 98% branches; worker = 100% stmts/funcs/lines, 90% branches; replay = 100% lines (binding).
+- Enforced thresholds (`vitest.config.ts`), each set to the MEASURED floor so a regression can't slip under an aspirational gate: render = 100% stmts/funcs/lines + 98% branches; worker = 100% stmts/funcs/lines + 95% branches; replay = 100% lines, 99% stmts, 97% funcs, 96% branches. Re-measure and raise them when coverage improves.
+- CI runs render + worker WITH `--coverage` on every push (+1s measured); replay coverage stays on the weekly schedule because v8 instrumentation triples its runtime (12s→40s) and that slowdown is what makes `scenarios/09-*` flaky.
+- Biome's **linter is enabled** (`biome.json`) — `pnpm lint` fails on errors only. `noExplicitAny`, `useExhaustiveDependencies`, and the a11y rules are set to `warn`: they carry real signal but need a dedicated cleanup pass, so they're visible without blocking. `noArrayIndexKey` / `useIterableCallbackReturn` / `noNonNullAssertion` are off (style-only in this codebase); `useHookAtTopLevel` is off under `shared/gl/` where it false-positives on `gl.useProgram()`; `noAssignInExpressions` is off in tests.
 - Patterns: `createFakeCtx()` (`src/test/setup.ts`) for canvas draw tests; a stub host whose `line(id)` returns a handle with a spyable `push` (see `use-simple-chart.test.tsx` `makeStubHost`) for stream-hook tests; `labelDraws(ctx)` (setup.ts) to assert label text/anchor coords from sprite `drawImage` blits — labels are NOT `fillText` on the target ctx anymore.
 - Module singletons (frame driver, flush scheduler, label cache) are reset by a global `afterEach` in setup.ts; file-local afterEach hooks that reset them must run BEFORE `vi.useRealTimers()` (a fake-timer rAF handle cancelled under real timers wedges the singleton).
 - Frame-count-exact tests: happy-dom/sinon rAF due-times don't align with arbitrary `advanceTimersByTime` steps — step frames with `vi.advanceTimersToNextTimer()` (it fires ALL timers due at that tick, in registration order). Governor tests drive time via `vi.spyOn(performance, "now")` with a manual clock (advance BEFORE the frame for arrival gaps, INSIDE onFrame for busy).
@@ -50,9 +52,21 @@ pnpm lint:fix    # biome check --write . (formatter + import sort; linter disabl
 ## Release
 
 Per-package release-it via root scripts: `release[:worker|:replay][:patch|:minor|:major][:dry]`.
-Pipeline: typecheck → test → build → version bump → CHANGELOG → tag (`fluxion-<pkg>-v<semver>`) → GitHub release → npm publish. Use the `release` skill.
+Use the `release` skill.
+
+**The publish happens in CI, not on your machine.** Split of responsibilities:
+- **release-it (local)** — verifies, bumps the version, writes CHANGELOG, commits, tags `fluxion-<pkg>-v<semver>`, pushes, creates the GitHub release. It does **not** publish.
+- **`.github/workflows/release.yml`** — triggered by that tag. Re-installs from the lockfile, runs the whole workspace (build → typecheck → test → lint), then `pnpm pack` + `npm publish --provenance`.
+
+Why split that way: `pnpm pack` is the only half that rewrites `workspace:^` to a real range (`fluxion-render` depends on `fluxion-worker` that way, so a plain `npm publish` would ship an uninstallable package.json), and `npm publish` is the only half that emits provenance. The workflow packs with one and publishes the tarball with the other, and hard-fails if any `workspace:` range survives into the tarball.
 
 **Caveats:**
 - `release-it --dry-run` runs `npm version` FOR REAL — the `:dry` scripts auto-restore `package.json` afterward, but never trust a dirty tree after a dry-run; a leftover bump skews the next computed version.
 - The plain `:dry` previews the DEFAULT (minor) bump — use `release:<pkg>:patch:dry` etc. to preview the level you actually intend.
-- release-it requires a clean tree and branch `main`; `.env` must provide `GITHUB_TOKEN`.
+- release-it requires a clean tree and branch `main`; `.env` must provide `GITHUB_TOKEN`. The npm token now lives only in the `NPM_TOKEN` Actions secret — there is no longer a reason to keep one in a local `.npmrc`.
+- `before:init` runs the **whole workspace**, not just the package being released. `fluxion-replay` peer-depends on any `fluxion-render` 1.x and imports its source in tests, so a render-only gate could ship a render change that breaks replay.
+- A failed publish does not need a new version: re-run the workflow via `workflow_dispatch` with the existing tag.
+
+## CI
+
+`ci.yml` runs on `pull_request` / `workflow_dispatch` / weekly — **not** on push to main. `main` has no branch protection and the repo has never used a PR, so a post-push check gates nothing; the checks that protect users run in `release.yml` and in release-it's `before:init` instead. What CI still covers is the clean-environment sweep local dev never does: frozen-lockfile install, dependency-ordered build, examples typecheck.

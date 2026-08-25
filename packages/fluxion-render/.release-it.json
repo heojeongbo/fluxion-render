@@ -18,14 +18,14 @@
   },
   "hooks": {
     "before:init": [
-      "pnpm --filter @heojeongbo/fluxion-render typecheck",
-      "pnpm --filter @heojeongbo/fluxion-render test",
-      "pnpm --filter @heojeongbo/fluxion-render build"
+      "pnpm -w run build",
+      "pnpm -w run typecheck",
+      "pnpm -w run test",
+      "pnpm -w run lint"
     ],
     "after:bump": ["echo 'Version bumped to ${version}'"],
     "after:release": [
-      "pnpm publish --access public --registry https://registry.npmjs.org --no-git-checks",
-      "echo 'Successfully released ${name} v${version} to ${repo.repository}.'"
+      "echo 'Tagged ${name} v${version} — the release workflow publishes it on tag push. Watch: gh run watch'"
     ]
   },
   "plugins": {

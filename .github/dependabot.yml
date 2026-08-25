@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # The CI outage that prompted this file was an action-config problem
+  # (pnpm/action-setup rejecting a `version:` input that duplicated
+  # package.json's `packageManager`). Keeping the actions current surfaces that
+  # class of breakage as a reviewable PR instead of a red main branch.
+  #
+  # npm is deliberately NOT watched here: this is a pnpm workspace with three
+  # published packages, and per-dependency PRs would be noisy without a
+  # lockfile-aware grouping story. Upgrade deps deliberately instead.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "ci"
+    labels:
+      - dependencies
