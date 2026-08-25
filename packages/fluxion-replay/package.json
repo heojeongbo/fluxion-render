@@ -49,16 +49,16 @@
     "webrtc",
     "dashboard"
   ],
-  "author": "heojeongbo <heojungbo@gmail.com> (https://github.com/HeoJeongBo)",
+  "author": "heojeongbo <heojungbo@gmail.com> (https://github.com/heojeongbo)",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/HeoJeongBo/fluxion-render.git",
+    "url": "git+https://github.com/heojeongbo/fluxion-render.git",
     "directory": "packages/fluxion-replay"
   },
-  "homepage": "https://github.com/HeoJeongBo/fluxion-render/tree/main/packages/fluxion-replay#readme",
+  "homepage": "https://github.com/heojeongbo/fluxion-render/tree/main/packages/fluxion-replay#readme",
   "bugs": {
-    "url": "https://github.com/HeoJeongBo/fluxion-render/issues"
+    "url": "https://github.com/heojeongbo/fluxion-render/issues"
   },
   "engines": {
     "node": ">=18",

@@ -34,7 +34,7 @@
       "infile": "CHANGELOG.md",
       "context": {
         "host": "https://github.com",
-        "owner": "HeoJeongBo",
+        "owner": "heojeongbo",
         "repository": "fluxion-render"
       }
     }

@@ -18,13 +18,6 @@
 * **render:** opt-in slim worker via a layer registry (tree-shakeable layers) ([82ba2d1](https://github.com/HeoJeongBo/fluxion-render/commit/82ba2d138d26038cdc16b817791bb23a250afc9f))
 
 
-### BREAKING CHANGES
-
-* **examples:** to a package's API now shows up as a failing demo.
-
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01WsSrT7xJHY81FrZfdS41w2
-
 # [1.5.0](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v1.4.0...fluxion-render-v1.5.0) (2026-08-06)
 
 
