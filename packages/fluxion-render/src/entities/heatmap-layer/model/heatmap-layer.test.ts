@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Viewport } from "../../../shared/model/viewport";
+import type { Viewport } from "../../../shared/model/viewport";
 import { HeatmapLayer } from "./heatmap-layer";
 
 function makeCtx() {

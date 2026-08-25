@@ -1,5 +1,5 @@
 import { act, render } from "@testing-library/react";
-import { StrictMode, useState } from "react";
+import { StrictMode, useEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FluxionHost } from "../../../features/host";
 import { useFluxionStream } from "./use-fluxion-stream";
@@ -263,15 +263,25 @@ describe("useFluxionStream", () => {
         setup: () => null,
         tick: () => latestDivisor, // intentionally unstable via outer closure
       });
-      // Force a re-render to ensure refs update
-      setTimeout(() => setN((n) => n + 1), 0);
+      // One re-render after mount so the hook re-latches the unstable closures.
+      // Scheduled from an effect and cleared on unmount: the previous version
+      // called setTimeout in the RENDER BODY, leaking one uncleared timer per
+      // render. A straggler firing after the DOM was torn down took React's
+      // `getCurrentEventPriority` through a missing `window` and failed the
+      // whole run with an unhandled ReferenceError — intermittently, which is
+      // the worst kind of CI red.
+      useEffect(() => {
+        const t = setTimeout(() => setN((n) => n + 1), 0);
+        return () => clearTimeout(t);
+      }, []);
       return <div>{rate}</div>;
     }
-    render(<ControlledHarness />);
+    const { unmount } = render(<ControlledHarness />);
     vi.advanceTimersByTime(30);
     latestDivisor = 5;
     vi.advanceTimersByTime(30);
     // No assertion on exact rate — just that it didn't crash and refs flowed.
+    unmount(); // testing-library auto-cleanup is off (globals:false)
     host.dispose();
   });
 });

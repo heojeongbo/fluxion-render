@@ -24,7 +24,7 @@ class FakeWorker {
   addEventListener = vi.fn();
   removeEventListener = vi.fn();
   constructor(_url: string | URL, _opts?: WorkerOptions) {
-    fakeWorkerInstances.push(this as any);
+    fakeWorkerInstances.push(this);
   }
 }
 

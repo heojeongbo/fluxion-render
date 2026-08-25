@@ -49,7 +49,7 @@ describe("Scenario 05: error handling and edge cases", () => {
     seedMetricFrames(session, "cpu", 5);
     await session.store.flush();
 
-    let before = await session.getTimeRange();
+    const before = await session.getTimeRange();
     expect(before).not.toBeNull();
 
     await session.clearRecording();

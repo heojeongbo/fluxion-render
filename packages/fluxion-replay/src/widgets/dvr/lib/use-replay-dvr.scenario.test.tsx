@@ -650,7 +650,6 @@ describe("useReplayDvr + useChartReplay end-to-end (real player, real session)",
     return (
       <ChartReplayProbe
         host={host}
-        // biome-ignore lint: deliberate cast — fixtures use structural fakes
         player={player as never}
         store={store as never}
         channel={SIGNAL_CHANNEL}

@@ -188,7 +188,7 @@ export function describeSlice(
 // ── Easing ───────────────────────────────────────────────────────────────────
 
 function easeOutCubic(t: number): number {
-  return 1 - Math.pow(1 - t, 3);
+  return 1 - (1 - t) ** 3;
 }
 
 // ── Animation hook ────────────────────────────────────────────────────────────

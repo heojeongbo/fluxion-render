@@ -40,7 +40,13 @@ async function seedFiveMinutes(session: ReplaySession): Promise<void> {
   await session.store.flush();
 }
 
-describe("Scenario 07: long recording replay (~5 min)", () => {
+// Every test here seeds a full 5-minute recording (8 × `seedFiveMinutes`), so
+// each one legitimately runs close to vitest's 5 s default — one was measured
+// at 5007 ms on a loaded machine and failed the whole suite. That matters more
+// now that the release gate runs the full workspace: a load-sensitive flake
+// here would block a publish. Same headroom scenario 09 already gives its
+// long-running tests (`{ timeout: 20_000 }`), applied once at the describe.
+describe("Scenario 07: long recording replay (~5 min)", { timeout: 20_000 }, () => {
   let session: ReplaySession;
 
   beforeEach(async () => {

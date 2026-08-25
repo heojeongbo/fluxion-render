@@ -1,5 +1,6 @@
 import { act, render } from "@testing-library/react";
-import React, { createRef } from "react";
+import type React from "react";
+import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FluxionBrush } from "./fluxion-brush";
 

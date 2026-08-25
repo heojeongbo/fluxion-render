@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
+import type {
   ReplayPlayer,
-  type ReplayPlayerState,
+  ReplayPlayerState,
 } from "../../../features/player/model/replay-player";
 
 export interface UseReplayPlayerOptions {

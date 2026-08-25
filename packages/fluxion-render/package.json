@@ -34,6 +34,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "release": "release-it",
     "release:minor": "release-it minor",
     "release:major": "release-it major",

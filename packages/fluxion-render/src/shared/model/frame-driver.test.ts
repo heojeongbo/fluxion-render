@@ -160,9 +160,7 @@ describe("FrameDriver", () => {
   it("falls back to setTimeout(16)/clearTimeout when rAF is undefined", () => {
     const raf = (globalThis as { requestAnimationFrame?: unknown }).requestAnimationFrame;
     const caf = (globalThis as { cancelAnimationFrame?: unknown }).cancelAnimationFrame;
-    // biome-ignore lint/performance/noDelete: restoring below
     delete (globalThis as { requestAnimationFrame?: unknown }).requestAnimationFrame;
-    // biome-ignore lint/performance/noDelete: restoring below
     delete (globalThis as { cancelAnimationFrame?: unknown }).cancelAnimationFrame;
 
     const d = new FrameDriver();
@@ -468,9 +466,7 @@ describe("FrameDriver", () => {
       const raf = (globalThis as { requestAnimationFrame?: unknown })
         .requestAnimationFrame;
       const caf = (globalThis as { cancelAnimationFrame?: unknown }).cancelAnimationFrame;
-      // biome-ignore lint/performance/noDelete: restoring below
       delete (globalThis as { requestAnimationFrame?: unknown }).requestAnimationFrame;
-      // biome-ignore lint/performance/noDelete: restoring below
       delete (globalThis as { cancelAnimationFrame?: unknown }).cancelAnimationFrame;
 
       const d = new FrameDriver();

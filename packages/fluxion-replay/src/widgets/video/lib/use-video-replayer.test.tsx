@@ -7,7 +7,7 @@ import {
 } from "../../../entities/video-channel/video-channel";
 import { ReplayPlayer } from "../../../features/player/model/replay-player";
 import { ReplayStore } from "../../../features/store/model/replay-store";
-import { TimelineIndex } from "../../../features/timeline/model/timeline-index";
+import type { TimelineIndex } from "../../../features/timeline/model/timeline-index";
 import { VideoReplayer } from "../../../features/video/model/video-replayer";
 import { useVideoReplayer } from "./use-video-replayer";
 

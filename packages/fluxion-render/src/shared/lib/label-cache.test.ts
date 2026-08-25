@@ -182,7 +182,6 @@ describe("label-cache", () => {
 
   it("falls back to verbatim fillText when OffscreenCanvas is missing, and latches", () => {
     const saved = (globalThis as { OffscreenCanvas?: unknown }).OffscreenCanvas;
-    // biome-ignore lint/performance/noDelete: restoring below
     delete (globalThis as { OffscreenCanvas?: unknown }).OffscreenCanvas;
     try {
       const ctx = ctx2d();

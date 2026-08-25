@@ -835,7 +835,6 @@ describe("ReplayStore", () => {
 
       // The next write throws quota on its first attempt → the REAL
       // _evictOldest(0.25) runs (not mocked) → the retry (2nd attempt) resolves.
-      // biome-ignore lint/suspicious/noExplicitAny: spying the private write
       const writeSpy = vi
         .spyOn(store as any, "_writeChunkOnce")
         .mockRejectedValueOnce(new DOMException("quota", "QuotaExceededError"))

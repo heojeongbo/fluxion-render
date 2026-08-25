@@ -4,7 +4,7 @@
  */
 export function niceStep(range: number, targetTicks: number): number {
   const rough = range / Math.max(1, targetTicks);
-  const pow10 = Math.pow(10, Math.floor(Math.log10(rough)));
+  const pow10 = 10 ** Math.floor(Math.log10(rough));
   const norm = rough / pow10;
   let nice: number;
   if (norm < 1.5) nice = 1;

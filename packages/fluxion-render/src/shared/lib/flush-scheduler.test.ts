@@ -109,9 +109,7 @@ describe("flush-scheduler", () => {
   it("falls back to setTimeout(0)/clearTimeout when rAF is undefined", () => {
     const raf = (globalThis as { requestAnimationFrame?: unknown }).requestAnimationFrame;
     const caf = (globalThis as { cancelAnimationFrame?: unknown }).cancelAnimationFrame;
-    // biome-ignore lint/performance/noDelete: restoring below
     delete (globalThis as { requestAnimationFrame?: unknown }).requestAnimationFrame;
-    // biome-ignore lint/performance/noDelete: restoring below
     delete (globalThis as { cancelAnimationFrame?: unknown }).cancelAnimationFrame;
 
     const a = vi.fn();

@@ -1,5 +1,5 @@
 import { type DependencyList, useEffect, useRef, useState } from "react";
-import { WorkerHandle } from "../worker-pool/model/worker-pool";
+import type { WorkerHandle } from "../worker-pool/model/worker-pool";
 
 /**
  * Creates a `WorkerHandle` that lives for the component lifetime.

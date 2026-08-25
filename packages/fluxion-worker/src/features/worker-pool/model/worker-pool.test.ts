@@ -5,7 +5,7 @@ import type { WorkerPoolStats } from "./worker-pool";
 import {
   WorkerHandle,
   WorkerHandlerError,
-  WorkerLike,
+  type WorkerLike,
   WorkerPool,
   WorkerTimeoutError,
 } from "./worker-pool";

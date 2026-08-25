@@ -64,7 +64,6 @@ export function useHoverDataCache(
       });
     }
     // sig captures the id/color set; cache is stable.
-    // biome-ignore lint/correctness/useExhaustiveDependencies: sig stands in for layers identity
   }, [sig, cache]);
 
   const push = useCallback(

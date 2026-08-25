@@ -386,8 +386,6 @@ export interface ChartReplayProbeProps {
  */
 export function ChartReplayProbe(props: ChartReplayProbeProps) {
   const channel = props.channel ?? SIGNAL_CHANNEL;
-  // biome-ignore lint: deliberate cast — props use the fake shapes that
-  // structurally match the production interfaces but aren't nominally typed.
   useChartReplay({
     host: props.host as never,
     player: props.player as never,

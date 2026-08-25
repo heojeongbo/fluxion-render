@@ -1,4 +1,4 @@
-import { type GlRenderer } from "../../../shared/gl/gl-renderer";
+import type { GlRenderer } from "../../../shared/gl/gl-renderer";
 import {
   type ClipTransform,
   dataToClip,

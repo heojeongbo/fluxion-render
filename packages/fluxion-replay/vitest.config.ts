@@ -42,11 +42,14 @@ export default defineConfig({
         "src/index.ts",
         "src/react.ts",
       ],
+      // Set to the measured floor, not an aspiration — the previous gates sat
+      // ~9 points under actual coverage, so a sizeable regression could land
+      // without CI noticing. Measured 99.03/96.73/97.32/100, stable across runs.
       thresholds: {
         lines: 100,
-        statements: 90,
-        branches: 85,
-        functions: 90,
+        statements: 99,
+        branches: 96,
+        functions: 97,
       },
     },
   },

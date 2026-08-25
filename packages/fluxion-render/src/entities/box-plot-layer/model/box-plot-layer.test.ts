@@ -13,7 +13,9 @@ function makeViewport() {
 /** [x, min, q1, median, q3, max] tuples → flat buffer. */
 function boxes(...rows: number[][]): ArrayBuffer {
   const buf = new Float32Array(rows.length * 6);
-  rows.forEach((r, i) => buf.set(r, i * 6));
+  rows.forEach((r, i) => {
+    buf.set(r, i * 6);
+  });
   return buf.buffer as ArrayBuffer;
 }
 

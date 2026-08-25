@@ -1,5 +1,5 @@
 import { type DependencyList, useEffect, useRef } from "react";
-import { WorkerHandle } from "../worker-pool/model/worker-pool";
+import type { WorkerHandle } from "../worker-pool/model/worker-pool";
 
 /**
  * Subscribe to stream messages from a worker and emit a new message

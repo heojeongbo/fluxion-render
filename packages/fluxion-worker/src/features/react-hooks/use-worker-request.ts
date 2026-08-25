@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { type RequestOptions, WorkerHandle } from "../worker-pool/model/worker-pool";
+import type { RequestOptions, WorkerHandle } from "../worker-pool/model/worker-pool";
 
 export interface UseWorkerRequestResult<TResult> {
   /** Last successful response, or `null` before the first response. */

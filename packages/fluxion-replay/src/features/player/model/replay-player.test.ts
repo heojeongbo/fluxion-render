@@ -897,7 +897,6 @@ describe("ReplayPlayer", () => {
       ]);
       await flush();
 
-      // biome-ignore lint/suspicious/noExplicitAny: testing internals
       expect(
         (player as any)._prefetchBuffer.some((f: { t: number }) => f.t === 500),
       ).toBe(false);

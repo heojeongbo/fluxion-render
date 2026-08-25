@@ -187,7 +187,6 @@ export function useMultiSeriesChart(
       ),
     ],
     // sig captures id/color/lineWidth/dash/offset; the rest are listed.
-    // biome-ignore lint/correctness/useExhaustiveDependencies: sig stands in for series identity
     [
       sig,
       axisLayerId,
