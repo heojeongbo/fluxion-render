@@ -37,6 +37,9 @@
         "host": "https://github.com",
         "owner": "heojeongbo",
         "repository": "fluxion-render"
+      },
+      "gitRawCommitsOpts": {
+        "path": "."
       }
     }
   }
