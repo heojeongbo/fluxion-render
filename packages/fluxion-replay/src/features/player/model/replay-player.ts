@@ -26,6 +26,22 @@ export interface ReplayPlayerOptions {
 
 const DEFAULT_PREFETCH_MS = 2_000;
 
+/**
+ * Refill hysteresis, as a fraction of `prefetchMs`.
+ *
+ * Without it, `_prefetch` sets `_prefetchedUpTo = currentT + prefetchMs`, so
+ * the very next tick (16 ms later) is already "behind" the horizon and fetches
+ * again — one IndexedDB range query per animation frame, each covering ~16 ms
+ * and returning about one frame. Measured at 60 queries/second per playing
+ * player, and in the scenario tests it was 98% of their wall clock
+ * (4 064 ticks → 4 064 `getFrames` calls for a 65 s playback).
+ *
+ * Refilling only once the buffered horizon has drained below half the window
+ * makes it one query per ~`prefetchMs / 2` of playback instead, while still
+ * leaving that much buffered runway for the async fetch to land.
+ */
+const REFILL_AT = 0.5;
+
 /** Returns the index of the first element with t > value (sorted ascending). */
 function upperBound(arr: SerializedFrame[], value: number): number {
   let lo = 0;
@@ -293,8 +309,15 @@ export class ReplayPlayer {
       return;
     }
 
-    // Prefetch ahead — skip if a fetch is already in-flight
-    if (!this._isPrefetching && currentT + this._prefetchMs > this._prefetchedUpTo) {
+    // Prefetch ahead — skip if a fetch is already in-flight, and only once the
+    // buffered horizon has drained past REFILL_AT (see the constant: without
+    // the hysteresis this fires on every single frame).
+    // seek()/play()/stop() rewind `_prefetchedUpTo` behind `currentT`, making
+    // the remaining horizon negative, so they still refill on the next tick.
+    if (
+      !this._isPrefetching &&
+      this._prefetchedUpTo - currentT < this._prefetchMs * REFILL_AT
+    ) {
       void this._prefetch(currentT);
     }
 

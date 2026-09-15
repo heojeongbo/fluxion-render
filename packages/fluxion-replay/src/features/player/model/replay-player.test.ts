@@ -413,8 +413,10 @@ describe("ReplayPlayer", () => {
     vi.advanceTimersByTime(16);
     for (let i = 0; i < 5; i++) await Promise.resolve();
     // Advance to trigger more prefetch windows (which return []), then past the
-    // buffered frames so they emit despite the empty merges.
-    vi.advanceTimersByTime(500);
+    // buffered frames so they emit despite the empty merges. Must exceed the
+    // refill hysteresis (prefetchMs * REFILL_AT = 1 000 ms of drained horizon)
+    // or the second prefetch never fires.
+    vi.advanceTimersByTime(1_500);
     for (let i = 0; i < 5; i++) await Promise.resolve();
 
     expect(call).toBeGreaterThan(1); // at least one empty prefetch happened

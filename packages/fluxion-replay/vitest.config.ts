@@ -19,6 +19,15 @@ export default defineConfig({
   test: {
     environment: "happy-dom",
     globals: false,
+    // One budget for the whole package instead of `{ timeout: 20_000 }` hand-
+    // applied per test. The old scheme was applied to 9 of 831 tests and was
+    // already incomplete — two tests in the very file that kept failing
+    // (scenario 09's A4 and B1) never got the option and silently sat on
+    // vitest's 5 s default. This is the same 20 s budget, just uniform, so a
+    // new scenario test inherits it instead of needing someone to remember.
+    // It is a hang detector, not a perf budget: the slowest test in the package
+    // is ~2.5 s locally, and the scenario suite runs in ~1 s.
+    testTimeout: 20_000,
     teardownTimeout: 10000,
     include: ["src/**/*.test.{ts,tsx}"],
     // Bench files are picked up by `vitest bench` only. Exclude here so a
