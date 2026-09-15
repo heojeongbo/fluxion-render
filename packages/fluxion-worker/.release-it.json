@@ -31,7 +31,12 @@
   "plugins": {
     "@release-it/conventional-changelog": {
       "preset": "angular",
-      "infile": "CHANGELOG.md"
+      "infile": "CHANGELOG.md",
+      "context": {
+        "host": "https://github.com",
+        "owner": "heojeongbo",
+        "repository": "fluxion-render"
+      }
     }
   }
 }
