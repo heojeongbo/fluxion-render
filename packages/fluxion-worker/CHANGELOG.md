@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/heojeongbo/fluxion-render/compare/fluxion-worker-v0.6.0...fluxion-worker-v0.6.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **repo:** lowercase the GitHub owner so npm provenance validates ([2538a58](https://github.com/heojeongbo/fluxion-render/commit/2538a5841bd5aa64fdca818f21f5300aa7e60534))
+
 # [0.6.0](https://github-personal/HeoJeongBo/fluxion-render/compare/fluxion-worker-v0.5.1...fluxion-worker-v0.6.0) (2026-06-25)
 
 
