@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.2](https://github.com/heojeongbo/fluxion-render/compare/fluxion-replay-v0.13.1...fluxion-replay-v0.13.2) (2026-09-15)
+
+
+### Bug Fixes
+
+* **replay:** refill prefetch on a horizon threshold, not every frame ([c209f7d](https://github.com/heojeongbo/fluxion-render/commit/c209f7df48fd15442f24cef6d63545e536bd478c))
+* **repo:** lowercase the GitHub owner so npm provenance validates ([2538a58](https://github.com/heojeongbo/fluxion-render/commit/2538a5841bd5aa64fdca818f21f5300aa7e60534))
+
 ## [0.13.1](https://github-personal/HeoJeongBo/fluxion-render/compare/fluxion-replay-v0.13.0...fluxion-replay-v0.13.1) (2026-08-06)
 
 

@@ -1,6 +1,6 @@
 {
   "name": "@heojeongbo/fluxion-replay",
-  "version": "0.13.1",
+  "version": "0.13.2",
   "description": "Time-travel replay system for dashboard data streams (video, logs, ROS, metrics).",
   "type": "module",
   "sideEffects": false,
