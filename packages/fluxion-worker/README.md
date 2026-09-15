@@ -1,7 +1,7 @@
 # @heojeongbo/fluxion-worker
 
 [![npm](https://img.shields.io/npm/v/@heojeongbo/fluxion-worker)](https://www.npmjs.com/package/@heojeongbo/fluxion-worker)
-[![coverage](https://img.shields.io/badge/coverage-99%25%20lines-brightgreen)](#testing)
+[![coverage](https://img.shields.io/badge/coverage-100%25%20lines-brightgreen)](#testing)
 
 Generic Web Worker pool and utilities. Zero dependencies, framework-agnostic.
 
@@ -428,8 +428,8 @@ Tested with [Vitest](https://vitest.dev). Run coverage from this package:
 cd packages/fluxion-worker && pnpm vitest run --coverage
 ```
 
-Enforced thresholds (`vitest.config.ts`): **99% lines · 99% statements ·
-100% functions · 90% branches**.
+Enforced thresholds (`vitest.config.ts`): **100% lines · 100% statements ·
+100% functions · 95% branches**.
 
 ---
 

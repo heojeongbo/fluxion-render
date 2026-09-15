@@ -893,10 +893,9 @@ pnpm --filter @heojeongbo/fluxion-render build
 cd packages/fluxion-replay && pnpm vitest run --coverage
 ```
 
-Enforced thresholds (`vitest.config.ts`): **100% lines · 90% statements ·
-90% functions · 85% branches**. The `scenarios/09-*` suite is timing-flaky
-*only* under `--coverage` (v8 instrumentation slowdown), so it carries per-test
-`testTimeout: 20_000` — that's expected, not a clock/player bug.
+Enforced thresholds (`vitest.config.ts`): **100% lines · 99% statements ·
+97% functions · 96% branches**. `testTimeout` is set once for the whole package
+in `vitest.config.ts`; don't add per-test `timeout:` options.
 
 ---
 
