@@ -35,17 +35,21 @@ permissions:
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # No `version:` input on purpose — `packageManager` in package.json is the
       # single source of truth. Specifying BOTH makes pnpm/action-setup abort
-      # with "Multiple versions of pnpm specified".
-      - uses: pnpm/action-setup@v4
+      # with "Multiple versions of pnpm specified". Still true on v6.
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
+          # Keep `cache:` explicit. setup-node v6 limited *automatic* caching to
+          # npm, so dropping this input silently loses the pnpm store cache
+          # rather than erroring.
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
@@ -56,35 +60,22 @@ jobs:
 
       - run: pnpm typecheck
 
-      # render + worker run WITH coverage on every push: measured at +1s over a
-      # plain run (6s→7s and 1s→1s), which is cheap enough that the thresholds
-      # in their vitest.config.ts actually guard every change instead of only
-      # the weekly sweep. replay is excluded on purpose — see the coverage job.
+      # All three packages run WITH coverage, so the thresholds in each
+      # vitest.config.ts guard every change instead of only a weekly sweep.
       #
-      # NOTE: it must be `run test:coverage`, not `pnpm --filter X vitest ...`.
-      # The latter makes pnpm look for a script NAMED "vitest", print "None of
-      # the selected packages has a vitest script", and exit 0 — a green check
-      # that ran nothing. That is what the old coverage job did.
-      - run: pnpm --filter @heojeongbo/fluxion-render run test:coverage
-      - run: pnpm --filter @heojeongbo/fluxion-worker run test:coverage
-      - run: pnpm --filter @heojeongbo/fluxion-replay run test
+      # replay used to be quarantined to a separate schedule-only job because
+      # its coverage run took 40s and `scenarios/09-*.test.ts` timed out inside
+      # it. That was never v8 being slow — `ReplayPlayer` re-queried IndexedDB
+      # on every animation frame, so cost scaled with simulated playback time.
+      # With that fixed the run is ~11s and the quarantine has no reason to
+      # exist; the job is gone and replay is gated on every PR like the others.
+      #
+      # NOTE the `-C <dir>` form. `pnpm --filter <pkg> run <script>` exits 0
+      # when the filter matches nothing OR the script is missing — a rename
+      # anywhere turns these into green checks that ran nothing (verified).
+      # `pnpm -C <dir> run <script>` exits 1 with ERR_PNPM_NO_SCRIPT instead.
+      - run: pnpm -C packages/fluxion-render run test:coverage
+      - run: pnpm -C packages/fluxion-worker run test:coverage
+      - run: pnpm -C packages/fluxion-replay run test:coverage
 
       - run: pnpm lint
-
-  # replay coverage only, on a schedule / manual trigger. v8 instrumentation
-  # takes it from 12s to 40s (3.3x), and that slowdown is exactly what makes
-  # `scenarios/09-*.test.ts` timing-flaky (see CLAUDE.md) — so it stays off the
-  # per-push path where a flake would block every merge.
-  coverage:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - run: pnpm --filter @heojeongbo/fluxion-replay run test:coverage

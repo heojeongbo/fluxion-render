@@ -7,7 +7,7 @@
     "build:replay": "pnpm --filter @heojeongbo/fluxion-replay build",
     "dev": "pnpm --filter @heojeongbo/fluxion-render build && pnpm -r --parallel --filter @heojeongbo/fluxion-render --filter vite-demo run dev",
     "dev:replay": "pnpm --filter @heojeongbo/fluxion-replay build && pnpm --filter fluxion-replay-demo run dev",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "format": "biome format --write .",
     "format:check": "biome format .",

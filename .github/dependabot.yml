@@ -8,11 +8,22 @@ updates:
   # npm is deliberately NOT watched here: this is a pnpm workspace with three
   # published packages, and per-dependency PRs would be noisy without a
   # lockfile-aware grouping story. Upgrade deps deliberately instead.
+  #
+  # Grouped into ONE pull request. Ungrouped, the first sweep opened three
+  # separate PRs (checkout, setup-node, pnpm/action-setup); all three were green
+  # and all three sat unmerged for three weeks — the same "nobody reads the
+  # notification" failure mode ci.yml's header describes. One PR is one thing to
+  # review. Note `directory: /` already covers BOTH ci.yml and release.yml.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
       day: monday
+    groups:
+      actions:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
     commit-message:
       prefix: "ci"
     labels:

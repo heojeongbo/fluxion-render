@@ -33,16 +33,22 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - uses: pnpm/action-setup@v4
+      # No `version:` input on purpose — `packageManager` in package.json is the
+      # single source of truth. Specifying BOTH makes pnpm/action-setup abort
+      # with "Multiple versions of pnpm specified". Still true on v6.
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
+          # Keep `cache:` explicit — setup-node v6 limited *automatic* caching
+          # to npm, so removing this input loses the pnpm store cache silently.
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
@@ -50,8 +56,14 @@ jobs:
       # directory `packages/fluxion-render`, npm name `@heojeongbo/fluxion-render`.
       - name: Resolve package from tag
         id: pkg
+        # Through `env:`, not `${{ }}` inside the script. The workflow_dispatch
+        # `tag` input is free text and would otherwise be substituted into the
+        # script body before bash parses it — in the one job that holds
+        # `id-token: write` and NPM_TOKEN.
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          set -euo pipefail
           SLUG="${TAG%-v*}"                      # fluxion-render
           VERSION="${TAG##*-v}"                  # 1.6.0
           DIR="packages/$SLUG"
@@ -67,12 +79,42 @@ jobs:
             echo "::error::tag says v$VERSION but $DIR/package.json is $PKGVER"
             exit 1
           fi
+          # A prerelease must not land on `latest`. The tag globs match
+          # `fluxion-render-v2.0.0-beta.1`, and `npm publish` defaults to
+          # `latest`, which would hand every `npm i` consumer the beta.
+          case "$VERSION" in
+            *-*) NPMTAG=next ;;
+            *)   NPMTAG=latest ;;
+          esac
           echo "dir=$DIR"   >> "$GITHUB_OUTPUT"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Publishing $NAME@$VERSION from $DIR"
+          echo "npmtag=$NPMTAG" >> "$GITHUB_OUTPUT"
+          echo "Publishing $NAME@$VERSION from $DIR to dist-tag '$NPMTAG'"
 
       - run: pnpm install --frozen-lockfile
+
+      # `pnpm -r run <script>` exits 0 when NO package defines the script, so a
+      # rename would turn the pre-publish gate below into a green step that ran
+      # nothing — on the one path where that is expensive. Assert the scripts
+      # exist before relying on them.
+      - name: Assert every package defines the gate scripts
+        run: |
+          set -euo pipefail
+          node -e '
+            const { readFileSync } = require("node:fs");
+            const pkgs = ["fluxion-worker", "fluxion-render", "fluxion-replay"];
+            const need = ["build", "typecheck", "test", "lint"];
+            const bad = [];
+            for (const p of pkgs) {
+              const s = JSON.parse(readFileSync(`packages/${p}/package.json`)).scripts ?? {};
+              for (const n of need) if (!s[n] && n !== "lint") bad.push(`${p}:${n}`);
+            }
+            if (bad.length) {
+              console.error("::error::missing package scripts: " + bad.join(", "));
+              process.exit(1);
+            }
+          '
 
       # Verify the WHOLE workspace, not just the package being published.
       # `fluxion-replay` peer-depends on any `fluxion-render` 1.x and imports
@@ -93,14 +135,26 @@ jobs:
         id: pack
         run: |
           set -euo pipefail
-          pnpm pack --pack-destination "$RUNNER_TEMP"
-          TGZ=$(ls "$RUNNER_TEMP"/*.tgz)
+          # A dedicated directory, not $RUNNER_TEMP itself: that is shared job
+          # scratch (setup-node writes its auth .npmrc there), so a stray *.tgz
+          # would make the glob below multi-valued.
+          OUT="$RUNNER_TEMP/pack"
+          mkdir -p "$OUT"
+          pnpm pack --pack-destination "$OUT"
+          TGZ=$(ls "$OUT"/*.tgz)
           echo "Packed $TGZ"
           node -e "
             const { execSync } = require('node:child_process');
             const raw = execSync('tar -xzOf \"$TGZ\" package/package.json').toString();
-            const deps = JSON.parse(raw).dependencies ?? {};
-            const bad = Object.entries(deps).filter(([, v]) => String(v).startsWith('workspace:'));
+            const m = JSON.parse(raw);
+            // All four maps, not just 'dependencies'. worker and replay have no
+            // 'dependencies' at all, so a dependencies-only check passed them
+            // vacuously — and a surviving 'workspace:' in 'peerDependencies' is
+            // the dangerous one, since npm 7+ auto-installs peers.
+            const maps = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'];
+            const bad = maps.flatMap((k) =>
+              Object.entries(m[k] ?? {}).map(([n, v]) => [k, n, v]),
+            ).filter(([, , v]) => String(v).startsWith('workspace:'));
             if (bad.length) {
               console.error('::error::unresolved workspace ranges in the tarball: ' + JSON.stringify(bad));
               process.exit(1);
@@ -110,8 +164,10 @@ jobs:
         working-directory: ${{ steps.pkg.outputs.dir }}
 
       - name: Publish to npm
-        run: npm publish "${{ steps.pack.outputs.tgz }}" --access public --provenance
+        run: npm publish "$TGZ" --access public --provenance --tag "$NPMTAG"
         env:
+          TGZ: ${{ steps.pack.outputs.tgz }}
+          NPMTAG: ${{ steps.pkg.outputs.npmtag }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Summary
