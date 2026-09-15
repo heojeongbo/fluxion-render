@@ -32,7 +32,7 @@ Built for robotics, ROS2 monitoring, sensor dashboards, and anything that needs 
 
 - **Recording**: frames are batched into IndexedDB every 500ms. `retentionMs` trims the in-memory ring buffer (the recent-frames fast path) — it does **not** bound on-disk size.
 - **Storage & eviction**: when origin storage crosses `evictThresholdPct` (default 70%), the oldest slice of the recording is evicted from **both** IndexedDB frames and OPFS video chunks, so usage stabilises instead of climbing to the quota. Eviction is **paused during replay** so time-travel never deletes the history you're viewing.
-- **Playback**: a `VirtualClock` drives a RAF loop. Frames are prefetched 2 seconds ahead from IDB into a memory buffer, then drained on each tick. The clock loop and the player's frame/tick fan-outs isolate a throwing listener, so one bad frame is logged and skipped instead of freezing playback.
+- **Playback**: a `VirtualClock` drives a RAF loop. Frames are prefetched 2 seconds ahead from IDB into a memory buffer, then drained on each tick. The buffer refills once its horizon drains below half the window — roughly one IDB read per second of playback, not one per frame — and a seek refills on the next tick. The clock loop and the player's frame/tick fan-outs isolate a throwing listener, so one bad frame is logged and skipped instead of freezing playback.
 - **Video**: raw `VideoFrame`s from `MediaStreamTrackProcessor` are encoded via `VideoEncoder` (WebCodecs) and written to OPFS. On playback, `VideoDecoder` decodes chunks back to canvas.
 
 ---
