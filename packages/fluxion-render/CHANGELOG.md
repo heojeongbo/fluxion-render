@@ -1,5 +1,12 @@
 # Changelog
 
+# [1.7.0](https://github.com/heojeongbo/fluxion-render/compare/fluxion-render-v1.6.0...fluxion-render-v1.7.0) (2026-10-07)
+
+
+### Features
+
+* **render,examples:** add configurable current-time playhead ([f80721b](https://github.com/heojeongbo/fluxion-render/commit/f80721bf31e240ab9c9604bf418a7c7f1998dd52))
+
 # [1.6.0](https://github.com/HeoJeongBo/fluxion-render/compare/fluxion-render-v1.5.0...fluxion-render-v1.6.0) (2026-08-25)
 
 
