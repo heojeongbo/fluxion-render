@@ -3,6 +3,7 @@ import type { AxisGridConfig } from "../../../entities/axis-grid-layer";
 import type { BarChartConfig } from "../../../entities/bar-chart-layer";
 import type { BoxPlotConfig } from "../../../entities/box-plot-layer";
 import type { CandlestickConfig } from "../../../entities/candlestick-layer";
+import type { CurrentTimeConfig } from "../../../entities/current-time-layer";
 import type { EventMarkerConfig } from "../../../entities/event-marker-layer";
 import type { HeatmapConfig } from "../../../entities/heatmap-layer";
 import type { HeatmapStreamConfig } from "../../../entities/heatmap-stream-layer";
@@ -44,6 +45,7 @@ export interface LayerConfigByKind {
   "scatter-colored": ScatterColoredConfig;
   "heatmap-stream": HeatmapStreamConfig;
   "reference-line": ReferenceLineConfig;
+  "current-time": CurrentTimeConfig;
   "pose-arrow": PoseArrowConfig;
   trajectory: TrajectoryConfig;
   "occupancy-grid": OccupancyGridConfig;

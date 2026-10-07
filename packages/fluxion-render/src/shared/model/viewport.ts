@@ -19,6 +19,9 @@ export class Viewport {
    */
   latestT = 0;
 
+  /** Frame clock epoch published by a follow-clock axis for synchronized playheads. */
+  clockTime: number | null = null;
+
   /**
    * Per-frame aggregate of observed y values across all data layers that
    * currently overlap the visible time window. `AxisGridLayer` in
@@ -89,6 +92,7 @@ export class Viewport {
 
   /** Called by Engine at the start of each render frame before scan pass. */
   beginScan(): void {
+    this.clockTime = null;
     this.observedYMin = Number.POSITIVE_INFINITY;
     this.observedYMax = Number.NEGATIVE_INFINITY;
   }

@@ -24,7 +24,11 @@ import type { FluxionLayerSpec } from "./use-fluxion-canvas";
  * call `host.configLayer` directly in a memoized effect.
  */
 export function useLayerConfig(host: FluxionHost | null, spec: FluxionLayerSpec): void {
-  const lastSentRef = useRef<string | null>(null);
+  const lastSentRef = useRef<{
+    host: FluxionHost;
+    id: string;
+    config: string | undefined;
+  } | null>(null);
   const serialized = JSON.stringify(spec.config);
 
   useEffect(() => {
@@ -32,8 +36,9 @@ export function useLayerConfig(host: FluxionHost | null, spec: FluxionLayerSpec)
       lastSentRef.current = null;
       return;
     }
-    if (lastSentRef.current === serialized) return;
-    lastSentRef.current = serialized;
+    const last = lastSentRef.current;
+    if (last?.host === host && last.id === spec.id && last.config === serialized) return;
+    lastSentRef.current = { host, id: spec.id, config: serialized };
     if (spec.config !== undefined) {
       host.configLayer(spec.id, spec.config);
     }

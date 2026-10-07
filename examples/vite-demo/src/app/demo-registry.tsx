@@ -10,6 +10,7 @@ import { BrushDemoPage } from "../pages/brush-demo";
 import { CandlestickDemoPage } from "../pages/candlestick-demo";
 import { ChurnStressDemoPage } from "../pages/churn-stress-demo";
 import { CrosshairDemoPage } from "../pages/crosshair-demo";
+import { CurrentTimeDemoPage } from "../pages/current-time-demo";
 import { EventMarkerDemoPage } from "../pages/event-marker-demo";
 import { ExternalAxesDemoPage } from "../pages/external-axes-demo";
 import { FluxionWorkerDemoPage } from "../pages/fluxion-worker-demo";
@@ -79,6 +80,11 @@ export const DEMO_GROUPS: readonly DemoGroup[] = [
         slug: "follow-clock",
         label: "Follow Clock (bursty)",
         component: FollowClockDemoPage,
+      },
+      {
+        slug: "current-time",
+        label: "Current Time / Replay",
+        component: CurrentTimeDemoPage,
       },
       { slug: "crosshair", label: "Crosshair", component: CrosshairDemoPage },
       { slug: "static", label: "Static XY", component: StaticXyDemoPage },

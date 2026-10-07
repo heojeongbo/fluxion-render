@@ -3,6 +3,7 @@ import { AxisGridLayer } from "../../../entities/axis-grid-layer";
 import { BarChartLayer } from "../../../entities/bar-chart-layer";
 import { BoxPlotLayer } from "../../../entities/box-plot-layer";
 import { CandlestickLayer } from "../../../entities/candlestick-layer";
+import { CurrentTimeLayer } from "../../../entities/current-time-layer";
 import { EventMarkerLayer } from "../../../entities/event-marker-layer";
 import { HeatmapLayer } from "../../../entities/heatmap-layer";
 import { HeatmapStreamLayer } from "../../../entities/heatmap-stream-layer";
@@ -46,6 +47,7 @@ export function registerDefaultLayers(): void {
   registerLayer("event-marker", (id) => new EventMarkerLayer(id));
   registerLayer("scatter-colored", (id) => new ScatterColoredLayer(id));
   registerLayer("heatmap-stream", (id) => new HeatmapStreamLayer(id));
+  registerLayer("current-time", (id) => new CurrentTimeLayer(id));
   registerLayer("reference-line", (id) => new ReferenceLineLayer(id));
   registerLayer("pose-arrow", (id) => new PoseArrowLayer(id));
   registerLayer("trajectory", (id) => new TrajectoryLayer(id));

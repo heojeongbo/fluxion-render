@@ -81,3 +81,16 @@ describe("useLayersConfig", () => {
     ).not.toThrow();
   });
 });
+
+it("resends identical batch to a replacement non-null host", () => {
+  const { host: a } = makeHost();
+  const { host: b } = makeHost();
+  const spy = vi.spyOn(b, "configLayers");
+  const specs = visibleSpecs(true, false);
+  const { rerender, unmount } = render(<Probe host={a} specs={specs} />);
+  rerender(<Probe host={b} specs={specs} />);
+  expect(spy).toHaveBeenCalledWith(specs.map(({ id, config }) => ({ id, config })));
+  unmount();
+  a.dispose();
+  b.dispose();
+});

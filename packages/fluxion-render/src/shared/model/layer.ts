@@ -42,5 +42,7 @@ export interface Layer {
    * the layer. Layers that don't hold data may leave this unimplemented.
    */
   clearData?(): void;
+  /** Request continuous frames while an animation is active; checked after config changes. */
+  needsContinuousRender?(): boolean;
   dispose(): void;
 }

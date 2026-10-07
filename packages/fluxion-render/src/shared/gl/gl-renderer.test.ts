@@ -381,3 +381,20 @@ describe("GlRenderer", () => {
     });
   });
 });
+
+it("drawTriangles renders solid bars and safely skips a lost context", () => {
+  const h = newGlCanvas();
+  const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
+  const vertices = new Float32Array(12);
+  const transform = new Float32Array([0, 0, 1, 1, 0, 0]);
+  glr.drawTriangles(vertices, 6, transform, [1, 0, 0, 1]);
+  expect(h.gl.calls.filter((c) => c.name === "drawArrays")[0]?.args).toEqual([
+    h.gl.TRIANGLES,
+    0,
+    6,
+  ]);
+  h.dispatch({ type: "webglcontextlost", preventDefault() {} });
+  glr.drawTriangles(vertices, 6, transform, [1, 0, 0, 1]);
+  expect(h.gl.calls.filter((c) => c.name === "drawArrays")).toHaveLength(1);
+  glr.dispose();
+});

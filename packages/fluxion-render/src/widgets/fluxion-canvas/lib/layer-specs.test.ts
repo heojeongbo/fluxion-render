@@ -5,6 +5,7 @@ import {
   barLayer,
   boxPlotLayer,
   candlestickLayer,
+  currentTimeLayer,
   eventMarkerLayer,
   heatmapLayer,
   heatmapStreamLayer,
@@ -334,4 +335,14 @@ describe("all layer factories", () => {
       expect(spec.id).toBe(id);
     }
   });
+});
+
+it("currentTimeLayer exposes optional live and controlled configs", () => {
+  expect(currentTimeLayer("now")).toEqual({
+    id: "now",
+    kind: "current-time",
+    config: undefined,
+  });
+  const config = { currentTime: 1234, lineWidth: 2 };
+  expect(currentTimeLayer("playhead", config).config).toBe(config);
 });

@@ -164,3 +164,20 @@ describe("LayerStack", () => {
     expect(onUnsupported.mock.calls[0]![0]).toBe(plainLayer);
   });
 });
+
+it("replacing a duplicate id disposes the old layer and removal leaves no ghost", () => {
+  const stack = new LayerStack();
+  const old = makeStubLayer("same");
+  const next = makeStubLayer("same");
+  stack.add(old);
+  stack.add(next);
+  expect(old.dispose).toHaveBeenCalledTimes(1);
+  expect(stack.get("same")).toBe(next);
+  stack.remove("same");
+  stack.drawAll(
+    createFakeCtx() as unknown as OffscreenCanvasRenderingContext2D,
+    new Viewport(),
+  );
+  expect(old.draw).not.toHaveBeenCalled();
+  expect(next.draw).not.toHaveBeenCalled();
+});

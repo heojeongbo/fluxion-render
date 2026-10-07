@@ -9,7 +9,9 @@
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "bench": "node scripts/bench.mjs",
-    "scroll-bench": "node scripts/scroll-bench.mjs"
+    "scroll-bench": "node scripts/scroll-bench.mjs",
+    "test:e2e": "node scripts/current-time-e2e.mjs",
+    "test:perf": "node scripts/current-time-perf.mjs"
   },
   "dependencies": {
     "@heojeongbo/fluxion-render": "workspace:*",

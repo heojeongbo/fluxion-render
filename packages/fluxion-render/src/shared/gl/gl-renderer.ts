@@ -208,6 +208,18 @@ export class GlRenderer {
     gl.drawArrays(gl.LINES, 0, count);
   }
 
+  /** Filled geometry using the solid-color program; avoids native GL line-width limits. */
+  drawTriangles(
+    vertices: Float32Array,
+    count: number,
+    transform: ClipTransform,
+    color: Rgba,
+  ): void {
+    const gl = this.setupLineDraw(vertices, count, transform, color, 1, 1);
+    if (!gl) return;
+    gl.drawArrays(gl.TRIANGLES, 0, count);
+  }
+
   /**
    * Shared prologue for both line primitives: program + streaming VBO upload +
    * uniforms + clamped width. Returns the context ready to draw, or null when

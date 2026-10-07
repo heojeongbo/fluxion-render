@@ -597,6 +597,7 @@ export class FluxionHost {
   ): void {
     // Defensive: drain any staged data for a recycled id before re-adding.
     this.flushLayer(id);
+    this.layerArity.delete(id);
     this.trackArity(id, config);
     this.post({ op: Op.ADD_LAYER, id, kind, config: stripFunctionFields(config) });
   }

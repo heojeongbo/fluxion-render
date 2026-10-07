@@ -1684,7 +1684,7 @@ import { FluxionCanvas } from '@heojeongbo/fluxion-render/react';
 const host = new FluxionHost(canvas, opts?: FluxionHostOptions);
 
 // Layer management — addLayer<K> types `config` to the kind (LayerConfigByKind),
-// so all 21 kinds get autocomplete + typo detection (not just line/axis-grid).
+// so all 22 kinds get autocomplete + typo detection (not just line/axis-grid).
 host.addLayer(id, kind, config?)
 host.removeLayer(id)
 host.configLayer(id, config)
@@ -1851,7 +1851,7 @@ import type {
 ```
 
 **Slim worker bundle (tree-shaking layers).** The built-in worker registers all
-21 layer kinds, so its bundle includes every layer class. `Engine` creates
+22 layer kinds, so its bundle includes every layer class. `Engine` creates
 layers through a registry, so a **custom worker can register only the kinds it
 uses** — the bundler (`sideEffects: false`) then drops the rest. For an app that
 only draws lines + axes, this trims most of the layer code:
@@ -1863,7 +1863,7 @@ import { Engine, registerLayer, LineChartLayer, AxisGridLayer, defineWorkerWithS
 
 registerLayer("line", (id) => new LineChartLayer(id));
 registerLayer("axis-grid", (id) => new AxisGridLayer(id));
-// (the other 19 layer classes are never imported → tree-shaken out)
+// (the other 20 layer classes are never imported → tree-shaken out)
 
 defineWorkerWithState(/* …dispatch to a `new Engine()` as shown below… */);
 ```
@@ -2135,6 +2135,62 @@ it('tears down on unmount', () => {
 ```
 
 `flushLifecycleScheduler()` runs **all** queued mount/dispose tasks synchronously (ignoring the per-frame rate); wrap it in `act()` because a flushed mount calls `setHost`. Prefer this over fake timers for lifecycle assertions. Alternatively, pass `staggerMount={false}` to a chart under test to make its mount/unmount fully synchronous (no flush needed). `configureLifecycleScheduler` is re-exported here too for tuning the rate in tests.
+
+---
+
+## Current-time bar / replay playhead
+
+Add `currentTimeLayer` **after** data layers to draw a vertical bar inside the
+plot (including at either edge). It supports Canvas2D and WebGL, inline and
+external axes, DPR changes and offscreen rendering suspension.
+
+```tsx
+import { axisGridLayer, lineLayer, currentTimeLayer } from '@heojeongbo/fluxion-render';
+
+const layers = [
+  axisGridLayer('axis', { xRange: [0, 30_000], yRange: [-1, 1] }),
+  lineLayer('signal'),
+  currentTimeLayer('playhead', {
+    currentTime: 12_500, // ms from the recording start, in the same units as x
+    color: '#ff5252',
+    lineWidth: 2,       // CSS px, same width on Canvas2D and WebGL
+    visible: true,
+  }),
+];
+// Seeking or playing only updates config; no sample re-upload required.
+host.configLayer('playhead', { currentTime: replayTimeMs });
+```
+
+For a live clock, omit `currentTime` and set `timeOrigin` to the epoch
+corresponding to x=0 (the same origin as the axis and streamed samples).
+Explicitly set `currentTime: null` to switch a controlled playhead back to live.
+Live mode uses the follow-clock axis's frame clock when available, otherwise
+`Date.now() - timeOrigin`. Without an origin or a finite controlled time it draws
+nothing. Out-of-window times are hidden; the bar does not change the axis window
+or data bounds. `visible: false` stops its animation; a controlled bar redraws
+only when something changes. Existing `hostOptions.maxFps` applies to live mode.
+
+```ts
+axisGridLayer('axis', { xMode: 'time', timeWindowMs: 5000, timeOrigin, followClock: true });
+currentTimeLayer('now', { timeOrigin });
+```
+
+Browser and performance checks (from the repository root):
+
+```bash
+pnpm build
+pnpm -C examples/vite-demo build
+pnpm -C examples/vite-demo test:e2e
+pnpm -C examples/vite-demo test:perf
+```
+
+E2E checks actual rendered pixels in Chromium and Firefox across Canvas2D/WebGL,
+axis modes and DPR 1/2. Performance tests alternate bar off/on over three headed
+runs per browser, with 60 charts at 25 Hz (3s warmup + 8s sampling). They gate
+median FPS (at least 85% of baseline), p95 frame time (at most 1.5× + 3ms), jank
+(at most +5 percentage points), and worker time/render (at most 1.5× + 0.05ms).
+Run on an otherwise idle desktop. Screenshots and measured JSON go to
+`.cache/current-time-e2e/` and `.cache/current-time-perf/`.
 
 ---
 

@@ -16,6 +16,7 @@
 import type { FluxionHost } from "@heojeongbo/fluxion-render";
 import {
   axisGridLayer,
+  currentTimeLayer,
   FluxionCanvas,
   lineLayer,
   type RenderStats,
@@ -35,6 +36,7 @@ function numParam(name: string, fallback: number): number {
 
 // Read once per page load — each bench run is a fresh navigation.
 const PARAMS = {
+  currentTime: new URLSearchParams(window.location.search).get("currentTime") === "1",
   charts: numParam("charts", 60),
   rate: numParam("rate", 25), // samples/sec per chart
   duration: numParam("duration", 15_000),
@@ -106,6 +108,7 @@ const BenchChart = memo(function BenchChart({
         xMode: "time",
         timeWindowMs: 5000,
         timeOrigin,
+        followClock: true,
         yMode: "auto",
         gridColor: THEME.chart.gridColor,
         axisColor: THEME.chart.axisColor,
@@ -116,6 +119,7 @@ const BenchChart = memo(function BenchChart({
         showYGrid: PARAMS.grid,
       }),
       lineLayer("line", { color, lineWidth: 1, capacity: 1024 }),
+      ...(PARAMS.currentTime ? [currentTimeLayer("now", { timeOrigin })] : []),
     ],
     [timeOrigin, color],
   );
@@ -127,7 +131,8 @@ const BenchChart = memo(function BenchChart({
     shared: true,
     trackRate: false,
     setup: (h) => h.line("line"),
-    tick: (t, line) => {
+    tick: (_t, line) => {
+      const t = Date.now() - timeOrigin;
       line.push({
         t,
         y:

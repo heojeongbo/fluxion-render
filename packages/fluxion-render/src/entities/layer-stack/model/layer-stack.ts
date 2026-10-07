@@ -7,6 +7,7 @@ export class LayerStack {
   private byId = new Map<string, Layer>();
 
   add(layer: Layer): void {
+    this.remove(layer.id);
     this.layers.push(layer);
     this.byId.set(layer.id, layer);
   }
@@ -29,6 +30,10 @@ export class LayerStack {
       if (predicate(l)) return l;
     }
     return undefined;
+  }
+
+  needsContinuousRender(): boolean {
+    return this.layers.some((layer) => layer.needsContinuousRender?.() === true);
   }
 
   resizeAll(viewport: Viewport): void {

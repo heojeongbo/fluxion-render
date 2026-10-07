@@ -3,6 +3,7 @@ import type { AxisGridConfig } from "../../../entities/axis-grid-layer";
 import type { BarChartConfig } from "../../../entities/bar-chart-layer";
 import type { BoxPlotConfig } from "../../../entities/box-plot-layer";
 import type { CandlestickConfig } from "../../../entities/candlestick-layer";
+import type { CurrentTimeConfig } from "../../../entities/current-time-layer";
 import type { EventMarkerConfig } from "../../../entities/event-marker-layer";
 import type { HeatmapConfig } from "../../../entities/heatmap-layer";
 import type { HeatmapStreamConfig } from "../../../entities/heatmap-stream-layer";
@@ -101,6 +102,13 @@ export function heatmapStreamLayer(
   config?: HeatmapStreamConfig,
 ): FluxionLayerSpec {
   return { id, kind: "heatmap-stream", config };
+}
+
+export function currentTimeLayer(
+  id: string,
+  config?: CurrentTimeConfig,
+): FluxionLayerSpec {
+  return { id, kind: "current-time", config };
 }
 
 export function referenceLineLayer(

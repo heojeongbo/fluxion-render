@@ -358,10 +358,11 @@ export class AxisGridLayer implements Layer {
       // follow-clock wins when enabled and timeOrigin is known: the right edge
       // tracks wall-clock now so the window scrolls even with no new data.
       // Otherwise the existing data-driven latestT path is preserved unchanged.
-      const rightEdge =
-        this.followClock && this.timeOrigin != null
-          ? this.now() - this.timeOrigin
-          : viewport.latestT;
+      let rightEdge = viewport.latestT;
+      if (this.followClock && this.timeOrigin != null) {
+        viewport.clockTime = this.now();
+        rightEdge = viewport.clockTime - this.timeOrigin;
+      }
       this.bounds.xMin = rightEdge - this.timeWindowMs;
       this.bounds.xMax = rightEdge;
     }

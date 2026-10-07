@@ -620,7 +620,8 @@ export class Engine {
    * Called after any op that can change layer presence or config.
    */
   private syncContinuousMode(): void {
-    const follow = this.axisLayer?.isFollowingClock() ?? false;
+    const follow =
+      (this.axisLayer?.isFollowingClock() ?? false) || this.stack.needsContinuousRender();
     // Suspend the continuous loop whenever the chart isn't viewable (hidden tab
     // or scrolled off-screen) — no point scrolling an axis nobody can see, and
     // it saves CPU/battery.

@@ -135,6 +135,7 @@ export interface FakeGl {
   LINE_STRIP: number;
   LINES: number;
   TRIANGLE_STRIP: number;
+  TRIANGLES: number;
   FLOAT: number;
   ALIASED_LINE_WIDTH_RANGE: number;
   TEXTURE_2D: number;
@@ -231,6 +232,7 @@ export function createFakeGl(canvas: { width: number; height: number }): FakeGl 
     LINE_STRIP: 3,
     LINES: 1,
     TRIANGLE_STRIP: 5,
+    TRIANGLES: 4,
     FLOAT: 0x1406,
     ALIASED_LINE_WIDTH_RANGE: 0x846e,
     TEXTURE_2D: 0x0de1,

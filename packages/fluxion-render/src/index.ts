@@ -7,6 +7,7 @@ export type { AxisGridConfig } from "./entities/axis-grid-layer";
 export type { BarChartConfig } from "./entities/bar-chart-layer";
 export type { BoxPlotConfig } from "./entities/box-plot-layer";
 export type { CandlestickConfig } from "./entities/candlestick-layer";
+export type { CurrentTimeConfig } from "./entities/current-time-layer";
 export type { EventMarkerConfig } from "./entities/event-marker-layer";
 export type { HeatmapConfig } from "./entities/heatmap-layer";
 export type { HeatmapStreamConfig } from "./entities/heatmap-stream-layer";
@@ -113,6 +114,7 @@ export {
   barLayer,
   boxPlotLayer,
   candlestickLayer,
+  currentTimeLayer,
   eventMarkerLayer,
   heatmapLayer,
   heatmapStreamLayer,

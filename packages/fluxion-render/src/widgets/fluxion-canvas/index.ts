@@ -14,6 +14,7 @@ export {
   barLayer,
   boxPlotLayer,
   candlestickLayer,
+  currentTimeLayer,
   eventMarkerLayer,
   heatmapLayer,
   heatmapStreamLayer,

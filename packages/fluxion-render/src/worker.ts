@@ -47,6 +47,7 @@ export { AxisGridLayer } from "./entities/axis-grid-layer";
 export { BarChartLayer } from "./entities/bar-chart-layer";
 export { BoxPlotLayer } from "./entities/box-plot-layer";
 export { CandlestickLayer } from "./entities/candlestick-layer";
+export { type CurrentTimeConfig, CurrentTimeLayer } from "./entities/current-time-layer";
 export { EventMarkerLayer } from "./entities/event-marker-layer";
 export { HeatmapLayer } from "./entities/heatmap-layer";
 export { HeatmapStreamLayer } from "./entities/heatmap-stream-layer";

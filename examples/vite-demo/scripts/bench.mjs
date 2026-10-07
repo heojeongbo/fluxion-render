@@ -26,6 +26,7 @@ function arg(name, fallback) {
 }
 
 const opts = {
+  currentTime: arg("currentTime", "0"),
   browser: arg("browser", "firefox"),
   charts: Number(arg("charts", "60")),
   rate: Number(arg("rate", "25")),
@@ -83,7 +84,7 @@ const benchUrl =
   `&duration=${opts.duration}&warmup=${opts.warmup}` +
   `&maxFps=${opts.maxFps}&emitBounds=${opts.emitBounds}` +
   `&axes=${opts.axes}&labels=${opts.labels}&grid=${opts.grid}` +
-  `&renderer=${opts.renderer}`;
+  `&renderer=${opts.renderer}&currentTime=${opts.currentTime}`;
 
 const results = [];
 try {
@@ -103,7 +104,7 @@ try {
     const result = await page.evaluate(() => window.__benchResult);
     await browser.close();
     results.push(result);
-    console.log(JSON.stringify({ run, browser: opts.browser, ...flat(result) }));
+    console.log(JSON.stringify({ run, browser: opts.browser, currentTime: opts.currentTime, ...flat(result) }));
   }
 } finally {
   preview.kill();
@@ -135,5 +136,5 @@ for (const key of Object.keys(flats[0])) {
   summary[key] = round(median(flats.map((f) => f[key])));
 }
 console.log(
-  JSON.stringify({ median: true, browser: opts.browser, runs: opts.runs, ...summary }),
+  JSON.stringify({ median: true, browser: opts.browser, currentTime: opts.currentTime, runs: opts.runs, ...summary }),
 );

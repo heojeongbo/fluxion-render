@@ -1362,6 +1362,7 @@ describe("Engine", () => {
       "scatter-colored",
       "heatmap-stream",
       "reference-line",
+      "current-time",
       "pose-arrow",
       "trajectory",
       "occupancy-grid",
@@ -2097,5 +2098,71 @@ describe("Engine", () => {
       expect(writes).toBeGreaterThan(0);
       engine.dispatch({ op: Op.DISPOSE });
     });
+  });
+});
+
+// Real scheduler + engine lifecycle, without streaming data.
+describe("current-time animation", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    resetFrameDriver();
+    vi.useRealTimers();
+  });
+
+  it("animates live; pauses offscreen; idles when controlled, hidden, removed or reset", () => {
+    const engine = new Engine();
+    engine.dispatch({
+      op: Op.INIT,
+      canvas: newCanvas(),
+      width: 100,
+      height: 100,
+      dpr: 1,
+    });
+    const render = vi.spyOn(engine as unknown as { render(): void }, "render");
+    engine.dispatch({
+      op: Op.ADD_LAYER,
+      id: "now",
+      kind: "current-time",
+      config: { timeOrigin: Date.now() },
+    });
+    vi.advanceTimersByTime(100);
+    expect(render.mock.calls.length).toBeGreaterThan(1);
+    engine.dispatch({ op: Op.SET_ON_SCREEN, onScreen: false });
+    render.mockClear();
+    vi.advanceTimersByTime(100);
+    expect(render).not.toHaveBeenCalled();
+    engine.dispatch({ op: Op.SET_ON_SCREEN, onScreen: true });
+    vi.advanceTimersByTime(100);
+    expect(render.mock.calls.length).toBeGreaterThan(1);
+    for (const config of [{ currentTime: 50 }, { currentTime: null, visible: false }]) {
+      engine.dispatch({ op: Op.CONFIG, id: "now", config });
+      vi.advanceTimersByTime(50);
+      render.mockClear();
+      vi.advanceTimersByTime(100);
+      expect(render).not.toHaveBeenCalled();
+    }
+    engine.dispatch({
+      op: Op.CONFIG_BATCH,
+      entries: [{ id: "now", config: { visible: true } }],
+    });
+    vi.advanceTimersByTime(100);
+    expect(render.mock.calls.length).toBeGreaterThan(1);
+    engine.dispatch({ op: Op.REMOVE_LAYER, id: "now" });
+    vi.advanceTimersByTime(50);
+    render.mockClear();
+    vi.advanceTimersByTime(100);
+    expect(render).not.toHaveBeenCalled();
+    engine.dispatch({
+      op: Op.ADD_LAYER,
+      id: "now",
+      kind: "current-time",
+      config: { timeOrigin: 0 },
+    });
+    engine.dispatch({ op: Op.RESET });
+    vi.advanceTimersByTime(50);
+    render.mockClear();
+    vi.advanceTimersByTime(100);
+    expect(render).not.toHaveBeenCalled();
+    engine.dispatch({ op: Op.DISPOSE });
   });
 });

@@ -101,3 +101,21 @@ describe("useLayerConfig", () => {
     host.dispose();
   });
 });
+
+it("resends identical config when the layer id or non-null host changes", () => {
+  const { host: a } = makeHost();
+  const { host: b } = makeHost();
+  const aSpy = vi.spyOn(a, "configLayer");
+  const bSpy = vi.spyOn(b, "configLayer");
+  const config = { timeWindowMs: 1234 };
+  const { rerender, unmount } = render(
+    <Probe host={a} spec={axisGridLayer("a", config)} />,
+  );
+  rerender(<Probe host={a} spec={axisGridLayer("b", config)} />);
+  expect(aSpy).toHaveBeenLastCalledWith("b", config);
+  rerender(<Probe host={b} spec={axisGridLayer("b", config)} />);
+  expect(bSpy).toHaveBeenCalledWith("b", config);
+  unmount();
+  a.dispose();
+  b.dispose();
+});

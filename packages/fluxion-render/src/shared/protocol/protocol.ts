@@ -40,6 +40,7 @@ export type LayerKind =
   | "scatter-colored"
   | "heatmap-stream"
   | "reference-line"
+  | "current-time"
   | "pose-arrow"
   | "trajectory"
   | "occupancy-grid"
