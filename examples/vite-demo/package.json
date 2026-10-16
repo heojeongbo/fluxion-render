@@ -11,7 +11,9 @@
     "bench": "node scripts/bench.mjs",
     "scroll-bench": "node scripts/scroll-bench.mjs",
     "test:e2e": "node scripts/current-time-e2e.mjs",
-    "test:perf": "node scripts/current-time-perf.mjs"
+    "test:perf": "node scripts/current-time-perf.mjs",
+    "test:reliability": "node scripts/reliability-e2e.mjs",
+    "test:storage-perf": "node scripts/reliability-e2e.mjs --perf"
   },
   "dependencies": {
     "@heojeongbo/fluxion-render": "workspace:*",

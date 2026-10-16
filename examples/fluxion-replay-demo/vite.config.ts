@@ -4,6 +4,14 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      input: {
+        app: path.resolve(__dirname, "index.html"),
+        reliability: path.resolve(__dirname, "reliability.html"),
+      },
+    },
+  },
   worker: {
     format: "es",
   },

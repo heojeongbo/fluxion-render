@@ -5,8 +5,8 @@
   "scripts": {
     "build": "pnpm --filter @heojeongbo/fluxion-worker build && pnpm --filter @heojeongbo/fluxion-render build && pnpm --filter @heojeongbo/fluxion-replay build",
     "build:replay": "pnpm --filter @heojeongbo/fluxion-replay build",
-    "dev": "pnpm --filter @heojeongbo/fluxion-render build && pnpm -r --parallel --filter @heojeongbo/fluxion-render --filter vite-demo run dev",
-    "dev:replay": "pnpm --filter @heojeongbo/fluxion-replay build && pnpm --filter fluxion-replay-demo run dev",
+    "dev": "pnpm build && pnpm -r --parallel --filter @heojeongbo/fluxion-worker --filter @heojeongbo/fluxion-render --filter vite-demo run dev",
+    "dev:replay": "pnpm build && pnpm -r --parallel --filter @heojeongbo/fluxion-worker --filter @heojeongbo/fluxion-render --filter @heojeongbo/fluxion-replay --filter fluxion-replay-demo run dev",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "format": "biome format --write .",
@@ -36,7 +36,13 @@
     "release:replay:minor": "pnpm --filter @heojeongbo/fluxion-replay release:minor",
     "release:replay:major": "pnpm --filter @heojeongbo/fluxion-replay release:major",
     "lint": "biome check .",
-    "lint:fix": "biome check --write ."
+    "lint:fix": "biome check --write .",
+    "test:coverage": "pnpm -C packages/fluxion-worker test:coverage && pnpm -C packages/fluxion-render test:coverage && pnpm -C packages/fluxion-replay test:coverage",
+    "build:examples": "pnpm -C examples/vite-demo build && pnpm -C examples/fluxion-replay-demo build",
+    "test:e2e": "pnpm build:examples && pnpm -C examples/vite-demo test:e2e && pnpm -C examples/vite-demo test:reliability",
+    "test:perf": "pnpm build:examples && pnpm -C examples/vite-demo test:perf && pnpm -C examples/vite-demo test:storage-perf",
+    "test:package": "node scripts/package-smoke.mjs",
+    "test:perf:cpu": "node scripts/render-performance.mjs"
   },
   "packageManager": "pnpm@9.0.0",
   "devDependencies": {

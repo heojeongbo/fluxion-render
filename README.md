@@ -185,3 +185,71 @@ gh workflow run release.yml -f tag=fluxion-render-v1.6.0
 ## License
 
 MIT
+
+## Reliability verification
+
+Run from the workspace root, with Node 22+ and pnpm 9:
+
+```sh
+pnpm build
+pnpm typecheck
+pnpm test:coverage
+pnpm lint
+pnpm test:package
+pnpm test:perf:cpu
+pnpm -C examples/vite-demo exec playwright install --with-deps chromium firefox
+pnpm test:e2e
+pnpm test:perf
+```
+
+The three package coverage gates require 100% statements, branches, functions and
+lines in the existing Vitest coverage scope (entrypoints, test helpers and existing
+annotated platform fallbacks are excluded). This is not a claim that E2E exercises
+100% of source code or proves every possible browser behavior. Browser checks run
+all enumerated current-time and reliability scenarios; a failed browser launch is
+a failed check. CI and release both gate on these checks and packed-package imports.
+
+The reliability browser suite covers concurrent/error/aborted worker requests,
+TypedArray slices, React StrictMode mount/unmount, real IndexedDB/OPFS isolation,
+legacy recording reads, draining storage writes, explicit retention, and replay
+pause/seek/end. The storage performance run ingests approximately 1,000 frames/s
+for 60 seconds in each browser, checks persisted counts and a bounded backlog.
+The CPU benchmark compares full-history and indexed visible-window traversal;
+its timings are a microbenchmark, not an application FPS estimate. Artifacts are
+written under `.cache/`.
+
+### Architecture and compatibility
+
+- Player and recorder depend on `FrameReader` / `FrameWriter`; video components
+  depend on chunk reader/writer ports. `ReplayPlayer` accepts an optional clock
+  port, and `ReplaySession` accepts an optional store. Defaults remain the browser
+  implementations. A supplied player clock is owned and disposed by the player.
+- Layers advertise an optional structural axis capability. The stack prepares
+  axes, scans data layers, then finalizes bounds, independent of insertion order.
+  Declarative layer types live outside React; imperative and React APIs share them.
+- React worker hooks return non-null pools with stable identity. Constructors are
+  pure, workers start at commit/first use, and unmount disposal occurs one microtask
+  later so StrictMode replay does not retain a dead pool. Imperative pools still
+  start eagerly unless `lazy: true` is set.
+- Worker requests carry `__fluxionRequestId`. `defineWorker` and
+  `defineWorkerWithState` echo it automatically. Custom workers should echo this
+  field in replies/errors. Untagged sequential replies remain supported, but
+  ambiguous concurrent replies and untagged replies after cancellation/timeout
+  reject rather than returning the wrong request's data.
+- Replay video files are stored under `fluxion-replay/<encoded-dbName>/` in OPFS.
+  Clearing a recording deletes only that namespace. Legacy root files remain
+  readable while referenced by that database; shared legacy files are not deleted
+  automatically because their ownership cannot be established safely.
+- Disk time retention is opt-in via `ReplayStore({ retentionMs })` or
+  `ReplaySession({ storeOptions: { retentionMs } })`; the session's top-level
+  `retentionMs` continues to control memory history. Eviction is incremental.
+  Pending writes survive failed transactions and drain in batches of 200.
+  `pendingFrameCount`, `lastWriteError` and `onError` expose pressure/failures.
+  Optional `maxPendingFrames` rejects before accepting an overflowing frame;
+  its default is unlimited to preserve existing ingestion behavior.
+
+For a release containing these changes, publish worker first, then update render's
+minimum worker dependency to that published version before releasing render and
+replay. The new render hooks import worker's resource-lifecycle helper, so consumers
+must not resolve an older worker release. Package versions are not bumped merely
+by running the verification commands.

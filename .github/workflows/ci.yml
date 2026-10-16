@@ -79,3 +79,15 @@ jobs:
       - run: pnpm -C packages/fluxion-replay run test:coverage
 
       - run: pnpm lint
+
+      - run: pnpm -C examples/vite-demo exec playwright install --with-deps chromium firefox
+      - run: pnpm test:package
+      - run: pnpm test:perf:cpu
+      - run: pnpm test:e2e
+      # The chart benchmark uses headed compositing; Linux runners need Xvfb.
+      - run: xvfb-run -a pnpm test:perf
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-regressions
+          path: .cache/

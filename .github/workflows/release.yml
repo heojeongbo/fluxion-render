@@ -104,7 +104,7 @@ jobs:
           node -e '
             const { readFileSync } = require("node:fs");
             const pkgs = ["fluxion-worker", "fluxion-render", "fluxion-replay"];
-            const need = ["build", "typecheck", "test", "lint"];
+            const need = ["build", "typecheck", "test:coverage", "lint"];
             const bad = [];
             for (const p of pkgs) {
               const s = JSON.parse(readFileSync(`packages/${p}/package.json`)).scripts ?? {};
@@ -122,8 +122,20 @@ jobs:
       # breaks replay. Build first: replay resolves render through dist/.
       - run: pnpm build
       - run: pnpm typecheck
-      - run: pnpm test
+      - run: pnpm test:coverage
       - run: pnpm lint
+
+      - run: pnpm -C examples/vite-demo exec playwright install --with-deps chromium firefox
+      - run: pnpm test:package
+      - run: pnpm test:perf:cpu
+      - run: pnpm test:e2e
+      # The chart benchmark uses headed compositing; Linux runners need Xvfb.
+      - run: xvfb-run -a pnpm test:perf
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-regressions
+          path: .cache/
 
       # Pack with pnpm, publish with npm — each does the half the other can't.
       # `fluxion-render` depends on `@heojeongbo/fluxion-worker: workspace:^`;

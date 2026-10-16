@@ -15,8 +15,8 @@ Source layout is FSD-ish: `src/{app,entities,features,widgets,shared}` with colo
 pnpm build       # all packages, dependency-ordered — run BEFORE test (tests resolve workspace deps via dist)
 pnpm test        # vitest per package (happy-dom; fake OffscreenCanvas in src/test/setup.ts)
 pnpm typecheck   # tsc --noEmit per package
-pnpm dev         # vite-demo
-pnpm dev:replay  # fluxion-replay-demo
+pnpm dev         # build, then worker/render watch + vite-demo
+pnpm dev:replay  # build, then all package watchers + fluxion-replay-demo
 pnpm lint:fix    # biome check --write . (formatter + import sort; linter disabled)
 
 # Perf bench (headed Playwright, from examples/vite-demo after `pnpm build` there):
@@ -38,15 +38,15 @@ pnpm lint:fix    # biome check --write . (formatter + import sort; linter disabl
 
 ## Testing & coverage
 
-- Coverage runs per package (no root script): `cd packages/<pkg> && pnpm vitest run --coverage`. Build render first (`pnpm --filter @heojeongbo/fluxion-render build`) so replay resolves it.
-- Enforced thresholds (`vitest.config.ts`), each set to the MEASURED floor so a regression can't slip under an aspirational gate: render = 100% stmts/funcs/lines + 98% branches; worker = 100% stmts/funcs/lines + 95% branches; replay = 100% lines, 99% stmts, 97% funcs, 96% branches. Re-measure and raise them when coverage improves.
+- Run `pnpm build` then `pnpm test:coverage` at the root; all three packages resolve workspace dependencies through `dist`.
+- All three packages enforce 100% statements, branches, functions and lines within their configured coverage scope. Coverage is unit/integration instrumentation, not browser E2E coverage. Do not add exclusions just to satisfy the gate.
 - CI runs ALL THREE packages WITH `--coverage` in one `build-test` job, so every threshold gates every PR. (replay used to sit in a separate schedule-only `coverage` job because its run took 40s and timed out; that was a `ReplayPlayer` bug, not v8 — see below. It is ~11s now and the job is gone.) Steps use `pnpm -C packages/<pkg> run <script>`, never `pnpm --filter`: the filtered form exits **0** when the filter matches nothing or the script is missing, which is a green check that ran nothing.
 - Biome's **linter is enabled** (`biome.json`) — `pnpm lint` fails on errors only. `noExplicitAny`, `useExhaustiveDependencies`, and the a11y rules are set to `warn`: they carry real signal but need a dedicated cleanup pass, so they're visible without blocking. `noArrayIndexKey` / `useIterableCallbackReturn` / `noNonNullAssertion` are off (style-only in this codebase); `useHookAtTopLevel` is off under `shared/gl/` where it false-positives on `gl.useProgram()`; `noAssignInExpressions` is off in tests.
 - Patterns: `createFakeCtx()` (`src/test/setup.ts`) for canvas draw tests; a stub host whose `line(id)` returns a handle with a spyable `push` (see `use-simple-chart.test.tsx` `makeStubHost`) for stream-hook tests; `labelDraws(ctx)` (setup.ts) to assert label text/anchor coords from sprite `drawImage` blits — labels are NOT `fillText` on the target ctx anymore.
 - Module singletons (frame driver, flush scheduler, label cache) are reset by a global `afterEach` in setup.ts; file-local afterEach hooks that reset them must run BEFORE `vi.useRealTimers()` (a fake-timer rAF handle cancelled under real timers wedges the singleton).
 - Frame-count-exact tests: happy-dom/sinon rAF due-times don't align with arbitrary `advanceTimersByTime` steps — step frames with `vi.advanceTimersToNextTimer()` (it fires ALL timers due at that tick, in registration order). Governor tests drive time via `vi.spyOn(performance, "now")` with a manual clock (advance BEFORE the frame for arrival gaps, INSIDE onFrame for busy).
 - React component tests run with vitest `globals:false` → testing-library auto-cleanup is OFF. Add `afterEach(cleanup)` or scope queries to the returned `container`, or you'll hit "Found multiple elements" across tests.
-- v8-ignore: `/* v8 ignore next */` does NOT suppress cond-expr (`a?b:c`), binary-expr (`a??b`), or `if`-statement branches — use `/* v8 ignore start */ … /* v8 ignore stop */` for those, always with `-- reason`. The render branch gate is 98 (not 100) because v8 emits an untargetable phantom "implicit else" on every `if` without an `else`.
+- v8-ignore: `/* v8 ignore next */` does NOT suppress cond-expr (`a?b:c`), binary-expr (`a??b`), or `if`-statement branches — use `/* v8 ignore start */ … /* v8 ignore stop */` for those, always with `-- reason`. An implicit else is a reachable false condition; exercise it with a boundary test.
 - Timeouts live in `vitest.config.ts` (`testTimeout`), once per package — never as a per-test `timeout:` option. The old per-test scheme was applied to 9 of replay's 831 tests and had already missed two tests in the very file that kept failing.
 - replay `scenarios/09-*.test.ts` was NOT "coverage flakiness". `ReplayPlayer._onTick` re-queried IndexedDB on every rAF tick (`_prefetch` set `_prefetchedUpTo = currentT + prefetchMs`, so the next 16ms tick was already behind the horizon), making cost scale with simulated playback time — 4,064 `getFrames` calls and 98% of wall clock for a 65s playback. Fixed with refill hysteresis (`REFILL_AT`); the file went 5.3s→1.0s plain, the coverage suite 40s→11s. VirtualClock is innocent — don't change it or the fake-timer stepping to chase a slow test.
 
