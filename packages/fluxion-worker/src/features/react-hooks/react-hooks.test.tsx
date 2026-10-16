@@ -143,7 +143,7 @@ describe("useWorkerPool", () => {
     expect(result.current).toBeInstanceOf(WorkerPool);
   });
 
-  it("disposes the pool on unmount", () => {
+  it("disposes the pool on unmount", async () => {
     const fake = makeFakeWorker();
     const { result, unmount } = renderHook(() =>
       useWorkerPool<TestMsg>({
@@ -155,6 +155,7 @@ describe("useWorkerPool", () => {
     const pool = result.current;
     const disposeSpy = vi.spyOn(pool, "dispose");
     unmount();
+    await Promise.resolve();
     expect(disposeSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -428,4 +429,14 @@ describe("useWorkerStream", () => {
     }).not.toThrow();
     expect(onData).not.toHaveBeenCalled();
   });
+});
+
+it("normalizes a non-Error request rejection", async () => {
+  const handle = new WorkerHandle<TestMsg>(() => makeFakeWorker() as unknown as Worker);
+  vi.spyOn(handle, "request").mockRejectedValueOnce("plain failure");
+  const message = { op: "failure" };
+  const hook = renderHook(() => useWorkerRequest(handle, message));
+  await waitFor(() => expect(hook.result.current.error?.message).toBe("plain failure"));
+  hook.unmount();
+  handle.dispose();
 });

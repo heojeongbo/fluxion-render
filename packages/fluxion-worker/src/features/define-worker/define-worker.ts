@@ -8,6 +8,8 @@ export type FluxionMode = "rpc" | "stream";
  */
 export type WorkerMsg<T extends object = object> = T & {
   hostId?: string;
+  /** Internal RPC correlation token. Echoed by reply and errors. */
+  __fluxionRequestId?: number;
   mode?: FluxionMode;
 };
 
@@ -15,6 +17,7 @@ export type WorkerMsg<T extends object = object> = T & {
 export interface WorkerErrorMsg {
   readonly __fluxionError: true;
   readonly hostId?: string;
+  readonly __fluxionRequestId?: number;
   readonly message: string;
   readonly stack?: string;
 }
@@ -47,8 +50,8 @@ export type PushFn<TResult extends object> = (
  *
  * - `hostId` is automatically echoed back on every reply so pool/handle routing works.
  * - Call `reply` once for request/response, or multiple times for streaming results.
- * - Return a Promise (or use async) for async handlers — errors are caught and ignored
- *   (add your own try/catch inside the handler if you need error reporting).
+ * - Return a Promise (or use async) for async handlers — errors are returned to
+ *   the caller with the request correlation token.
  *
  * @example — simple request/response
  * ```ts
@@ -95,9 +98,10 @@ export interface HostContext<TState> {
 
 const _SOLO_KEY = "__solo__";
 
-function _postError(hostId: string | undefined, e: unknown): void {
+function _postError(hostId: string | undefined, e: unknown, requestId?: number): void {
   const err: WorkerErrorMsg = {
     __fluxionError: true,
+    ...(requestId === undefined ? {} : { __fluxionRequestId: requestId }),
     hostId,
     message: e instanceof Error ? e.message : String(e),
     stack: e instanceof Error ? e.stack : undefined,
@@ -147,6 +151,7 @@ export function defineWorkerWithState<
   (self as unknown as Worker).onmessage = (evt: MessageEvent<WorkerMsg<TMsg>>) => {
     const msg = evt.data;
     const hostId = msg.hostId;
+    const requestId = msg.__fluxionRequestId;
     const key = hostId ?? _SOLO_KEY;
     const mode: FluxionMode = (msg as { mode?: FluxionMode }).mode ?? "rpc";
 
@@ -167,16 +172,20 @@ export function defineWorkerWithState<
       try {
         const result = streamHandler(msg as unknown as WorkerMsg<TStreamMsg>, push, ctx);
         if (result instanceof Promise) {
-          result.catch((e) => _postError(hostId, e));
+          result.catch((e) => _postError(hostId, e, requestId));
         }
       } catch (e) {
-        _postError(hostId, e);
+        _postError(hostId, e, requestId);
       }
       return;
     }
 
     const reply: ReplyFn<TResult> = (result, transfer) => {
-      const out = hostId !== undefined ? { ...result, hostId } : result;
+      const out = {
+        ...result,
+        ...(hostId === undefined ? {} : { hostId }),
+        ...(requestId === undefined ? {} : { __fluxionRequestId: requestId }),
+      };
       if (transfer && transfer.length > 0) {
         (self as unknown as Worker).postMessage(out, transfer);
       } else {
@@ -196,12 +205,12 @@ export function defineWorkerWithState<
     try {
       const result = rpcHandler(msg, reply, ctx);
       if (result instanceof Promise) {
-        result.then(applyState).catch((e) => _postError(hostId, e));
+        result.then(applyState).catch((e) => _postError(hostId, e, requestId));
       } else {
         applyState(result);
       }
     } catch (e) {
-      _postError(hostId, e);
+      _postError(hostId, e, requestId);
     }
   };
 }
@@ -221,6 +230,7 @@ export function defineWorker<
   (self as unknown as Worker).onmessage = (evt: MessageEvent<WorkerMsg<TMsg>>) => {
     const msg = evt.data;
     const hostId = msg.hostId;
+    const requestId = msg.__fluxionRequestId;
     const mode: FluxionMode = (msg as { mode?: FluxionMode }).mode ?? "rpc";
 
     if (mode === "stream" && streamHandler) {
@@ -238,16 +248,20 @@ export function defineWorker<
       try {
         const result = streamHandler(msg as unknown as WorkerMsg<TStreamMsg>, push);
         if (result instanceof Promise) {
-          result.catch((e) => _postError(hostId, e));
+          result.catch((e) => _postError(hostId, e, requestId));
         }
       } catch (e) {
-        _postError(hostId, e);
+        _postError(hostId, e, requestId);
       }
       return;
     }
 
     const reply: ReplyFn<TResult> = (result, transfer) => {
-      const out = hostId !== undefined ? { ...result, hostId } : result;
+      const out = {
+        ...result,
+        ...(hostId === undefined ? {} : { hostId }),
+        ...(requestId === undefined ? {} : { __fluxionRequestId: requestId }),
+      };
       if (transfer && transfer.length > 0) {
         (self as unknown as Worker).postMessage(out, transfer);
       } else {
@@ -258,10 +272,10 @@ export function defineWorker<
     try {
       const result = rpcHandler(msg, reply);
       if (result instanceof Promise) {
-        result.catch((e) => _postError(hostId, e));
+        result.catch((e) => _postError(hostId, e, requestId));
       }
     } catch (e) {
-      _postError(hostId, e);
+      _postError(hostId, e, requestId);
     }
   };
 }

@@ -539,3 +539,26 @@ describe("defineWorkerWithState — stream mode", () => {
     expect("hostId" in out).toBe(false);
   });
 });
+
+describe("RPC correlation compatibility", () => {
+  it("echoes request tokens for ordinary and stateful workers, including errors", async () => {
+    for (const define of [defineWorker, defineWorkerWithState]) {
+      define((message, reply) => {
+        reply({ ok: true });
+        if ((message as { fail?: boolean }).fail) throw new Error("failed");
+      });
+      selfMock.emit({ hostId: "h", __fluxionRequestId: 12, fail: true });
+      expect(selfMock.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ hostId: "h", __fluxionRequestId: 12, ok: true }),
+      );
+      expect(selfMock.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ __fluxionError: true, __fluxionRequestId: 12 }),
+      );
+      selfMock.emit({ __fluxionRequestId: 13 });
+      expect(selfMock.postMessage).toHaveBeenCalledWith({
+        ok: true,
+        __fluxionRequestId: 13,
+      });
+    }
+  });
+});

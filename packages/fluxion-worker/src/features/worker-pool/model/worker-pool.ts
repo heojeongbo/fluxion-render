@@ -60,6 +60,8 @@ export interface WorkerLike {
 }
 
 export interface WorkerPoolOptions {
+  /** Delay worker creation until start(), acquire(), or stream(). Default false. */
+  lazy?: boolean;
   /**
    * Initial number of workers. Default: 4. Clamped to [1, 16]. When `maxSize`
    * is larger, this is the starting count and the pool grows on demand.
@@ -96,6 +98,37 @@ let _standaloneSeq = 0;
 
 export class WorkerHandle<TMsg extends object> implements WorkerLike {
   private _terminated = false;
+  private _released = false;
+  private _requestSeq = 0;
+  private _legacyRepliesSafe = true;
+  private readonly _requests = new Map<
+    number,
+    {
+      resolve: (value: object) => void;
+      reject: (reason: unknown) => void;
+    }
+  >();
+  private readonly _rpcListener: EventListener = (event) => {
+    const data = (event as MessageEvent).data;
+    if (!data || data.hostId !== this.hostId || data.__fluxionStream) return;
+    const id = data.__fluxionRequestId;
+    if (id === undefined && (!this._legacyRepliesSafe || this._requests.size > 1)) {
+      const error = new Error(
+        "Ambiguous worker reply: echo __fluxionRequestId (or use defineWorker) for concurrent/cancelled requests",
+      );
+      for (const pending of [...this._requests.values()]) pending.reject(error);
+      return;
+    }
+    const pending =
+      id === undefined ? this._requests.values().next().value : this._requests.get(id);
+    if (!pending) return;
+    if (data.__fluxionError) {
+      pending.reject(new WorkerHandlerError(data.message, data.stack));
+    } else {
+      const { hostId: _host, __fluxionRequestId: _request, ...result } = data;
+      pending.resolve(result);
+    }
+  };
   private readonly _ownsWorker: boolean;
   // Map<type, Map<original listener, wrapper listener>> for O(1) remove
   private readonly _listenerMap = new Map<string, Map<EventListener, EventListener>>();
@@ -155,6 +188,7 @@ export class WorkerHandle<TMsg extends object> implements WorkerLike {
    * each only see their own messages.
    */
   addEventListener(type: string, listener: EventListener): void {
+    if (this._terminated || this._listenerMap.get(type)?.has(listener)) return;
     const id = this.hostId;
     const wrapper: EventListener = (evt: Event) => {
       const msg = (
@@ -211,7 +245,11 @@ export class WorkerHandle<TMsg extends object> implements WorkerLike {
   ): () => void {
     const listener: EventListener = (evt: Event) => {
       const raw = (evt as MessageEvent<TResult & { hostId?: string }>).data;
-      const { hostId: _stripped, ...msg } = raw;
+      const {
+        hostId: _stripped,
+        __fluxionRequestId: _request,
+        ...msg
+      } = raw as TResult & { hostId?: string; __fluxionRequestId?: number };
       callback(msg as Omit<TResult, "hostId">);
     };
     this.addEventListener("message", listener);
@@ -235,63 +273,62 @@ export class WorkerHandle<TMsg extends object> implements WorkerLike {
     transfer?: Transferable[],
   ): Promise<Omit<TResult, "hostId">> {
     return new Promise<Omit<TResult, "hostId">>((resolve, reject) => {
-      // Reject immediately if the signal is already aborted.
+      if (this._terminated) {
+        reject(new Error("Worker was terminated"));
+        return;
+      }
       if (opts?.signal?.aborted) {
         const reason = opts.signal.reason;
         reject(reason instanceof Error ? reason : new Error("Aborted"));
         return;
       }
-
+      const id = ++this._requestSeq;
       let timerId: ReturnType<typeof setTimeout> | undefined;
       let signalListener: (() => void) | undefined;
-
       const cleanup = () => {
         if (timerId !== undefined) clearTimeout(timerId);
-        if (signalListener && opts?.signal) {
-          opts.signal.removeEventListener("abort", signalListener);
-          signalListener = undefined;
-        }
-        offMsg();
-        offErr();
+        if (signalListener) opts!.signal!.removeEventListener("abort", signalListener);
+        this._requests.delete(id);
         this._abortCallbacks.delete(abort);
+        if (this._requests.size === 0)
+          this._worker.removeEventListener("message", this._rpcListener);
       };
-
-      const abort = () => {
+      const fail = (reason: unknown) => {
         cleanup();
-        reject(new Error("Worker was terminated"));
+        reject(reason);
       };
+      const cancel = (reason: unknown) => {
+        // A legacy reply has no identity: after cancellation it cannot safely
+        // complete a later request. Tagged replies remain fully supported.
+        this._legacyRepliesSafe = false;
+        fail(reason);
+      };
+      const abort = () => cancel(new Error("Worker was terminated"));
+      if (this._requests.size === 0)
+        this._worker.addEventListener("message", this._rpcListener);
+      this._requests.set(id, {
+        resolve: (value) => {
+          cleanup();
+          resolve(value as Omit<TResult, "hostId">);
+        },
+        reject: fail,
+      });
       this._abortCallbacks.add(abort);
-
-      const offMsg = this.onMessage<TResult>((result) => {
-        cleanup();
-        resolve(result);
-      });
-
-      const offErr = this.onError((err) => {
-        cleanup();
-        reject(new WorkerHandlerError(err.message, err.stack));
-      });
-
       if (opts?.timeoutMs !== undefined) {
         const ms = opts.timeoutMs;
-        timerId = setTimeout(() => {
-          cleanup();
-          reject(new WorkerTimeoutError(ms));
-        }, ms);
+        timerId = setTimeout(() => cancel(new WorkerTimeoutError(ms)), ms);
       }
-
       if (opts?.signal) {
-        const sig = opts.signal;
-        signalListener = () => {
-          cleanup();
-          const reason = sig.reason;
-          /* v8 ignore next */
-          reject(reason instanceof Error ? reason : new Error("Aborted"));
-        };
-        sig.addEventListener("abort", signalListener, { once: true });
+        const signal = opts.signal;
+        signalListener = () =>
+          cancel(signal.reason instanceof Error ? signal.reason : new Error("Aborted"));
+        signal.addEventListener("abort", signalListener, { once: true });
       }
-
-      this.postMessage(msg, transfer);
+      try {
+        this.postMessage({ ...msg, __fluxionRequestId: id }, transfer);
+      } catch (error) {
+        fail(error);
+      }
     });
   }
 
@@ -449,6 +486,8 @@ export class WorkerHandle<TMsg extends object> implements WorkerLike {
    * When used standalone (no pool), this is a no-op — call `worker.terminate()` directly.
    */
   release(): void {
+    if (this._released) return;
+    this._released = true;
     this._onRelease?.();
   }
 
@@ -458,6 +497,7 @@ export class WorkerHandle<TMsg extends object> implements WorkerLike {
    * manages the worker lifetime.
    */
   terminate(): void {
+    if (this._terminated) return;
     if (this._ownsWorker) {
       this._markTerminated();
       this._worker.terminate();
@@ -473,12 +513,13 @@ export class WorkerHandle<TMsg extends object> implements WorkerLike {
    * doesn't need to know which mode the handle is in.
    */
   dispose(): void {
+    if (this._terminated) return;
     if (this._ownsWorker) {
       this._markTerminated();
       this._worker.terminate();
     } else {
       this._markTerminated();
-      this._onRelease?.();
+      this.release();
     }
   }
 
@@ -517,6 +558,7 @@ export class WorkerPool<TMsg extends object> {
   private readonly _workerErrorListeners: EventListener[] = [];
   private readonly _workerFactory: () => Worker;
   private readonly _maxSize: number;
+  private readonly _initialSize: number;
   private readonly _targetPerWorker: number;
   private _errorCallback: WorkerPoolErrorCallback | undefined;
   private _seq = 0;
@@ -528,13 +570,30 @@ export class WorkerPool<TMsg extends object> {
   }
 
   constructor(opts: WorkerPoolOptions) {
-    const size = Math.max(1, Math.min(opts.size ?? 4, 16));
+    const size = Math.max(
+      1,
+      Math.min(Math.floor(Number.isFinite(opts.size) ? opts.size! : 4), 16),
+    );
+    this._initialSize = size;
     this._workerFactory = opts.workerFactory;
     // maxSize defaults to size (growth disabled) so existing fixed-size callers
     // are unchanged; opt into growth by passing a larger maxSize.
     this._maxSize = Math.max(size, Math.min(opts.maxSize ?? size, 16));
     this._targetPerWorker = Math.max(1, opts.targetPerWorker ?? 12);
-    for (let i = 0; i < size; i++) this._spawnWorker();
+    if (!opts.lazy) this.start();
+  }
+
+  /** Start a lazy pool. Idempotent; acquire/stream also start it automatically. */
+  start(): void {
+    if (this._disposed) throw new Error("WorkerPool has been disposed");
+    try {
+      while (this.workers.length < this._initialSize) this._spawnWorker();
+    } catch (error) {
+      // A factory may fail partway through construction: release workers
+      // already created without calling a subclass override before its init.
+      WorkerPool.prototype.dispose.call(this);
+      throw error;
+    }
   }
 
   /**
@@ -630,6 +689,7 @@ export class WorkerPool<TMsg extends object> {
    */
   stream(msg: TMsg, transfer?: Transferable[]): void {
     if (this._disposed) return;
+    this.start();
     const index = this._leastBusyIndex();
     const stamped = { ...msg, mode: "stream" as const };
     if (transfer && transfer.length > 0) {
@@ -643,6 +703,7 @@ export class WorkerPool<TMsg extends object> {
     if (this._disposed) {
       throw new Error("WorkerPool has been disposed");
     }
+    this.start();
     this._maybeGrow();
     const index = this._leastBusyIndex();
     this.hostCounts[index]++;
@@ -650,8 +711,7 @@ export class WorkerPool<TMsg extends object> {
     // onRelease wraps _release so that the handles Set is cleaned up regardless
     // of whether the subclass overrides _createHandle.
     const onRelease = () => {
-      this.handles.delete(handle);
-      this._release(index);
+      if (this.handles.delete(handle)) this._release(index);
     };
     const handle = this._createHandle(this.workers[index]!, index, hostId, onRelease);
     this.handles.add(handle);
@@ -688,8 +748,7 @@ export class WorkerPool<TMsg extends object> {
     this.handles.clear();
     for (let i = 0; i < this.workers.length; i++) {
       const listener = this._workerErrorListeners[i];
-      /* v8 ignore next */
-      if (listener) this.workers[i]!.removeEventListener("message", listener);
+      this.workers[i]!.removeEventListener("message", listener!);
       this.workers[i]!.terminate();
     }
     this._workerErrorListeners.length = 0;
