@@ -1,11 +1,11 @@
 import type { VideoFrameInfo } from "../../../entities/video-channel/video-channel";
+import type { VideoChunkWriter } from "../../../shared/model/storage";
 import type { ReplayRecorder } from "../../recorder/model/replay-recorder";
-import type { ReplayStore } from "../../store/model/replay-store";
 import type { ThumbnailStore } from "../../timeline/model/thumbnail-store";
 
 export interface VideoRecorderOptions {
   channelId: string;
-  store: ReplayStore;
+  store: VideoChunkWriter;
   recorder: ReplayRecorder;
   thumbnailStore?: ThumbnailStore;
   keyframeIntervalSec?: number;
@@ -46,11 +46,11 @@ export class VideoRecorder {
     typeof MediaStreamTrackProcessor !== "undefined";
 
   private readonly _channelId: string;
-  private readonly _store: ReplayStore;
+  private readonly _store: VideoChunkWriter;
   private readonly _recorder: ReplayRecorder;
   private readonly _thumbnailStore: ThumbnailStore | undefined;
   private readonly _keyframeIntervalSec: number;
-  private readonly _config: VideoEncoderConfig;
+  private readonly _config: VideoEncoderConfig & { framerate: number };
   private readonly _onWriteError: ((error: unknown) => void) | undefined;
   private _writeFailureCount = 0;
   private _encoder: VideoEncoder | null = null;
@@ -156,9 +156,7 @@ export class VideoRecorder {
   private async _readLoop(
     reader: ReadableStreamDefaultReader<VideoFrame>,
   ): Promise<void> {
-    const keyframeEvery = Math.round(
-      (this._config.framerate ?? DEFAULT_FRAMERATE) * this._keyframeIntervalSec,
-    );
+    const keyframeEvery = Math.round(this._config.framerate * this._keyframeIntervalSec);
 
     while (this._running) {
       let result: ReadableStreamReadResult<VideoFrame>;

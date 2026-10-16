@@ -362,3 +362,86 @@ describe("useReplaySession", () => {
     });
   });
 });
+
+it("ignores a late open rejection after unmount", async () => {
+  const { ReplaySession } = await import(
+    "../../../features/session/model/replay-session"
+  );
+  let reject!: (e: Error) => void;
+  const spy = vi.spyOn(ReplaySession.prototype, "open").mockImplementationOnce(
+    () =>
+      new Promise((_, r) => {
+        reject = r;
+      }),
+  );
+  const view = renderHook(() => useReplaySession({ channels: [] }));
+  view.unmount();
+  await act(async () => {
+    reject(new Error("late failure"));
+  });
+  expect(view.result.current.error).toBeNull();
+  spy.mockRestore();
+});
+it("does not restore replay mode when enter resolves after exit", async () => {
+  const view = renderHook(() => useReplaySession({ channels: [], autoOpen: false }));
+  const { makeFakePlayer } = await import("../../chart-replay/lib/chart-replay-fixtures");
+  const player = makeFakePlayer(
+    0,
+  ) as unknown as import("../../../features/player/model/replay-player").ReplayPlayer;
+  let release!: (p: typeof player) => void;
+  vi.spyOn(view.result.current.session!, "enterReplay").mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  let pending!: ReturnType<typeof view.result.current.enterReplay>;
+  act(() => {
+    pending = view.result.current.enterReplay();
+    view.result.current.exitReplay();
+  });
+  await act(async () => {
+    release(player);
+    expect(await pending).toBeNull();
+  });
+  expect(view.result.current.mode).toBe("live");
+  view.unmount();
+});
+it("does not install an old time range after exit", async () => {
+  const view = renderHook(() => useReplaySession({ channels: [], autoOpen: false }));
+  const { makeFakePlayer } = await import("../../chart-replay/lib/chart-replay-fixtures");
+  const player = makeFakePlayer(
+    0,
+  ) as unknown as import("../../../features/player/model/replay-player").ReplayPlayer;
+  vi.spyOn(view.result.current.session!, "enterReplay").mockResolvedValueOnce(player);
+  let release!: (range: { earliest: number; latest: number }) => void;
+  vi.spyOn(view.result.current.session!, "getTimeRange").mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  let pending!: ReturnType<typeof view.result.current.enterReplay>;
+  await act(async () => {
+    pending = view.result.current.enterReplay();
+    await Promise.resolve();
+  });
+  act(() => view.result.current.exitReplay());
+  await act(async () => {
+    release({ earliest: 0, latest: 10 });
+    expect(await pending).toBe(player);
+  });
+  expect(view.result.current.mode).toBe("live");
+  expect(view.result.current.timeRange).toBeNull();
+  view.unmount();
+});
+it("returns null before the first session effect commits", async () => {
+  let first!: ReturnType<typeof useReplaySession>["enterReplay"];
+  const view = renderHook(() => {
+    const hook = useReplaySession({ channels: [], autoOpen: false });
+    if (!first) first = hook.enterReplay;
+    return hook;
+  });
+  await expect(first()).resolves.toBeNull();
+  view.unmount();
+});

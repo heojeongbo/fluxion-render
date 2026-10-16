@@ -177,7 +177,10 @@ export function useScrubberControls(
         return;
       }
       const raf = requestAnimationFrame(() => {
-        const target = pendingSeekRef.current?.t ?? t;
+        // A cancelled callback can still arrive in the same animation frame.
+        const pending = pendingSeekRef.current;
+        if (!pending) return;
+        const target = pending.t;
         pendingSeekRef.current = null;
         dvr.player?.seek(target);
       });

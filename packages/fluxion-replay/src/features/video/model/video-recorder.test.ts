@@ -160,12 +160,18 @@ describe("VideoRecorder", () => {
     const origMSTP = globalThis.MediaStreamTrackProcessor;
 
     // Create a stream that yields one frame then closes
-    const fakeFrame = { close: vi.fn() } as unknown as VideoFrame;
+    const fakeFrame = {
+      timestamp: 1000,
+      displayWidth: 640,
+      displayHeight: 480,
+      close: vi.fn(),
+    } as unknown as VideoFrame;
     class OneFrameProcessor {
       readable: ReadableStream<VideoFrame>;
       constructor(_init: unknown) {
         this.readable = new ReadableStream<VideoFrame>({
           start(controller) {
+            controller.enqueue(fakeFrame);
             controller.enqueue(fakeFrame);
             controller.close();
           },
@@ -463,4 +469,27 @@ describe("VideoRecorder", () => {
     expect(warnSpy).toHaveBeenCalledTimes(1);
     warnSpy.mockRestore();
   });
+});
+
+it("defaults absent encoded duration to zero", async () => {
+  const { store, recorder } = await makeOpenRecorder();
+  const encoder = installImmediateEncoder();
+  const record = vi.spyOn(recorder, "record");
+  const vr = new VideoRecorder({ channelId: "cam", store, recorder });
+  try {
+    await vr.start({} as MediaStreamTrack);
+    const chunk = makeChunk();
+    Object.defineProperty(chunk, "duration", { value: null });
+    encoder.ref.output!(chunk, {});
+    await flushMicrotasks();
+    expect(record).toHaveBeenCalledWith(
+      "cam",
+      expect.objectContaining({ durationUs: 0 }),
+      expect.any(Number),
+    );
+  } finally {
+    vr.stop();
+    store.dispose();
+    encoder.restore();
+  }
 });

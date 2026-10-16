@@ -1080,3 +1080,32 @@ describe("useChartReplay", () => {
     expect(received).toHaveLength(1); // unsubscribed
   });
 });
+
+it("does not write a hydrate if pickValue tears down its consumer", async () => {
+  const { host, handle } = makeFakeHost();
+  const player = makeFakePlayer(5000);
+  const store = makeFakeStore({ signal: [metricFrame("signal", 4000, 1)] });
+  store.hold();
+  let unmount!: () => void;
+  const view = renderHook(() =>
+    useChartReplay({
+      host: host as unknown as import("@heojeongbo/fluxion-render").FluxionHost,
+      player:
+        player as unknown as import("../../../features/player/model/replay-player").ReplayPlayer,
+      store:
+        store as unknown as import("../../../features/store/model/replay-store").ReplayStore,
+      channel: SIGNAL_CHANNEL,
+      windowMs: 2000,
+      pickValue: () => {
+        unmount();
+        return 1;
+      },
+    }),
+  );
+  unmount = view.unmount;
+  await act(async () => {
+    store.release();
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+  });
+  expect(handle.reset).not.toHaveBeenCalled();
+});

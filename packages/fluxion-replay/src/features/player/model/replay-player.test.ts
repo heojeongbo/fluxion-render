@@ -98,17 +98,19 @@ describe("ReplayPlayer", () => {
     player.dispose();
   });
 
-  it("emits onEnd when reaching latest", () => {
-    const { player } = makePlayer(0, 100);
+  it("emits onEnd when reaching latest", async () => {
+    const { player, store } = makePlayer(0, 100);
+    await store.open();
     let ended = false;
     player.onEnd(() => {
       ended = true;
     });
     player.play(100); // 100x speed so 1ms wall = 100ms virtual
     // RAF fires every 16ms; at 100x, 16ms wall = 1600ms virtual >> latest(100)
-    vi.advanceTimersByTime(20);
+    await vi.advanceTimersByTimeAsync(20);
     expect(ended).toBe(true);
     player.dispose();
+    store.dispose();
   });
 
   it("onStateChange fires on transitions", () => {

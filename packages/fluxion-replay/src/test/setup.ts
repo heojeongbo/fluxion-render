@@ -418,9 +418,20 @@ class FakeFileSystemDirectoryHandle {
     return new FakeFileSystemFileHandle(path);
   }
 
-  async removeEntry(name: string): Promise<void> {
+  async *entries(): AsyncIterable<[string, unknown]> {
+    const names = new Set<string>();
+    for (const path of opfsFiles.keys()) {
+      if (path.startsWith(`${this._prefix}/`))
+        names.add(path.slice(this._prefix.length + 1).split("/")[0]);
+    }
+    for (const name of names) yield [name, {}];
+  }
+  async removeEntry(name: string, options?: { recursive?: boolean }): Promise<void> {
     const path = `${this._prefix}/${name}`;
     opfsFiles.delete(path);
+    if (options?.recursive)
+      for (const key of opfsFiles.keys())
+        if (key.startsWith(`${path}/`)) opfsFiles.delete(key);
   }
 }
 

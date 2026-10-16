@@ -893,3 +893,55 @@ describe("useScrubberControls", () => {
     });
   });
 });
+
+it("ignores a cancelled animation callback and supports unsnapped edges", () => {
+  const player = makeFakePlayer(1_030_000);
+  let callback!: FrameRequestCallback;
+  const raf = vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((cb) => {
+    callback = cb;
+    return 1;
+  });
+  vi.stubGlobal("cancelAnimationFrame", undefined);
+  const dvr = {
+    isDvr: true,
+    player,
+    frozenLatest: LIVE.latest,
+    effectiveTimeRange: LIVE,
+    enter: vi.fn(),
+    exit: vi.fn(),
+  } as unknown as ReturnType<typeof useReplayDvr>;
+  const view = renderHook(() => useScrubberControls({ dvr, snapMs: 0 }));
+  act(() => view.result.current.onScrubChange(fakeChange(1_020_000)));
+  act(() => view.result.current.commitScrub());
+  const calls = player.seek.mock.calls.length;
+  act(() => callback(0));
+  expect(player.seek).toHaveBeenCalledTimes(calls);
+  view.unmount();
+  raf.mockRestore();
+  vi.unstubAllGlobals();
+});
+it("does not play when a pending drag entry returns no player", async () => {
+  let release!: (p: null) => void;
+  const enter = vi.fn(
+    () =>
+      new Promise<null>((resolve) => {
+        release = resolve;
+      }),
+  );
+  const dvr = {
+    isDvr: false,
+    player: null,
+    frozenLatest: null,
+    effectiveTimeRange: LIVE,
+    enter,
+    exit: vi.fn(),
+  } as unknown as ReturnType<typeof useReplayDvr>;
+  const view = renderHook(() => useScrubberControls({ dvr }));
+  act(() => view.result.current.onScrubChange(fakeChange(1_020_000)));
+  act(() => view.result.current.commitScrub());
+  await act(async () => {
+    release(null);
+  });
+  expect(enter).toHaveBeenCalledOnce();
+  view.unmount();
+});

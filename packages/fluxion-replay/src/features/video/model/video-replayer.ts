@@ -1,6 +1,6 @@
 import type { VideoFrameInfo } from "../../../entities/video-channel/video-channel";
+import type { VideoChunkReader } from "../../../shared/model/storage";
 import type { ReplayPlayerFrame } from "../../player/model/replay-player";
-import type { ReplayStore } from "../../store/model/replay-store";
 import type { TimelineIndex } from "../../timeline/model/timeline-index";
 
 export interface VideoDecoderConfig {
@@ -8,7 +8,7 @@ export interface VideoDecoderConfig {
 }
 
 export interface VideoReplayerOptions {
-  store: ReplayStore;
+  store: VideoChunkReader;
   channelId: string;
   outputCanvas: HTMLCanvasElement | OffscreenCanvas;
   decoderConfig?: VideoDecoderConfig;
@@ -17,13 +17,21 @@ export interface VideoReplayerOptions {
 const DEFAULT_CODEC = "vp8";
 
 export class VideoReplayer {
-  private readonly _store: ReplayStore;
+  private _generation = 0;
+  private _disposed = false;
+  private _queue: Promise<void> = Promise.resolve();
+
+  /** Wait for queued reads/decode submissions (does not wait for video presentation). */
+  flush(): Promise<void> {
+    return this._queue;
+  }
+
+  private readonly _store: VideoChunkReader;
   private readonly _channelId: string;
   private readonly _canvas: HTMLCanvasElement | OffscreenCanvas;
   private readonly _codec: string;
   private _decoder: VideoDecoder | null = null;
   private _lastFrame: VideoFrame | null = null;
-  private _canvasInitialized = false;
 
   constructor(opts: VideoReplayerOptions) {
     this._store = opts.store;
@@ -34,11 +42,22 @@ export class VideoReplayer {
 
   /** Feed a single frame from the ReplayPlayer onFrame event. */
   feedFrame(frame: ReplayPlayerFrame): void {
-    if (typeof VideoDecoder === "undefined") return;
+    if (this._disposed || typeof VideoDecoder === "undefined") return;
     if (frame.channelId !== this._channelId) return;
 
     const info = frame.data as VideoFrameInfo;
-    void this._decodeChunk(info, info.isKeyframe);
+    const generation = this._generation;
+    this._queue = this._queue
+      .then(async () => {
+        if (generation === this._generation)
+          await this._decodeChunk(info, info.isKeyframe, frame.t);
+      })
+      .catch((error) => {
+        if (generation === this._generation) {
+          this._resetDecoder();
+          console.error("[VideoReplayer] decode failed", error);
+        }
+      });
   }
 
   /** Seek to a specific time, re-decoding from the last keyframe. */
@@ -47,7 +66,7 @@ export class VideoReplayer {
     keyframeIndex: TimelineIndex,
     allFrames: ReplayPlayerFrame[],
   ): Promise<void> {
-    if (typeof VideoDecoder === "undefined") return;
+    if (this._disposed || typeof VideoDecoder === "undefined") return;
 
     const keyframeT = keyframeIndex.floor(t);
     if (keyframeT === null) return;
@@ -58,13 +77,21 @@ export class VideoReplayer {
       (f) => f.channelId === this._channelId && f.t >= keyframeT && f.t <= t,
     );
 
-    for (const f of framesToDecode) {
-      const info = f.data as VideoFrameInfo;
-      await this._decodeChunk(info, info.isKeyframe);
-    }
+    const generation = this._generation;
+    this._queue = this._queue.then(async () => {
+      for (const f of framesToDecode) {
+        if (generation !== this._generation) return;
+        const info = f.data as VideoFrameInfo;
+        await this._decodeChunk(info, info.isKeyframe, f.t);
+      }
+    });
+    await this._queue;
   }
 
   dispose(): void {
+    this._disposed = true;
+    this._generation++;
+    this._queue = Promise.resolve();
     this._lastFrame?.close();
     this._lastFrame = null;
     this._decoder?.close();
@@ -72,6 +99,8 @@ export class VideoReplayer {
   }
 
   private _resetDecoder(): void {
+    this._generation++;
+    this._queue = Promise.resolve();
     if (this._decoder) {
       try {
         this._decoder.close();
@@ -82,14 +111,18 @@ export class VideoReplayer {
     }
     this._lastFrame?.close();
     this._lastFrame = null;
-    this._canvasInitialized = false;
   }
 
   private _setupDecoder(): void {
-    if (typeof VideoDecoder === "undefined") return;
+    if (this._disposed || typeof VideoDecoder === "undefined") return;
 
+    const generation = this._generation;
     this._decoder = new VideoDecoder({
       output: (frame) => {
+        if (generation !== this._generation) {
+          frame.close();
+          return;
+        }
         this._lastFrame?.close();
         this._lastFrame = frame;
         this._renderFrame(frame);
@@ -101,7 +134,11 @@ export class VideoReplayer {
     // configure is deferred to first keyframe — dimensions come from VideoFrameInfo
   }
 
-  private async _decodeChunk(info: VideoFrameInfo, isKeyframe: boolean): Promise<void> {
+  private async _decodeChunk(
+    info: VideoFrameInfo,
+    isKeyframe: boolean,
+    t = 0,
+  ): Promise<void> {
     if (!this._decoder) this._setupDecoder();
     if (!this._decoder) return;
 
@@ -110,11 +147,8 @@ export class VideoReplayer {
     // hardcoded-resolution mismatch that corrupts VP8 decode on Retina displays.
     if (this._decoder.state === "unconfigured") {
       if (!isKeyframe) return;
-      if (!this._canvasInitialized) {
-        this._canvas.width = info.codedWidth;
-        this._canvas.height = info.codedHeight;
-        this._canvasInitialized = true;
-      }
+      this._canvas.width = info.codedWidth;
+      this._canvas.height = info.codedHeight;
       this._decoder.configure({
         codec: this._codec,
         codedWidth: info.codedWidth,
@@ -123,20 +157,27 @@ export class VideoReplayer {
     }
 
     const channelId = this._channelId;
-    const filename = info.opfsPath.split("/").pop() ?? "";
+    const filename = info.opfsPath.slice(info.opfsPath.lastIndexOf("/") + 1);
+    const generation = this._generation;
+    const decoder = this._decoder;
     const data = await this._store.readVideoChunk(channelId, filename);
     if (!data) return;
 
     // Re-check after async gap — decoder may have been closed/disposed
-    if (!this._decoder || this._decoder.state !== "configured") return;
+    if (
+      generation !== this._generation ||
+      this._decoder !== decoder ||
+      decoder.state !== "configured"
+    )
+      return;
 
     const chunk = new EncodedVideoChunk({
       type: isKeyframe ? "key" : "delta",
-      timestamp: 0,
+      timestamp: Math.round(t * 1000),
       data: data.buffer as ArrayBuffer,
     });
 
-    this._decoder.decode(chunk);
+    decoder.decode(chunk);
   }
 
   private _renderFrame(frame: VideoFrame): void {

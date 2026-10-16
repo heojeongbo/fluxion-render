@@ -1,7 +1,7 @@
 import { VirtualClock } from "../../../shared/lib/virtual-clock";
 import type { BaseChannel } from "../../../shared/model/base-channel";
 import type { SerializedFrame } from "../../../shared/model/frame";
-import type { ReplayStore } from "../../store/model/replay-store";
+import type { FrameReader, ReplayClock } from "../../../shared/model/storage";
 
 export type ReplayPlayerState = "idle" | "playing" | "paused" | "stopped";
 
@@ -18,10 +18,12 @@ export type EndListener = () => void;
 export type SeekListener = (clampedT: number) => void;
 
 export interface ReplayPlayerOptions {
-  store: ReplayStore;
+  store: FrameReader;
   channels: Map<string, BaseChannel<unknown>>;
   timeRange: { earliest: number; latest: number };
   prefetchMs?: number;
+  /** Injectable owned clock; defaults to VirtualClock. */
+  clock?: ReplayClock;
 }
 
 const DEFAULT_PREFETCH_MS = 2_000;
@@ -54,39 +56,9 @@ function upperBound(arr: SerializedFrame[], value: number): number {
   return lo;
 }
 
-/**
- * Merges sorted `incoming` into sorted `target` in-place — O(n+m).
- * Callers only invoke this with a non-empty `incoming` (see `_prefetch`).
- */
-function mergeSorted(target: SerializedFrame[], incoming: SerializedFrame[]): void {
-  if (target.length === 0) {
-    target.push(...incoming);
-    return;
-  }
-  // Fast-path: prefetch windows are time-ordered, so incoming almost always
-  // starts at or after the last buffered frame — a simple append suffices.
-  if (incoming[0]!.t >= target[target.length - 1]!.t) {
-    target.push(...incoming);
-    return;
-  }
-  // Slow-path: genuine interleave (e.g. after a seek that partially overlaps
-  // existing buffer). O(n+m) merge into a temporary array then replace in-place.
-  const result: SerializedFrame[] = [];
-  let i = 0,
-    j = 0;
-  while (i < target.length && j < incoming.length) {
-    if (target[i]!.t <= incoming[j]!.t) result.push(target[i++]!);
-    else result.push(incoming[j++]!);
-  }
-  while (i < target.length) result.push(target[i++]!);
-  while (j < incoming.length) result.push(incoming[j++]!);
-  target.length = 0;
-  for (const f of result) target.push(f);
-}
-
 export class ReplayPlayer {
-  private readonly _clock: VirtualClock;
-  private readonly _store: ReplayStore;
+  private readonly _clock: ReplayClock;
+  private readonly _store: FrameReader;
   private readonly _channels: Map<string, BaseChannel<unknown>>;
   private readonly _timeRange: { earliest: number; latest: number };
   private readonly _prefetchMs: number;
@@ -122,7 +94,7 @@ export class ReplayPlayer {
     // calls use lowerOpen=true to avoid re-fetching the boundary frame.
     this._prefetchedUpTo = opts.timeRange.earliest - 1;
     this._lastKnownT = opts.timeRange.earliest;
-    this._clock = new VirtualClock();
+    this._clock = opts.clock ?? new VirtualClock();
   }
 
   get currentT(): number {
@@ -164,7 +136,8 @@ export class ReplayPlayer {
     const lookback = Math.max(this._prefetchMs, 3_000);
     // Invalidate any in-flight prefetch so it can't merge stale pre-seek frames.
     this._prefetchGeneration++;
-    this._prefetchBuffer = this._prefetchBuffer.filter((f) => f.t >= clamped - lookback);
+    this._prefetchBuffer = [];
+    this._isPrefetching = false;
     this._prefetchedUpTo = Math.max(clamped - lookback, this._timeRange.earliest) - 1;
     this._ended = false;
     for (const listener of this._seekListeners) listener(clamped);
@@ -280,6 +253,8 @@ export class ReplayPlayer {
   }
 
   dispose(): void {
+    this._prefetchGeneration++;
+    this._ended = true;
     this._clock.dispose();
     this._offTick?.();
     this._offTick = null;
@@ -301,13 +276,8 @@ export class ReplayPlayer {
   private _onTick(currentT: number): void {
     if (this._ended) return;
 
-    // Check for end of timeline
-    if (currentT >= this._timeRange.latest) {
-      this._ended = true;
-      this.stop();
-      for (const listener of this._endListeners) listener();
-      return;
-    }
+    const atEnd = currentT >= this._timeRange.latest;
+    currentT = Math.min(currentT, this._timeRange.latest);
 
     // Prefetch ahead — skip if a fetch is already in-flight, and only once the
     // buffered horizon has drained past REFILL_AT (see the constant: without
@@ -320,6 +290,9 @@ export class ReplayPlayer {
     ) {
       void this._prefetch(currentT);
     }
+
+    // Do not end until a query covering the endpoint has completed.
+    if (atEnd && (this._isPrefetching || this._prefetchedUpTo < currentT)) return;
 
     // Drain buffered frames up to currentT.
     // Buffer is kept sorted by t, so find the first frame past currentT with
@@ -351,6 +324,12 @@ export class ReplayPlayer {
         console.error("[fluxion-replay] tick listener error:", err);
       }
     }
+    if (atEnd) {
+      this.stop();
+      this._lastKnownT = currentT;
+      this._ended = true;
+      for (const listener of this._endListeners) listener();
+    }
   }
 
   private async _prefetch(currentT: number): Promise<void> {
@@ -373,7 +352,9 @@ export class ReplayPlayer {
       // `_prefetchedUpTo` to the newer generation (seek/play/stop already set it).
       if (this._prefetchGeneration !== generation) return;
       if (frames.length > 0) {
-        mergeSorted(this._prefetchBuffer, frames);
+        // Queries cover disjoint chronological ranges; seek clears the buffer.
+        // A loop also handles batches larger than the engine argument limit.
+        for (const frame of frames) this._prefetchBuffer.push(frame);
       }
     } catch {
       // Roll back so the range is retried next tick — but only if still current;
@@ -382,7 +363,15 @@ export class ReplayPlayer {
         this._prefetchedUpTo = from;
       }
     } finally {
-      this._isPrefetching = false;
+      if (this._prefetchGeneration === generation) {
+        this._isPrefetching = false;
+        if (
+          this._state === "playing" &&
+          this._clock.currentT >= this._timeRange.latest &&
+          this._prefetchedUpTo >= this._timeRange.latest
+        )
+          this._onTick(this._clock.currentT);
+      }
     }
   }
 }

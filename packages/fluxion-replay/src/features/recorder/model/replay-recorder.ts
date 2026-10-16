@@ -1,7 +1,7 @@
 import type { BaseChannel } from "../../../shared/model/base-channel";
 import type { SerializedFrame } from "../../../shared/model/frame";
 import { GenericRingBuffer } from "../../../shared/model/generic-ring-buffer";
-import type { ReplayStore } from "../../store/model/replay-store";
+import type { FrameWriter } from "../../../shared/model/storage";
 import { TimelineIndex } from "../../timeline/model/timeline-index";
 
 /**
@@ -36,7 +36,7 @@ export class UnknownChannelError extends Error {
 
 export interface ReplayRecorderOptions {
   channels: BaseChannel<unknown>[];
-  store: ReplayStore;
+  store: FrameWriter;
   retentionMs?: number;
   memoryCapacity?: number;
   indexIntervalMs?: number;
@@ -48,7 +48,7 @@ const DEFAULT_INDEX_INTERVAL_MS = 1_000;
 
 export class ReplayRecorder {
   private readonly _channels = new Map<string, BaseChannel<unknown>>();
-  private readonly _store: ReplayStore;
+  private readonly _store: FrameWriter;
   private readonly _memoryBuffer: GenericRingBuffer<SerializedFrame>;
   private readonly _index: TimelineIndex;
   private readonly _retentionMs: number;

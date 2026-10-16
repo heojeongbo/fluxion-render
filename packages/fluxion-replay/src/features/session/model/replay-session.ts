@@ -12,6 +12,9 @@ export type ReplaySessionMode = "live" | "replay";
 
 export interface ReplaySessionOptions {
   channels: BaseChannel<unknown>[];
+  /** Optional owned store instance; defaults to ReplayStore(storeOptions). */
+  store?: ReplayStore;
+  /** In-memory history only. Set storeOptions.retentionMs for persisted retention. */
   retentionMs?: number;
   memoryCapacity?: number;
   indexIntervalMs?: number;
@@ -41,12 +44,13 @@ export class ReplaySession {
   private _opGen = 0;
 
   constructor(opts: ReplaySessionOptions) {
-    this._store = new ReplayStore({
-      retentionMs: opts.retentionMs,
-      evictThresholdPct: opts.evictThresholdPct,
-      storageLogIntervalMs: opts.storageLogIntervalMs,
-      ...opts.storeOptions,
-    });
+    this._store =
+      opts.store ??
+      new ReplayStore({
+        evictThresholdPct: opts.evictThresholdPct,
+        storageLogIntervalMs: opts.storageLogIntervalMs,
+        ...opts.storeOptions,
+      });
 
     this._channelMap = new Map(opts.channels.map((ch) => [ch.channelId, ch]));
 
@@ -169,9 +173,11 @@ export class ReplaySession {
   }
 
   async clearRecording(): Promise<void> {
+    const wasRecording = this._recorder.isRecording;
     this._recorder.stop();
     await this._store.clearAll();
-    this._recorder.start();
+    this._recorder.clear();
+    if (wasRecording) this._recorder.start();
   }
 
   get mode(): ReplaySessionMode {

@@ -16,7 +16,13 @@ export interface DecodedFrame<T> {
 export interface ReplayStoreOptions {
   dbName?: string;
   dbVersion?: number;
+  /** Persisted history window relative to the latest frame. Default Infinity
+   * preserves existing recordings; set explicitly to enable time retention. */
   retentionMs?: number;
+  /** Queue bound. appendFrame throws before accepting a frame when full. Default Infinity (opt-in backpressure). */
+  maxPendingFrames?: number;
+  /** Background write failures are retried on the next interval, never discarded. */
+  onError?: (error: unknown) => void;
   batchIntervalMs?: number;
   /**
    * Storage usage percentage (0–100) at which old frames are automatically
@@ -52,12 +58,12 @@ export interface RecordingSegment {
 
 const DEFAULT_DB_NAME = "fluxion-replay";
 const DEFAULT_DB_VERSION = 1;
-const DEFAULT_RETENTION_MS = 10 * 60 * 1000;
+const DEFAULT_RETENTION_MS = Infinity;
 const DEFAULT_BATCH_INTERVAL_MS = 500;
 // Maximum records written per IDB transaction. Capping this prevents a single
 // flush from queuing hundreds of store.add() calls synchronously, which blocks
 // the main thread for several frames. Excess records stay in _pending and are
-// flushed on the next interval tick.
+// drained in successive asynchronous transactions (one writer per store).
 const MAX_BATCH_SIZE = 200;
 // Run eviction only every N flushes to avoid calling navigator.storage.estimate()
 // and the deleteFramesBefore cursor loop on every 500 ms tick.
@@ -90,6 +96,21 @@ export class ReplayStore {
   private _disposed = false;
   private _opfsRoot: FileSystemDirectoryHandle | null = null;
   private _pending: FrameRecord[] = [];
+  private _writeTask: Promise<void> | null = null;
+  private _clearTask: Promise<void> | null = null;
+  private _writeGeneration = 0;
+  private _legacyRoot: FileSystemDirectoryHandle | null = null;
+  private readonly _maxPendingFrames: number;
+  private readonly _onError?: (error: unknown) => void;
+  private _lastWriteError: unknown = null;
+  private readonly _videoWrites = new Set<Promise<void>>();
+
+  get pendingFrameCount(): number {
+    return this._pending.length;
+  }
+  get lastWriteError(): unknown {
+    return this._lastWriteError;
+  }
   private _flushTimer: ReturnType<typeof setInterval> | null = null;
   private _retentionMs: number;
   private _batchIntervalMs: number;
@@ -112,10 +133,18 @@ export class ReplayStore {
   private _evictionPaused = false;
 
   constructor(opts?: ReplayStoreOptions) {
+    this._maxPendingFrames = opts?.maxPendingFrames ?? Infinity;
+    if (!(this._maxPendingFrames > 0))
+      throw new RangeError("maxPendingFrames must be positive");
+    this._onError = opts?.onError;
     this._dbName = opts?.dbName ?? DEFAULT_DB_NAME;
     this._dbVersion = opts?.dbVersion ?? DEFAULT_DB_VERSION;
     this._retentionMs = opts?.retentionMs ?? DEFAULT_RETENTION_MS;
     this._batchIntervalMs = opts?.batchIntervalMs ?? DEFAULT_BATCH_INTERVAL_MS;
+    if (!(this._retentionMs >= 0))
+      throw new RangeError("retentionMs must be non-negative");
+    if (!Number.isFinite(this._batchIntervalMs) || this._batchIntervalMs <= 0)
+      throw new RangeError("batchIntervalMs must be finite and positive");
     this._evictThresholdPct = opts?.evictThresholdPct ?? 70;
     this._storageLogIntervalMs = opts?.storageLogIntervalMs ?? 0;
   }
@@ -131,7 +160,14 @@ export class ReplayStore {
     }
     this._db = db;
     try {
-      this._opfsRoot = await navigator.storage.getDirectory();
+      const root = await navigator.storage.getDirectory();
+      if (this._disposed) return;
+      this._legacyRoot = root;
+      const namespace = await root.getDirectoryHandle("fluxion-replay", { create: true });
+      this._opfsRoot = await namespace.getDirectoryHandle(
+        encodeURIComponent(this._dbName),
+        { create: true },
+      );
     } catch {
       // OPFS not available (e.g. non-secure context) — video recording disabled
       this._opfsRoot = null;
@@ -139,7 +175,11 @@ export class ReplayStore {
     // The OPFS await is another suspension point dispose() could have run past.
     // dispose() already closed _db (it was set above) and stopped everything,
     // so just bail before starting timers on the dead store.
-    if (this._disposed) return;
+    if (this._disposed) {
+      this._opfsRoot = null;
+      this._legacyRoot = null;
+      return;
+    }
     this._startFlushTimer();
     if (this._storageLogIntervalMs > 0) {
       this._startStorageLogTimer();
@@ -147,6 +187,11 @@ export class ReplayStore {
   }
 
   appendFrame(frame: SerializedFrame): void {
+    if (this._disposed) throw new Error("ReplayStore has been disposed");
+    if (this._pending.length >= this._maxPendingFrames)
+      throw new RangeError(
+        "ReplayStore write queue is full; await flush() before appending more frames",
+      );
     this._pending.push({
       t: frame.t,
       channelId: frame.channelId,
@@ -155,14 +200,9 @@ export class ReplayStore {
   }
 
   async flush(): Promise<void> {
-    // Public flush: drain the entire pending queue (possibly multiple batches
-    // of MAX_BATCH_SIZE) then evict once. The timer-driven path processes one
-    // batch per tick to avoid blocking the main thread; public flush must be
-    // complete so callers (e.g. enterReplay, tests) see all recorded frames.
-    while (this._pending.length > 0) {
-      await this._flushPending(false);
-    }
-    await this._maybeEvict();
+    this._assertOpen();
+    if (this._clearTask) await this._clearTask;
+    await this._flushPending(true);
   }
 
   async getFrames(
@@ -423,7 +463,7 @@ export class ReplayStore {
       };
       tx.oncomplete = () =>
         resolve(earliest === null ? null : { earliest, latest: latest ?? earliest });
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = tx.onabort = () => reject(tx.error);
     });
   }
 
@@ -442,15 +482,26 @@ export class ReplayStore {
     filename: string,
     data: Uint8Array,
   ): Promise<void> {
+    if (this._clearTask) await this._clearTask;
+    const write = this._writeVideoChunk(channelId, filename, data);
+    this._videoWrites.add(write);
+    try {
+      await write;
+    } finally {
+      this._videoWrites.delete(write);
+    }
+  }
+
+  private async _writeVideoChunk(
+    channelId: string,
+    filename: string,
+    data: Uint8Array,
+  ): Promise<void> {
     this._videoChannelIds.add(channelId);
     try {
       await this._writeChunkOnce(channelId, filename, data);
-    } catch (e) {
-      // Quota exhaustion is the one failure we can recover from: aggressively
-      // evict the oldest slice (OPFS chunks + IDB rows) to free space, then
-      // retry the write once. A non-quota error — or a still-full disk after
-      // reclaim — propagates to the caller (VideoRecorder drops the frame).
-      if (!isQuotaExceededError(e)) throw e;
+    } catch (error) {
+      if (!isQuotaExceededError(error)) throw error;
       await this._evictOldest(0.25).catch(() => {});
       await this._writeChunkOnce(channelId, filename, data);
     }
@@ -470,46 +521,61 @@ export class ReplayStore {
   }
 
   async readVideoChunk(channelId: string, filename: string): Promise<Uint8Array | null> {
-    const root = this._opfsRoot;
-    if (!root) return null;
-    try {
-      const dir = await root.getDirectoryHandle(channelId);
-      const file = await dir.getFileHandle(filename);
-      const f = await file.getFile();
-      const buf = await f.arrayBuffer();
-      return new Uint8Array(buf);
-    } catch {
-      return null;
-    }
+    const read = async (root: FileSystemDirectoryHandle): Promise<Uint8Array | null> => {
+      try {
+        const dir = await root.getDirectoryHandle(channelId);
+        const file = await dir.getFileHandle(filename);
+        return new Uint8Array(await (await file.getFile()).arrayBuffer());
+      } catch {
+        return null;
+      }
+    };
+    if (!this._opfsRoot) return null;
+    const data = await read(this._opfsRoot);
+    if (data) return data;
+    // Old releases wrote directly under the origin root. Read those files only
+    // when this database still references the timestamp; never delete shared
+    // legacy directories whose owner cannot be determined safely.
+    const t = Number(filename.replace(/\.chunk$/, ""));
+    if (!this._legacyRoot || !Number.isFinite(t)) return null;
+    const frames = await this.getFramesByChannel(channelId, t, t);
+    return frames.length ? read(this._legacyRoot) : null;
   }
 
   async clearAll(): Promise<void> {
-    this._segments = [];
-    this._videoChannelIds.clear();
-    // Clear IDB frames
+    if (this._clearTask) return this._clearTask;
     const db = this._assertOpen();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction("frames", "readwrite");
-      const req = tx.objectStore("frames").clear();
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    });
-
-    // Clear OPFS video chunks
-    const root = this._opfsRoot;
-    if (!root) return;
-    try {
+    this._writeGeneration++;
+    this._pending = [];
+    this._segments = [];
+    const clear = async () => {
+      // A committing batch/file must finish BEFORE deletion, so it cannot
+      // resurrect an earlier recording after this promise resolves.
+      if (this._writeTask) await this._writeTask.catch(() => {});
+      await Promise.allSettled([...this._videoWrites]);
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction("frames", "readwrite");
+        tx.objectStore("frames").clear();
+        tx.oncomplete = () => resolve();
+        tx.onerror = tx.onabort = () => reject(tx.error);
+      });
+      this._videoChannelIds.clear();
+      const root = this._opfsRoot;
+      if (!root) return;
+      if (typeof (root as unknown as { entries?: unknown }).entries !== "function")
+        return;
       const names: string[] = [];
       for await (const [name] of (
         root as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }
-      ).entries()) {
+      ).entries())
         names.push(name);
-      }
-      await Promise.all(
-        names.map((n) => root.removeEntry(n, { recursive: true }).catch(() => {})),
-      );
-    } catch {
-      // OPFS iteration not supported in all environments — skip silently
+      await Promise.all(names.map((name) => root.removeEntry(name, { recursive: true })));
+    };
+    this._clearTask = clear();
+    try {
+      await this._clearTask;
+    } finally {
+      this._clearTask = null;
     }
   }
 
@@ -526,6 +592,8 @@ export class ReplayStore {
 
   dispose(): void {
     this._disposed = true;
+    this._writeGeneration++;
+    this._legacyRoot = null;
     this._stopFlushTimer();
     this._stopStorageLogTimer();
     this._db?.close();
@@ -548,7 +616,17 @@ export class ReplayStore {
 
   private _startFlushTimer(): void {
     this._flushTimer = setInterval(() => {
-      void this._flushPending(false);
+      if (this._clearTask) return;
+      void this._flushPending(false).catch((error) => {
+        this._lastWriteError = error;
+        if (this._onError) {
+          try {
+            this._onError(error);
+          } catch (reportError) {
+            console.error("[ReplayStore] error listener failed", reportError);
+          }
+        } else console.error("[ReplayStore] write failed; queued frames retained", error);
+      });
     }, this._batchIntervalMs);
   }
 
@@ -560,17 +638,29 @@ export class ReplayStore {
   }
 
   private async _flushPending(forceEvict: boolean): Promise<void> {
-    if (this._pending.length === 0 || !this._db) return;
-    // Cap batch size so one transaction never queues hundreds of store.add()
-    // calls at once. Any remaining records stay in _pending for the next tick.
-    const batch = this._pending.splice(0, MAX_BATCH_SIZE);
-    await this._writeBatch(batch);
-    // Timer-driven flushes rate-limit eviction to every EVICT_EVERY_N_FLUSHES
-    // ticks to avoid running storage.estimate() + cursor deletion every 500 ms.
-    // Public flush() always evicts so callers see a consistent storage state.
-    const shouldEvict = forceEvict || ++this._flushCount % EVICT_EVERY_N_FLUSHES === 0;
-    if (shouldEvict) {
-      await this._maybeEvict();
+    if (this._writeTask) return this._writeTask;
+    if (!this._db || this._clearTask) return;
+    const generation = this._writeGeneration;
+    const drain = async () => {
+      while (this._pending.length && generation === this._writeGeneration) {
+        // Retain until transaction COMMIT. Retry sees the same batch on failure.
+        const batch = this._pending.slice(0, MAX_BATCH_SIZE);
+        await this._writeBatch(batch);
+        if (generation !== this._writeGeneration) return;
+        this._pending.splice(0, batch.length);
+        this._lastWriteError = null;
+      }
+      if (
+        generation === this._writeGeneration &&
+        (forceEvict || ++this._flushCount % EVICT_EVERY_N_FLUSHES === 0)
+      )
+        await this._maybeEvict();
+    };
+    this._writeTask = drain();
+    try {
+      await this._writeTask;
+    } finally {
+      this._writeTask = null;
     }
   }
 
@@ -585,8 +675,18 @@ export class ReplayStore {
   }
 
   private async _maybeEvict(): Promise<void> {
-    if (this._evictionPaused || this._evictThresholdPct >= 100) return;
+    if (this._evictionPaused) return;
     try {
+      if (Number.isFinite(this._retentionMs)) {
+        const range = await this.getTimeRange();
+        if (range) {
+          const cutoff = range.latest - this._retentionMs;
+          await this.deleteVideoChunksBefore(cutoff);
+          await this.deleteFramesBefore(cutoff);
+          this._trimSegmentsBefore(cutoff);
+        }
+      }
+      if (this._evictThresholdPct >= 100) return;
       // withCount:false — the eviction gate only needs percentUsed, so skip the
       // full IDB _countFrames() the UI-facing getStorageInfo() does.
       const info = await this.getStorageInfo({ withCount: false });
@@ -655,8 +755,7 @@ export class ReplayStore {
   }
 
   private async _writeBatch(records: FrameRecord[]): Promise<void> {
-    const db = this._db;
-    if (!db) return;
+    const db = this._assertOpen();
     return new Promise((resolve, reject) => {
       const tx = db.transaction("frames", "readwrite");
       const store = tx.objectStore("frames");
@@ -664,7 +763,7 @@ export class ReplayStore {
         store.add({ t: record.t, channelId: record.channelId, payload: record.payload });
       }
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = tx.onabort = () => reject(tx.error);
     });
   }
 
