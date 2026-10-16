@@ -59,6 +59,10 @@ export class GlRenderer {
   // Lazily built line program + shared streaming VBO (dropped on context loss).
   private lineProgram: LineProgram | null = null;
   private lineVbo: WebGLBuffer | null = null;
+  private readonly retainedLines = new Map<
+    Float32Array,
+    { buffer: WebGLBuffer; revision: number }
+  >();
   private lineWidthRange: readonly [number, number] | null = null;
   // Label-sprite quad pipeline: program + static unit-quad VBO + texture LRU
   // keyed by sprite canvas identity (sprite rasters are immutable).
@@ -177,8 +181,17 @@ export class GlRenderer {
     color: Rgba,
     opacity: number,
     widthPx: number,
+    revision?: number,
   ): void {
-    const gl = this.setupLineDraw(vertices, count, transform, color, opacity, widthPx);
+    const gl = this.setupLineDraw(
+      vertices,
+      count,
+      transform,
+      color,
+      opacity,
+      widthPx,
+      revision,
+    );
     if (!gl) return;
     let segStart = 0;
     for (let i = 0; i <= breaks.length; i++) {
@@ -232,15 +245,36 @@ export class GlRenderer {
     color: Rgba,
     opacity: number,
     widthPx: number,
+    revision?: number,
   ): WebGLRenderingContext | null {
     if (this.lost || count < 2) return null;
     const gl = this.gl;
     const prog = this.ensureLineProgram();
     if (!prog) return null;
     gl.useProgram(prog.program);
-    if (!this.lineVbo) this.lineVbo = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.lineVbo);
-    gl.bufferData(gl.ARRAY_BUFFER, vertices.subarray(0, count * 2), gl.DYNAMIC_DRAW);
+    if (revision === undefined) {
+      if (!this.lineVbo) this.lineVbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.lineVbo);
+      gl.bufferData(gl.ARRAY_BUFFER, vertices.subarray(0, count * 2), gl.DYNAMIC_DRAW);
+    } else {
+      let cached = this.retainedLines.get(vertices);
+      if (!cached) {
+        const buffer = gl.createBuffer();
+        if (!buffer) return null;
+        if (this.retainedLines.size >= 32) {
+          const oldest = this.retainedLines.keys().next().value!;
+          gl.deleteBuffer(this.retainedLines.get(oldest)!.buffer);
+          this.retainedLines.delete(oldest);
+        }
+        cached = { buffer, revision: NaN };
+        this.retainedLines.set(vertices, cached);
+      }
+      gl.bindBuffer(gl.ARRAY_BUFFER, cached.buffer);
+      if (cached.revision !== revision) {
+        gl.bufferData(gl.ARRAY_BUFFER, vertices.subarray(0, count * 2), gl.DYNAMIC_DRAW);
+        cached.revision = revision;
+      }
+    }
     gl.enableVertexAttribArray(prog.aPos);
     gl.vertexAttribPointer(prog.aPos, 2, gl.FLOAT, false, 0, 0);
     gl.uniform2f(prog.uOrigin, transform[0]!, transform[1]!);
@@ -357,6 +391,7 @@ export class GlRenderer {
   private dropGpuCaches(): void {
     this.lineProgram = null;
     this.lineVbo = null;
+    this.retainedLines.clear();
     this.lineWidthRange = null;
     this.quadProgram = null;
     this.quadVbo = null;
@@ -374,6 +409,8 @@ export class GlRenderer {
     this.canvas.removeEventListener("webglcontextrestored", this.onRestoredEvt);
     if (this.lineProgram) this.gl.deleteProgram(this.lineProgram.program);
     if (this.lineVbo) this.gl.deleteBuffer(this.lineVbo);
+    for (const entry of this.retainedLines.values()) this.gl.deleteBuffer(entry.buffer);
+    this.retainedLines.clear();
     if (this.quadProgram) this.gl.deleteProgram(this.quadProgram.program);
     if (this.quadVbo) this.gl.deleteBuffer(this.quadVbo);
     for (const tex of this.spriteTextures.values()) this.gl.deleteTexture(tex);

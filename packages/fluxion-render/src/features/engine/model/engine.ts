@@ -1,11 +1,6 @@
-// AxisGridLayer is the ONE layer class engine.ts references directly (the
-// `isAxisGrid` instanceof guard), so it is always bundled — fine, axes are
-// universal. Every OTHER layer class is pulled in only by the registry
-// (register-default-layers), so a custom slim worker tree-shakes the unused ones.
-import { AxisGridLayer } from "../../../entities/axis-grid-layer";
 import { LayerStack } from "../../../entities/layer-stack";
 import { GlRenderer } from "../../../shared/gl/gl-renderer";
-import type { Layer } from "../../../shared/model/layer";
+import type { AxisLayer, Layer } from "../../../shared/model/layer";
 import { enqueueBounds, enqueueStats, enqueueTicks } from "../../../shared/model/outbox";
 import { Scheduler } from "../../../shared/model/scheduler";
 import { Viewport } from "../../../shared/model/viewport";
@@ -19,8 +14,8 @@ import { Op, SOLO_HOST_ID } from "../../../shared/protocol";
 import { createLayer } from "./layer-registry";
 
 /** Type guard hoisted to module scope so render() doesn't allocate it per frame. */
-function isAxisGrid(l: Layer): l is AxisGridLayer {
-  return l instanceof AxisGridLayer;
+function isAxisGrid(l: Layer): l is Layer & { axis: AxisLayer } {
+  return l.axis !== undefined;
 }
 
 /**
@@ -43,7 +38,7 @@ export class Engine {
   // Cached first AxisGridLayer of the stack (insertion order), refreshed on
   // layer add/remove/reset — render() and friends read it every frame and must
   // not re-scan the stack (or allocate a type-guard closure) per frame.
-  private axisLayer: AxisGridLayer | null = null;
+  private axisLayer: AxisLayer | null = null;
   // WebGL backend (renderer:"webgl"); null = 2d path. Falls back to 2d when
   // context creation fails so the chart always renders.
   private glr: GlRenderer | null = null;
@@ -240,7 +235,7 @@ export class Engine {
    */
   /** Re-resolve the cached first AxisGridLayer after any stack mutation. */
   private refreshAxisLayerRef(): void {
-    this.axisLayer = this.stack.findFirst(isAxisGrid) ?? null;
+    this.axisLayer = this.stack.findFirst(isAxisGrid)?.axis ?? null;
   }
 
   private reset(): void {
@@ -652,7 +647,11 @@ export class Engine {
   pushRaw(layerId: string, data: Float32Array): void {
     const layer = this.stack.get(layerId);
     if (!layer) return;
-    layer.setData(data.buffer as ArrayBuffer, data.length, this.viewport);
+    // Layer protocol uses a zero-offset view. Copy only sliced/shared views;
+    // the normal whole ArrayBuffer path remains allocation-free.
+    const view =
+      data.byteOffset === 0 && data.buffer instanceof ArrayBuffer ? data : data.slice();
+    layer.setData(view.buffer as ArrayBuffer, view.length, this.viewport);
     this.scheduler.markDirty();
   }
 

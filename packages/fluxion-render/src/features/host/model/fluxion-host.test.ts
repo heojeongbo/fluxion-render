@@ -1659,3 +1659,28 @@ describe("FluxionHost arity tracking", () => {
     host.dispose();
   });
 });
+
+it("transfers a single external axis and supports a canvas-only runtime without document", () => {
+  for (const axis of ["x", "y"]) {
+    const fake = makeFakeWorker();
+    const host = new FluxionHost(makeCanvas(), {
+      workerFactory: () => fake.worker,
+      ...(axis === "x" ? { xAxisElement: makeCanvas() } : { yAxisElement: makeCanvas() }),
+    });
+    const sent = fake.posts.find(
+      (p) => (p.msg as { op: number }).op === Op.SET_AXIS_CANVAS,
+    )!;
+    expect(sent.transfer).toHaveLength(1);
+    host.dispose();
+  }
+  const canvas = makeCanvas();
+  const fake = makeFakeWorker();
+  vi.stubGlobal("document", undefined);
+  try {
+    const host = new FluxionHost(canvas, { workerFactory: () => fake.worker });
+    expect(fake.posts.length).toBeGreaterThan(0);
+    host.dispose();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

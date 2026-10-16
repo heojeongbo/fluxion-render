@@ -91,11 +91,6 @@ export function useFluxionBrush(opts: UseFluxionBrushOptions): UseFluxionBrushRe
       dragRef.current = { startPx: e.clientX - rect.left, width: rect.width };
     };
 
-    const onMouseMove = (e: MouseEvent) => {
-      if (!dragRef.current) return;
-      // Visual feedback is handled by FluxionBrush component reading selection.
-    };
-
     const onMouseUp = (e: MouseEvent) => {
       if (!dragRef.current) return;
       const rect = svg.getBoundingClientRect();
@@ -119,11 +114,9 @@ export function useFluxionBrush(opts: UseFluxionBrushOptions): UseFluxionBrushRe
     };
 
     svg.addEventListener("mousedown", onMouseDown);
-    window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
     return () => {
       svg.removeEventListener("mousedown", onMouseDown);
-      window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     };
   }, [pxToTime, onSelect]);

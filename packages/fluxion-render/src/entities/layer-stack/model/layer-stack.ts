@@ -17,7 +17,7 @@ export class LayerStack {
     if (!layer) return;
     this.byId.delete(id);
     const i = this.layers.indexOf(layer);
-    if (i >= 0) this.layers.splice(i, 1);
+    this.layers.splice(i, 1);
     layer.dispose();
   }
 
@@ -46,12 +46,14 @@ export class LayerStack {
    * Pre-draw pass. Layers that implement `scan` update shared viewport state
    * (bounds, observed extents) here so downstream layers' `draw` sees the
    * correct values. Iterates in insertion order so axis-grid (added first)
-   * writes bounds before data layers read them.
+   * prepares bounds before data layers read them, regardless of insertion order.
    */
   scanAll(viewport: Viewport): void {
-    for (let i = 0; i < this.layers.length; i++) {
-      this.layers[i].scan?.(viewport);
-    }
+    // Explicit phases: time window → observed extents → final bounds.
+    // Data layers no longer depend on the axis being inserted first.
+    for (const layer of this.layers) layer.axis?.scan(viewport);
+    for (const layer of this.layers) if (!layer.axis) layer.scan?.(viewport);
+    for (const layer of this.layers) layer.axis?.finalizeBounds(viewport);
   }
 
   drawAll(ctx: OffscreenCanvasRenderingContext2D, viewport: Viewport): void {

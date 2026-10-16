@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import type { FluxionLayerSpec } from "../../../widgets/fluxion-canvas/lib/use-fluxion-canvas";
+import type { FluxionLayerSpec } from "../../../shared/model/layer-spec";
 import { type CachedLayerOptions, HoverDataCache } from "./hover-data-cache";
 
 export interface UseHoverDataCacheOptions {

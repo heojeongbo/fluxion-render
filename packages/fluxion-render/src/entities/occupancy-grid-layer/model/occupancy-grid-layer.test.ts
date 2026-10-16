@@ -136,3 +136,11 @@ describe("OccupancyGridLayer", () => {
     expect(() => layer.resize(makeViewport())).not.toThrow();
   });
 });
+
+it("accepts an incomplete grid header without publishing an invalid extent", () => {
+  const layer = new OccupancyGridLayer("grid"),
+    vp = new Viewport();
+  layer.setData(new Float32Array([1, 2]).buffer, 2, vp);
+  expect(vp.latestT).toBe(0);
+  layer.dispose();
+});

@@ -764,3 +764,12 @@ describe("FluxionPieChart — edge cases", () => {
     ).not.toThrow();
   });
 });
+
+it("ignores a mouse move before entering a slice", () => {
+  const { container } = render(
+    <FluxionPieChart data={[{ name: "A", value: 1 }]} animationDuration={0} />,
+  );
+  const slice = container.querySelector("path")!;
+  fireEvent.mouseMove(slice, { clientX: 10, clientY: 10 });
+  expect(container.querySelector("path")).toBe(slice);
+});

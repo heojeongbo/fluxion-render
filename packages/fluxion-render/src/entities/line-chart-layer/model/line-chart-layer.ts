@@ -120,6 +120,9 @@ export class LineChartLayer implements Layer {
   private opacity = 1;
   // Per-layer visible y-extent from the last scan() — used to normalize this
   // layer's lane band independently of the shared viewport. NaN until scanned.
+  private _glGeometryKey = "";
+  private _glVertexCount = 0;
+  private _glRevision = 0;
   private scannedYMin = Number.NaN;
   private scannedYMax = Number.NaN;
   private ring: RingBuffer;
@@ -132,6 +135,7 @@ export class LineChartLayer implements Layer {
   }
 
   setConfig(config: unknown): void {
+    this._glGeometryKey = "";
     const c = config as LineChartConfig;
     if (c.color !== undefined) this.color = c.color;
     if (c.lineWidth !== undefined) this.lineWidth = c.lineWidth;
@@ -178,15 +182,15 @@ export class LineChartLayer implements Layer {
     // replacing the per-frame full-ring scan. `rawMin`/`rawMax` are over samples
     // with t >= xMin; +/-Infinity when the window is empty. Adding the constant
     // `off0` after the min/max is bit-identical to adding it per sample.
-    const rawMin = this.ring.extentMin(xMin);
+    const rawMin = this.ring.extentMin(xMin, viewport.bounds.xMax);
     if (lane) {
       this.scannedYMin = rawMin;
-      this.scannedYMax = this.ring.extentMax(xMin);
+      this.scannedYMax = this.ring.extentMax(xMin, viewport.bounds.xMax);
     } else if (rawMin !== Number.POSITIVE_INFINITY) {
       // Non-empty window: widen the shared observed range (an empty window left
       // the old loop's min/max at the incoming observed values — a no-op).
       const lo = rawMin + off0;
-      const hi = this.ring.extentMax(xMin) + off0;
+      const hi = this.ring.extentMax(xMin, viewport.bounds.xMax) + off0;
       if (lo < viewport.observedYMin) viewport.observedYMin = lo;
       if (hi > viewport.observedYMax) viewport.observedYMax = hi;
     }
@@ -264,13 +268,20 @@ export class LineChartLayer implements Layer {
     if (!this._glVerts || this._glVerts.length !== this.ring.capacity * 2) {
       this._glVerts = new Float32Array(this.ring.capacity * 2);
     }
-    const n = buildLineVertices(
-      this.ring,
-      viewport.bounds.xMin,
-      this.maxGapMs,
-      this._glVerts,
-      this._glBreaks,
-    );
+    const geometryKey = `${this.ring.version}:${this.ring.capacity}:${viewport.bounds.xMin}:${viewport.bounds.xMax}:${this.maxGapMs}`;
+    if (this._glGeometryKey !== geometryKey) {
+      this._glGeometryKey = geometryKey;
+      this._glVertexCount = buildLineVertices(
+        this.ring,
+        viewport.bounds.xMin,
+        this.maxGapMs,
+        this._glVerts,
+        this._glBreaks,
+        viewport.bounds.xMax,
+      );
+      this._glRevision++;
+    }
+    const n = this._glVertexCount;
     if (n < 2) return;
     if (this.laneActive()) {
       // Same band math as yToBandPx, expressed as an affine for the shader.
@@ -299,6 +310,7 @@ export class LineChartLayer implements Layer {
       rgba,
       this.opacity,
       this.lineWidth * viewport.dpr,
+      this._glRevision,
     );
   }
 

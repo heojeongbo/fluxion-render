@@ -399,3 +399,8 @@ describe("spriteFor / labelBlitPos (GL texture path)", () => {
     }
   });
 });
+
+it("normalizes nonpositive sprite DPR", () => {
+  const sprite = spriteFor("fallback DPR", { ...BASE, dpr: 0 });
+  expect(sprite).not.toBeNull();
+});

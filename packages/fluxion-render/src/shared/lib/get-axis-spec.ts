@@ -1,4 +1,4 @@
-import type { FluxionLayerSpec } from "../../widgets/fluxion-canvas/lib/use-fluxion-canvas";
+import type { FluxionLayerSpec } from "../model/layer-spec";
 
 /**
  * Find the axis-grid layer spec with the given id. Shared by `useAxisTicks` and

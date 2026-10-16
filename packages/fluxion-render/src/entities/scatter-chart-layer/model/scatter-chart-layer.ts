@@ -89,9 +89,9 @@ export class ScatterChartLayer implements Layer {
     // Sliding-window y-extent in O(log n) (monotonic deques in the ring),
     // replacing the per-frame full-ring scan. +Infinity when no sample is in the
     // window — leave the observed range untouched, matching the old loop.
-    const rawMin = this.ring.extentMin(xMin);
+    const rawMin = this.ring.extentMin(xMin, viewport.bounds.xMax);
     if (rawMin !== Number.POSITIVE_INFINITY) {
-      const rawMax = this.ring.extentMax(xMin);
+      const rawMax = this.ring.extentMax(xMin, viewport.bounds.xMax);
       if (rawMin < viewport.observedYMin) viewport.observedYMin = rawMin;
       if (rawMax > viewport.observedYMax) viewport.observedYMax = rawMax;
     }

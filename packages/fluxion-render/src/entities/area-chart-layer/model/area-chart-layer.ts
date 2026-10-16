@@ -114,13 +114,13 @@ export class AreaChartLayer implements Layer {
     const off0 = lane ? 0 : this.yOffset; // lanes normalize per-layer
     // Sliding-window y-extent in O(log n); see LineChartLayer.scan for the
     // bit-exactness rationale (constant off0 added after the min/max).
-    const rawMin = this.ring.extentMin(xMin);
+    const rawMin = this.ring.extentMin(xMin, viewport.bounds.xMax);
     if (lane) {
       this.scannedYMin = rawMin;
-      this.scannedYMax = this.ring.extentMax(xMin);
+      this.scannedYMax = this.ring.extentMax(xMin, viewport.bounds.xMax);
     } else if (rawMin !== Number.POSITIVE_INFINITY) {
       const lo = rawMin + off0;
-      const hi = this.ring.extentMax(xMin) + off0;
+      const hi = this.ring.extentMax(xMin, viewport.bounds.xMax) + off0;
       if (lo < viewport.observedYMin) viewport.observedYMin = lo;
       if (hi > viewport.observedYMax) viewport.observedYMax = hi;
     }
@@ -291,10 +291,9 @@ export class AreaChartLayer implements Layer {
         prevPx = colPx;
       },
       onGapBreak: () => {
-        if (inSeg) {
-          closeSeg();
-          inSeg = false;
-        }
+        // forEachColumn emits the preceding column before each gap.
+        closeSeg();
+        inSeg = false;
       },
     });
     if (inSeg) closeSeg();

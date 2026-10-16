@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useDisposableResource } from "@heojeongbo/fluxion-worker/react";
+import { useRef } from "react";
 
 import {
   createHostRecyclePool,
@@ -13,9 +14,7 @@ import {
  * recycled instead of re-created — the big CPU win for virtualized lists,
  * accordions, and grids that remount.
  *
- * Mirrors {@link useFluxionWorkerPool}: `useState` so a StrictMode double-invoke
- * recreates the pool and re-renders children with the live one before they
- * acquire. Charts sharing a recycle pool must use compatible host options
+ * Disposal is deferred one microtask so StrictMode effect replay keeps a live pool. Charts sharing a recycle pool must use compatible host options
  * (same worker pool, axis-canvas presence, etc.) — see `keyFor`; mismatches
  * simply fall back to a cold create.
  *
@@ -25,17 +24,5 @@ import {
  */
 export function useHostRecyclePool(opts: HostRecyclePoolOptions = {}): HostRecyclePool {
   const optsRef = useRef(opts);
-  const [pool, setPool] = useState(() => createHostRecyclePool(optsRef.current));
-
-  useEffect(() => {
-    const current = pool;
-    return () => {
-      current.dispose();
-      // Recreate immediately so the next render delivers a live pool to children
-      // before they attempt acquire() (StrictMode-safe, mirrors the worker pool).
-      setPool(createHostRecyclePool(optsRef.current));
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return pool;
+  return useDisposableResource(() => createHostRecyclePool(optsRef.current));
 }

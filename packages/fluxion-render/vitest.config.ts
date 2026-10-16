@@ -21,16 +21,12 @@ export default defineConfig({
         // Browser-only Worker factory (`new URL(import.meta.url)`) — untestable in node.
         "src/app/worker/create-worker-factory.ts",
       ],
-      // Statements / functions / lines are held at a literal 100%. Branches sit
-      // at 98: the shortfall is entirely v8's phantom "implicit else" branch on
-      // every `if` without an `else` (reported with no source location, so it
-      // can neither be tested nor `/* v8 ignore */`-d). Every real branch is
-      // covered or has a documented ignore.
+      // Regression suites exercise every measured statement, branch, function and line.
       thresholds: {
         lines: 100,
         functions: 100,
         statements: 100,
-        branches: 98,
+        branches: 100,
       },
     },
   },

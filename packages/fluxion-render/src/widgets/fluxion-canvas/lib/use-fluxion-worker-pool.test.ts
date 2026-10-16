@@ -1,98 +1,35 @@
-import { renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-const mockDispose = vi.fn();
-const mockAcquire = vi.fn();
-
-vi.mock("../../../features/worker-pool", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../../features/worker-pool")>();
-  class MockFluxionWorkerPool {
-    dispose = mockDispose;
-    acquire = mockAcquire;
-  }
-  return { ...actual, FluxionWorkerPool: MockFluxionWorkerPool };
-});
-
+import { act, cleanup, renderHook } from "@testing-library/react";
+import { StrictMode } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { FluxionWorkerPool } from "../../../features/worker-pool";
 import { useFluxionWorkerPool } from "./use-fluxion-worker-pool";
 
-function makeOpts() {
-  return {
-    size: 2,
-    workerFactory: vi.fn() as unknown as () => Worker,
-  };
-}
-
-const PoolSpy = vi.spyOn({ FluxionWorkerPool }, "FluxionWorkerPool");
-
+afterEach(cleanup);
 describe("useFluxionWorkerPool", () => {
-  beforeEach(() => {
-    mockDispose.mockClear();
-    mockAcquire.mockClear();
-  });
-
-  afterEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("creates a FluxionWorkerPool instance on mount", () => {
-    const opts = makeOpts();
-    const { result } = renderHook(() => useFluxionWorkerPool(opts));
-    expect(result.current).toBeInstanceOf(FluxionWorkerPool);
-  });
-
-  it("disposes the pool on unmount", () => {
-    const opts = makeOpts();
-    const { result, unmount } = renderHook(() => useFluxionWorkerPool(opts));
-    const pool = result.current;
-    unmount();
-    expect(pool.dispose).toHaveBeenCalledTimes(1);
-  });
-
-  it("returns the same pool instance across re-renders", () => {
-    const opts = makeOpts();
-    const { result, rerender } = renderHook(() => useFluxionWorkerPool(opts));
-    const first = result.current;
-    rerender();
-    const second = result.current;
-    expect(first).toBe(second);
-  });
-
-  it("does not create a new pool on multiple re-renders", () => {
-    const opts = makeOpts();
-    const { result, rerender } = renderHook(() => useFluxionWorkerPool(opts));
-    const first = result.current;
-    rerender();
-    rerender();
-    rerender();
-    expect(result.current).toBe(first);
-  });
-
-  it("pool is not disposed until unmount", () => {
-    const opts = makeOpts();
-    const { result, rerender } = renderHook(() => useFluxionWorkerPool(opts));
-    rerender();
-    rerender();
-    expect(result.current.dispose).not.toHaveBeenCalled();
-  });
-
-  it("returns a new pool after unmount (StrictMode double-invoke safe)", () => {
-    const opts = makeOpts();
-    const { result, unmount } = renderHook(() => useFluxionWorkerPool(opts));
-    const first = result.current;
-    unmount();
-    // After unmount, the hook calls setPool(new Pool), so a fresh instance exists
-    // Even though the hook is unmounted, the new pool should not be the disposed one
-    expect(first.dispose).toHaveBeenCalledTimes(1);
-  });
-
-  it("fresh pool returned after cleanup is not the same instance as the disposed one", () => {
-    const opts = makeOpts();
-    const { result, unmount, rerender } = renderHook(() => useFluxionWorkerPool(opts));
-    const first = result.current;
-    unmount();
-    // After unmount setPool fires — re-render to pick up new state
-    // (in real React the parent would re-render; here we just verify dispose was called once)
-    expect(first.dispose).toHaveBeenCalledTimes(1);
-  });
+  for (const strict of [false, true]) {
+    it(`keeps a live stable pool and releases all workers (StrictMode=${strict})`, async () => {
+      const workers: { terminate: ReturnType<typeof vi.fn> }[] = [];
+      const workerFactory = () => {
+        const w = { terminate: vi.fn(), addEventListener() {}, removeEventListener() {} };
+        workers.push(w);
+        return w as unknown as Worker;
+      };
+      const hook = renderHook(() => useFluxionWorkerPool({ size: 2, workerFactory }), {
+        wrapper: strict ? StrictMode : undefined,
+      });
+      const pool = hook.result.current;
+      expect(pool).toBeInstanceOf(FluxionWorkerPool);
+      expect(pool.isDisposed).toBe(false);
+      expect(workers).toHaveLength(2);
+      hook.rerender();
+      expect(hook.result.current).toBe(pool);
+      const handle = pool.acquire();
+      handle.dispose();
+      await act(async () => {
+        hook.unmount();
+      });
+      expect(pool.isDisposed).toBe(true);
+      expect(workers.every((w) => w.terminate.mock.calls.length === 1)).toBe(true);
+    });
+  }
 });

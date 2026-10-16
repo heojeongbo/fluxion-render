@@ -335,3 +335,20 @@ describe("HeatmapStreamLayer", () => {
     expect(() => layer.draw(ctx, vp)).not.toThrow();
   });
 });
+
+it("keeps extrema correct for descending bins and reuses row scratch until bin count changes", () => {
+  const layer = new HeatmapStreamLayer("heat"),
+    vp = makeViewport(),
+    ctx = makeCtx();
+  layer.setConfig({ yBins: 3 });
+  const a = makeColumn(0, 3, 2, 1);
+  layer.setData(a.buffer, a.length, vp);
+  layer.draw(ctx, vp);
+  layer.draw(ctx, vp);
+  layer.setConfig({ yBins: 2 });
+  const b = makeColumn(1, 4, 1);
+  layer.setData(b.buffer, b.length, vp);
+  layer.draw(ctx, vp);
+  expect(ctx.fillRect).toHaveBeenCalled();
+  layer.dispose();
+});

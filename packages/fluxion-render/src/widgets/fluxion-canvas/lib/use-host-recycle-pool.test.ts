@@ -13,7 +13,7 @@ describe("useHostRecyclePool", () => {
     resetLifecycleScheduler(); // pool teardown defers through the lifecycle queue
   });
 
-  it("returns a stable pool across re-renders and disposes it on unmount", () => {
+  it("returns a stable pool across re-renders and disposes it on unmount", async () => {
     const { result, rerender, unmount } = renderHook(() =>
       useHostRecyclePool({ max: 4 }),
     );
@@ -22,6 +22,7 @@ describe("useHostRecyclePool", () => {
     rerender();
     expect(result.current).toBe(pool); // stable across renders
     unmount();
+    await Promise.resolve();
     expect(pool.isDisposed).toBe(true); // disposed on unmount
   });
 
@@ -37,7 +38,7 @@ describe("useHostRecyclePool", () => {
     });
   });
 
-  it("unmount defers parked-host teardown through the lifecycle queue", () => {
+  it("unmount defers parked-host teardown through the lifecycle queue", async () => {
     const { result, unmount } = renderHook(() => useHostRecyclePool());
     const pool = result.current;
     const dispose = vi.fn();
@@ -46,7 +47,8 @@ describe("useHostRecyclePool", () => {
       canvas: {} as HTMLCanvasElement,
       key: pool.keyFor({ hasXAxis: false, hasYAxis: false }),
     });
-    unmount(); // disposes the pool in the cleanup…
+    unmount();
+    await Promise.resolve(); // disposes the pool in the cleanup…
     expect(pool.isDisposed).toBe(true);
     expect(dispose).not.toHaveBeenCalled(); // …but teardown drains on a later frame
     flushLifecycleScheduler(); // module-global queue survives the unmount

@@ -557,3 +557,11 @@ describe("createHostRecyclePool", () => {
     expect(b1.host.dispose).toHaveBeenCalledTimes(1);
   });
 });
+
+it("keeps immediate and coalesced hosts in separate recycle buckets", () => {
+  const pool = createHostRecyclePool();
+  expect(
+    pool.keyFor({ hasXAxis: false, hasYAxis: false, hostOptions: { coalesce: false } }),
+  ).not.toBe(pool.keyFor({ hasXAxis: false, hasYAxis: false }));
+  pool.dispose();
+});

@@ -28,12 +28,14 @@ export function buildLineVertices(
   maxGapMs: number | undefined,
   out: Float32Array,
   breaks: number[],
+  xMax = Infinity,
 ): number {
   breaks.length = 0;
   const { data, capacity, stride, start, length } = ring;
   let n = 0;
   let prevT = Number.NaN;
-  for (let i = 0; i < length; i++) {
+  const end = Math.min(length, ring.timeIndex(xMax, true) + 1);
+  for (let i = ring.timeIndex(xMin); i < end; i++) {
     const off = ((start + i) % capacity) * stride;
     const t = data[off]!;
     if (t < xMin) continue;

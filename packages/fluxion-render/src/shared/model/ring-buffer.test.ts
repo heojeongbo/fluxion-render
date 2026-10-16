@@ -152,3 +152,34 @@ describe("RingBuffer sliding-window extent", () => {
     }
   });
 });
+
+describe("bounded time queries", () => {
+  it("excludes future samples, supports reverse seeks, and scans only the visible tail", () => {
+    const ring = new RingBuffer(10000, 2);
+    ring.enableExtent();
+    for (let t = 0; t < 10000; t++) ring.push([t, t]);
+    expect(ring.extentMin(20, 30)).toBe(20);
+    expect(ring.extentMax(20, 30)).toBe(30);
+    expect(ring.extentMin(0, 10)).toBe(0);
+    expect(ring.extentMax(0, 10)).toBe(10);
+    let visited = 0;
+    ring.forEachRange(9990, 9999, () => {
+      visited++;
+    });
+    expect(visited).toBe(10);
+    ring.push([10000, -3]);
+    expect(ring.extentMin(9990, 10000)).toBe(-3);
+  });
+  it("falls back correctly for unordered input and resets ordering on clear", () => {
+    const ring = new RingBuffer(4, 2);
+    ring.enableExtent();
+    ring.push([10, 2]);
+    ring.push([0, 1]);
+    ring.push([20, 999]);
+    expect(ring.extentMin(0, 10)).toBe(1);
+    expect(ring.extentMax(0, 10)).toBe(2);
+    ring.clear();
+    ring.push([1, 5]);
+    expect(ring.extentMax(0, 1)).toBe(5);
+  });
+});

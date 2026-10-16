@@ -311,3 +311,14 @@ describe("multiple independent layers", () => {
     expect(c.findNearest("b", 1, 0)).toEqual({ t: 2, y: 20 });
   });
 });
+
+it("keeps the newest cross-layer time after overwrite and ignores clearing missing layers", () => {
+  const cache = new HoverDataCache();
+  cache.registerLayer("a", { capacity: 2 });
+  cache.registerLayer("b");
+  cache.pushBatch("a", new Float32Array([0, 0, 2, 2, 4, 4]));
+  cache.push("b", 1, 1);
+  cache.clear("missing");
+  expect(cache.getLatestT()).toBe(4);
+  expect(cache.findNearest("a", 0, 0)?.t).toBe(2);
+});

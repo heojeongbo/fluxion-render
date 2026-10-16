@@ -5,7 +5,6 @@ import {
   getFluxionDefaults,
   type HostBundle,
   type HostRecyclePool,
-  type LayerConfigByKind,
 } from "../../../features/host";
 import { useFluxionThemeValueOrNull } from "../../../features/theme";
 import { currentDpr } from "../../../shared/lib/current-dpr";
@@ -17,20 +16,10 @@ import {
 } from "../../../shared/lib/lifecycle-scheduler";
 import { mergeAxisStyle } from "../../../shared/lib/merge-axis-style";
 import { observeOnScreen } from "../../../shared/lib/onscreen-observer";
-import type { LayerKind } from "../../../shared/protocol";
+import type { FluxionLayerSpec } from "../../../shared/model/layer-spec";
 import { type ResizeInfo, useResizeObserver } from "./use-resize-observer";
 
-/**
- * Declarative layer spec used by `useFluxionCanvas` and `<FluxionCanvas/>`: an
- * `id` + `kind` + the config typed to that kind, so wrong fields are caught at
- * compile time. Derived from {@link LayerConfigByKind} (the single kind→config
- * source of truth), so it stays in lockstep with the imperative
- * `host.addLayer<K>` — add a layer kind once, in the map, and both APIs pick it
- * up.
- */
-export type FluxionLayerSpec = {
-  [K in LayerKind]: { id: string; kind: K; config?: LayerConfigByKind[K] };
-}[LayerKind];
+export type { FluxionLayerSpec } from "../../../shared/model/layer-spec";
 
 export interface UseFluxionCanvasOptions {
   layers: FluxionLayerSpec[];

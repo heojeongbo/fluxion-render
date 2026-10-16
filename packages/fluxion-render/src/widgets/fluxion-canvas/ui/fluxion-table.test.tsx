@@ -341,3 +341,21 @@ describe("FluxionTable", () => {
     });
   });
 });
+
+it("toggles descending back to ascending and supports a styled virtual root", () => {
+  const columns = [{ key: "id" as const, header: "ID", sortable: true }];
+  const { container } = render(
+    <FluxionTable
+      columns={columns}
+      rows={ROWS}
+      classNames={{ root: "custom-root" }}
+      virtual={{ height: 100, rowHeight: 20 }}
+    />,
+  );
+  const header = container.querySelector("th")!;
+  fireEvent.click(header);
+  fireEvent.click(header);
+  fireEvent.click(header);
+  expect(container.querySelector("tbody tr")?.textContent).toContain("a");
+  expect((container.firstChild as HTMLElement).style.height).toBe("100px");
+});

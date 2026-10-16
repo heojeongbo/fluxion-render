@@ -180,3 +180,25 @@ describe("StackedAreaLayer", () => {
     expect(() => new StackedAreaLayer("sa").resize(makeViewport())).not.toThrow();
   });
 });
+
+it("reuses drawing scratch and preserves a wider observed range after repeated configuration", () => {
+  const layer = new StackedAreaLayer("stack"),
+    vp = makeViewport();
+  layer.setConfig({ seriesCount: 2, capacity: 8 });
+  layer.setConfig({ capacity: 8 });
+  layer.setData(
+    samples([
+      [0, 1, 2],
+      [1, 2, 3],
+    ]),
+    6,
+    vp,
+  );
+  vp.observedYMin = -10;
+  vp.observedYMax = 10;
+  layer.scan(vp);
+  expect(vp.observedYMin).toBe(-10);
+  expect(draw(layer, vp).calls.length).toBeGreaterThan(0);
+  expect(draw(layer, vp).calls.length).toBeGreaterThan(0);
+  layer.dispose();
+});

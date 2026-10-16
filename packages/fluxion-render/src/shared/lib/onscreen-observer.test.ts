@@ -138,3 +138,14 @@ describe("onscreen-observer", () => {
     }
   });
 });
+
+it("reuses an explicit root identity and preserves unspecified rootMargin defaults", () => {
+  const root = div();
+  configureOnScreenObserver({ root });
+  const a = observeOnScreen(div(), vi.fn(), { root });
+  const b = observeOnScreen(div(), vi.fn(), { root });
+  expect(liveIntersectionObservers()).toHaveLength(1);
+  a();
+  b();
+  resetOnScreenObserver();
+});

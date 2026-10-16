@@ -162,6 +162,7 @@ export interface AxisGridConfig {
  * so a second `AxisGridLayer` in the same stack would bleed observations.
  */
 export class AxisGridLayer implements Layer {
+  readonly axis = this;
   readonly id: string;
   private gridColor = "rgba(255,255,255,0.08)";
   private gridLineWidth = 1;

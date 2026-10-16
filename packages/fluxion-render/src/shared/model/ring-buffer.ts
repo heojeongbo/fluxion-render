@@ -22,6 +22,70 @@ export class RingBuffer {
   private extent: WindowExtent | null = null;
   private extentCol = 1;
   private totalPushed = 0;
+  private ordered = true;
+  private lastT = -Infinity;
+  private revision = 0;
+  private rangeCache = {
+    revision: -1,
+    xMin: NaN,
+    xMax: NaN,
+    min: Infinity,
+    max: -Infinity,
+  };
+
+  /** Changes whenever data is added or cleared; useful for derived-data caches. */
+  get version(): number {
+    return this.revision;
+  }
+
+  /** First chronological index >= t (or > t for upper). Unordered data falls back to a full scan. */
+  timeIndex(t: number, upper = false): number {
+    if (!this.ordered) return upper ? this.count : 0;
+    let lo = 0,
+      hi = this.count;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      const value = this.data[((this.start + mid) % this.capacity) * this.stride]!;
+      if (upper ? value <= t : value < t) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  /** Iterate a time window without walking old retained history. */
+  forEachRange(
+    xMin: number,
+    xMax: number,
+    fn: (data: Float32Array, offset: number, index: number) => void,
+    rightNeighbor = false,
+  ): void {
+    const from = this.timeIndex(xMin);
+    const end = Math.min(
+      this.count,
+      this.timeIndex(xMax, true) + (rightNeighbor ? 1 : 0),
+    );
+    for (let i = from; i < end; i++) {
+      const off = ((this.start + i) % this.capacity) * this.stride;
+      const t = this.data[off]!;
+      if (this.ordered || (t >= xMin && t <= xMax)) fn(this.data, off, i);
+    }
+  }
+
+  private queryRange(xMin: number, xMax: number): typeof this.rangeCache {
+    const c = this.rangeCache;
+    if (c.revision === this.revision && c.xMin === xMin && c.xMax === xMax) return c;
+    c.revision = this.revision;
+    c.xMin = xMin;
+    c.xMax = xMax;
+    c.min = Infinity;
+    c.max = -Infinity;
+    this.forEachRange(xMin, xMax, (data, off) => {
+      const value = data[off + this.extentCol]!;
+      if (value < c.min) c.min = value;
+      if (value > c.max) c.max = value;
+    });
+    return c;
+  }
 
   constructor(capacity: number, stride: number) {
     this.capacity = capacity;
@@ -52,6 +116,10 @@ export class RingBuffer {
   }
 
   private feedExtent(base: number): void {
+    const t = this.data[base]!;
+    if (!Number.isFinite(t) || t < this.lastT) this.ordered = false;
+    this.lastT = t;
+    this.revision++;
     const ext = this.extent;
     if (!ext) return;
     const seq = this.totalPushed;
@@ -116,15 +184,17 @@ export class RingBuffer {
    * is >= `xMin`. `+Infinity` when none (or extent tracking is off).
    * Requires {@link enableExtent}.
    */
-  extentMin(xMin: number): number {
+  extentMin(xMin: number, xMax = Infinity): number {
     if (!this.extent) return Number.POSITIVE_INFINITY;
+    if (!this.ordered || xMax < this.lastT) return this.queryRange(xMin, xMax).min;
     const minSeq = this.totalPushed - this.capacity;
     return this.extent.queryMin(minSeq > 0 ? minSeq : 0, xMin);
   }
 
   /** Max counterpart of {@link extentMin}; `-Infinity` when none. */
-  extentMax(xMin: number): number {
+  extentMax(xMin: number, xMax = Infinity): number {
     if (!this.extent) return Number.NEGATIVE_INFINITY;
+    if (!this.ordered || xMax < this.lastT) return this.queryRange(xMin, xMax).max;
     const minSeq = this.totalPushed - this.capacity;
     return this.extent.queryMax(minSeq > 0 ? minSeq : 0, xMin);
   }
@@ -137,6 +207,9 @@ export class RingBuffer {
   }
 
   clear(): void {
+    this.ordered = true;
+    this.lastT = -Infinity;
+    this.revision++;
     this.head = 0;
     this.count = 0;
     this.totalPushed = 0;

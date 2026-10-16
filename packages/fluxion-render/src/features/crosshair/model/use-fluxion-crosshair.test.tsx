@@ -660,3 +660,27 @@ describe("throttleMs", () => {
     expect(last.position).toEqual({ pxX: 80, pxY: 40 });
   });
 });
+
+it("handles zero-width plot and missing time-window configuration", () => {
+  const mock = makeMockHost();
+  const cache = makeCache();
+  cache.push("a", 1, 2);
+  const state = vi.fn();
+  const view = render(
+    <Harness
+      host={mock.host}
+      cache={cache}
+      xMode="time"
+      insetLeft={200}
+      onState={state}
+    />,
+  );
+  const element = view.container.firstElementChild!;
+  stubRect(element);
+  act(() => {
+    mock.fireBounds(0, 10, 10);
+  });
+  firePointerMove(element as HTMLElement, 200, 10);
+  expect(state).toHaveBeenCalled();
+  view.unmount();
+});

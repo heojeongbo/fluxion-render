@@ -1,4 +1,5 @@
 import type { GlRenderer } from "../gl/gl-renderer";
+import type { AxisStyle } from "../protocol";
 import type { Viewport } from "./viewport";
 
 /**
@@ -10,7 +11,7 @@ import type { Viewport } from "./viewport";
  *   1. `viewport.beginScan()` — reset per-frame aggregates
  *   2. `scan(viewport)` — OPTIONAL pre-draw phase. Layers use this to update
  *      shared viewport state (bounds, observed y extents) before anyone reads
- *      it in draw. Called in stack insertion order.
+ *      it in draw. Axis preparation precedes data scans; axis finalization follows.
  *   3. `draw(ctx, viewport)` — actual rendering. Reads bounds written during
  *      scan. Called in stack insertion order.
  *
@@ -20,12 +21,14 @@ import type { Viewport } from "./viewport";
  */
 export interface Layer {
   readonly id: string;
+  /** Optional viewport/axis capability; independent of the concrete layer class. */
+  readonly axis?: AxisLayer;
   setConfig(config: unknown): void;
   setData(buffer: ArrayBuffer, length: number, viewport: Viewport): void;
   resize(viewport: Viewport): void;
   /**
-   * Optional pre-draw hook. Runs for every layer (in insertion order) before
-   * any layer's `draw`. Use this to write into `viewport` state that other
+   * Optional pre-draw hook. Non-axis layers run in insertion order between
+   * axis preparation and finalization, before any layer's `draw`. Use this to write into `viewport` state that other
    * layers will consume in their draw.
    */
   scan?(viewport: Viewport): void;
@@ -45,4 +48,39 @@ export interface Layer {
   /** Request continuous frames while an animation is active; checked after config changes. */
   needsContinuousRender?(): boolean;
   dispose(): void;
+}
+
+/** Axis capability consumed by the frame pipeline, not a concrete renderer. */
+export interface AxisLayer {
+  scan(viewport: Viewport): void;
+  finalizeBounds(viewport: Viewport): void;
+  isFollowingClock(): boolean;
+  resetClockAnchor(): void;
+  getXTickIntervalMs(): number | undefined;
+  computeTicksForExport(): {
+    xTicks: { value: number; label: string; fraction: number }[];
+    yTicks: { value: number; label: string; fraction: number }[];
+    xRawValues: number[];
+  };
+  drawInlineAxes(
+    ctx: OffscreenCanvasRenderingContext2D,
+    viewport: Viewport,
+    style: AxisStyle,
+  ): void;
+  drawInlineAxesGl(gl: GlRenderer, viewport: Viewport, style: AxisStyle): void;
+  drawXAxis(
+    ctx: OffscreenCanvasRenderingContext2D,
+    width: number,
+    height: number,
+    style: AxisStyle,
+    dpr?: number,
+  ): void;
+  drawYAxis(
+    ctx: OffscreenCanvasRenderingContext2D,
+    width: number,
+    height: number,
+    style: AxisStyle,
+    yPadPx?: number,
+    dpr?: number,
+  ): void;
 }

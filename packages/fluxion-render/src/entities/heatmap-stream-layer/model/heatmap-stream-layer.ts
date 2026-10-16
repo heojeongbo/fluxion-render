@@ -48,6 +48,8 @@ export class HeatmapStreamLayer implements Layer {
 
   // Ring buffer of columns: circular array of Float32Array(yBins) + timestamp Float32Array.
   private colData: Float32Array; // flat [col0_v0..v_{yBins-1}, col1_v0..., ...]
+  private colMin: Float32Array;
+  private colMax: Float32Array;
   private colTs: Float32Array; // timestamps per column
   private head = 0;
   private count = 0;
@@ -63,11 +65,15 @@ export class HeatmapStreamLayer implements Layer {
     this.id = id;
     this.colData = new Float32Array(this.maxCols * this.yBins);
     this.colTs = new Float32Array(this.maxCols);
+    this.colMin = new Float32Array(this.maxCols);
+    this.colMax = new Float32Array(this.maxCols);
   }
 
   private allocBuffers(): void {
     this.colData = new Float32Array(this.maxCols * this.yBins);
     this.colTs = new Float32Array(this.maxCols);
+    this.colMin = new Float32Array(this.maxCols);
+    this.colMax = new Float32Array(this.maxCols);
     this.head = 0;
     this.count = 0;
     this.autoMin = Number.POSITIVE_INFINITY;
@@ -76,18 +82,13 @@ export class HeatmapStreamLayer implements Layer {
 
   /** Rescan the retained columns for the auto value-range (min/max). */
   private recomputeAuto(): void {
-    const bins = this.yBins;
     let mn = Number.POSITIVE_INFINITY;
     let mx = Number.NEGATIVE_INFINITY;
     const start = this.count < this.maxCols ? 0 : this.head;
     for (let i = 0; i < this.count; i++) {
       const slot = (start + i) % this.maxCols;
-      const base = slot * bins;
-      for (let b = 0; b < bins; b++) {
-        const v = this.colData[base + b]!;
-        if (v < mn) mn = v;
-        if (v > mx) mx = v;
-      }
+      if (this.colMin[slot]! < mn) mn = this.colMin[slot]!;
+      if (this.colMax[slot]! > mx) mx = this.colMax[slot]!;
     }
     this.autoMin = mn;
     this.autoMax = mx;
@@ -136,6 +137,17 @@ export class HeatmapStreamLayer implements Layer {
     for (let i = 0; i < bins; i++) {
       this.colData[base + i] = arr[i + 1]!;
     }
+    let min = Infinity,
+      max = -Infinity;
+    // Include retained values in a partially supplied column, preserving the
+    // existing partial-column semantics and Float32 rounding.
+    for (let i = 0; i < this.yBins; i++) {
+      const value = this.colData[base + i]!;
+      if (value < min) min = value;
+      if (value > max) max = value;
+    }
+    this.colMin[slot] = min;
+    this.colMax[slot] = max;
     this.head = (this.head + 1) % this.maxCols;
     if (this.count < this.maxCols) this.count++;
 
@@ -213,6 +225,8 @@ export class HeatmapStreamLayer implements Layer {
 
   dispose(): void {
     this.colData = new Float32Array(0);
+    this.colMin = new Float32Array(0);
+    this.colMax = new Float32Array(0);
     this.colTs = new Float32Array(0);
     this.count = 0;
   }

@@ -2166,3 +2166,15 @@ describe("current-time animation", () => {
     engine.dispatch({ op: Op.DISPOSE });
   });
 });
+
+it("supports a y-only external axis and a partial axis style", () => {
+  const engine = new Engine();
+  engine.dispatch({ op: Op.SET_AXIS_STYLE, font: "12px sans-serif" });
+  engine.dispatch({
+    op: Op.SET_AXIS_CANVAS,
+    yAxisCanvas: newCanvas(),
+    xAxisHeight: 30,
+    yAxisWidth: 60,
+  });
+  expect(() => engine.dispatch({ op: Op.DISPOSE })).not.toThrow();
+});

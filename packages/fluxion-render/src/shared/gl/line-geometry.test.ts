@@ -133,3 +133,14 @@ describe("RingBuffer.start", () => {
     expect(viaStart).toEqual(viaForEach);
   });
 });
+
+it("filters out-of-order old timestamps without dropping valid later samples", () => {
+  const ring = new RingBuffer(4, 2);
+  ring.push([10, 1]);
+  ring.push([0, 2]);
+  ring.push([20, 3]);
+  const out = new Float32Array(8);
+  const count = buildLineVertices(ring, 5, undefined, out, []);
+  expect(count).toBe(2);
+  expect([...out.subarray(0, 4)]).toEqual([5, 1, 15, 3]);
+});

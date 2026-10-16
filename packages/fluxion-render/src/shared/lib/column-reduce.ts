@@ -51,36 +51,40 @@ export function forEachColumn(
   let lastY = 0;
   let prevT = Number.NaN;
 
-  ring.forEach((data, off) => {
-    const t = data[off]!;
-    if (t < xMin) return;
-    const y = data[off + 1]!;
+  ring.forEachRange(
+    xMin,
+    viewport.bounds.xMax,
+    (data, off) => {
+      const t = data[off]!;
+      const y = data[off + 1]!;
 
-    // Gap: close the pre-gap column, then signal a subpath break so the next
-    // emitted column starts fresh. Resetting curCol makes the column-change
-    // branch below start a new column without a duplicate flush. curCol is
-    // always set here — reaching this branch requires a prior in-window sample
-    // (prevT non-NaN), which necessarily assigned curCol below.
-    if (gap !== undefined && !Number.isNaN(prevT) && t - prevT > gap) {
-      sink.onColumn(curCol, firstY, minY, maxY, lastY);
-      curCol = Number.NaN;
-      sink.onGapBreak?.();
-    }
+      // Gap: close the pre-gap column, then signal a subpath break so the next
+      // emitted column starts fresh. Resetting curCol makes the column-change
+      // branch below start a new column without a duplicate flush. curCol is
+      // always set here — reaching this branch requires a prior in-window sample
+      // (prevT non-NaN), which necessarily assigned curCol below.
+      if (gap !== undefined && !Number.isNaN(prevT) && t - prevT > gap) {
+        sink.onColumn(curCol, firstY, minY, maxY, lastY);
+        curCol = Number.NaN;
+        sink.onGapBreak?.();
+      }
 
-    const col = Math.floor(viewport.xToPx(t));
-    if (col !== curCol) {
-      if (!Number.isNaN(curCol)) sink.onColumn(curCol, firstY, minY, maxY, lastY);
-      curCol = col;
-      firstY = y;
-      minY = y;
-      maxY = y;
-    } else {
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-    }
-    lastY = y;
-    prevT = t;
-  });
+      const col = Math.floor(viewport.xToPx(t));
+      if (col !== curCol) {
+        if (!Number.isNaN(curCol)) sink.onColumn(curCol, firstY, minY, maxY, lastY);
+        curCol = col;
+        firstY = y;
+        minY = y;
+        maxY = y;
+      } else {
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+      lastY = y;
+      prevT = t;
+    },
+    true,
+  );
 
   if (!Number.isNaN(curCol)) sink.onColumn(curCol, firstY, minY, maxY, lastY);
 }

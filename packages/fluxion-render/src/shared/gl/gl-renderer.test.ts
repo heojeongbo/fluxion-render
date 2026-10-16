@@ -398,3 +398,46 @@ it("drawTriangles renders solid bars and safely skips a lost context", () => {
   expect(h.gl.calls.filter((c) => c.name === "drawArrays")).toHaveLength(1);
   glr.dispose();
 });
+
+describe("retained line uploads", () => {
+  it("uploads once per revision, keeps layers independent, bounds cached buffers, and clears on restore", () => {
+    const h = newGlCanvas();
+    const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
+    const vertices = new Float32Array([0, 0, 1, 1]);
+    const transform = new Float32Array([0, 0, 1, 1, 0, 0]);
+    const draw = (v = vertices, revision = 1) =>
+      glr.drawLineStrip(v, 2, [], transform, [1, 1, 1, 1], 1, 1, revision);
+    draw();
+    draw();
+    expect(h.gl.calls.filter((c) => c.name === "bufferData")).toHaveLength(1);
+    draw(vertices, 2);
+    expect(h.gl.calls.filter((c) => c.name === "bufferData")).toHaveLength(2);
+    for (let i = 0; i < 33; i++) draw(new Float32Array([0, 0, 1, 1]));
+    expect(h.gl.calls.some((c) => c.name === "deleteBuffer")).toBe(true);
+    h.dispatch({ type: "webglcontextlost", preventDefault() {} });
+    h.dispatch({ type: "webglcontextrestored" });
+    draw();
+    glr.dispose();
+  });
+});
+
+it("does not draw a retained line if the driver cannot allocate its buffer", () => {
+  const h = newGlCanvas();
+  const glr = GlRenderer.tryCreate(h.canvas, { alpha: false }, () => {})!;
+  vi.spyOn(
+    h.gl as unknown as { createBuffer(): WebGLBuffer | null },
+    "createBuffer",
+  ).mockReturnValue(null);
+  glr.drawLineStrip(
+    new Float32Array([0, 0, 1, 1]),
+    2,
+    [],
+    new Float32Array(6),
+    [1, 1, 1, 1],
+    1,
+    1,
+    1,
+  );
+  expect(h.gl.calls.some((c) => c.name === "drawArrays")).toBe(false);
+  glr.dispose();
+});

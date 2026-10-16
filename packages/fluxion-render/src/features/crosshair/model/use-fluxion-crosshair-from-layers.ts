@@ -1,5 +1,5 @@
 import { getAxisSpec } from "../../../shared/lib/get-axis-spec";
-import type { FluxionLayerSpec } from "../../../widgets/fluxion-canvas/lib/use-fluxion-canvas";
+import type { FluxionLayerSpec } from "../../../shared/model/layer-spec";
 import type { FluxionHost } from "../../host";
 import type { CachedLayerOptions, HoverDataCache } from "./hover-data-cache";
 import {
