@@ -429,10 +429,22 @@ cd packages/fluxion-worker && pnpm vitest run --coverage
 ```
 
 Enforced thresholds (`vitest.config.ts`): **100% lines · 100% statements ·
-100% functions · 95% branches**.
+100% functions · 100% branches**.
 
 ---
 
 ## License
 
 MIT
+
+## Lifecycle and concurrency
+
+`defineWorkerWithState` serializes asynchronous handlers for the same host in arrival
+order. Different hosts remain independent, and idle synchronous handlers reply
+synchronously. Stream failures reach `onError` without completing or rejecting an
+unrelated RPC and never arrive as stream data. Custom workers must include
+`__fluxionStream: true` on stream error envelopes.
+
+`useWorkerRequest` combines the caller's `opts.signal` with effect cleanup cancellation.
+A caller abort is reported in `error`; obsolete cleanup completions are ignored.
+`opts` changes apply to the next request and do not restart the current request.

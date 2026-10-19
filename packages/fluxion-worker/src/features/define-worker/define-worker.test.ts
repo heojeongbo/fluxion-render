@@ -289,14 +289,14 @@ describe("defineWorkerWithState", () => {
     const states: Array<unknown> = [];
     defineWorkerWithState<object, object, number>(async (_msg, _reply, { state }) => {
       states.push(state);
-      await Promise.resolve();
+      for (let i = 0; i < 8; i++) await Promise.resolve();
       return (state ?? 0) + 1;
     });
     selfMock.emit({ hostId: "h1" });
-    await Promise.resolve();
-    await Promise.resolve();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
     selfMock.emit({ hostId: "h1" });
-    await Promise.resolve();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
     expect(states[0]).toBeUndefined();
     expect(states[1]).toBe(1);
   });

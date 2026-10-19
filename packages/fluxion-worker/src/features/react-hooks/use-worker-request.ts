@@ -54,27 +54,38 @@ export function useWorkerRequest<TMsg extends object, TResult extends object>(
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
-    if (!handle || handle.isTerminated) return;
+    if (!handle || handle.isTerminated) {
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     setError(null);
 
     const ctrl = new AbortController();
+    let cancelled = false;
+    const external = optsRef.current?.signal;
+    const abort = () => ctrl.abort(external?.reason);
+    if (external?.aborted) abort();
+    external?.addEventListener("abort", abort, { once: true });
 
     handle
       .request<TResult>(msg, { ...optsRef.current, signal: ctrl.signal })
       .then((result) => {
+        if (cancelled || ctrl.signal.aborted) return;
         setData(result);
         setLoading(false);
       })
       .catch((e: unknown) => {
         // Ignore rejections triggered by our own cleanup abort.
-        if (ctrl.signal.aborted) return;
+        if (cancelled) return;
         setError(e instanceof Error ? e : new Error(String(e)));
         setLoading(false);
       });
 
     return () => {
+      cancelled = true;
+      external?.removeEventListener("abort", abort);
       ctrl.abort();
     };
   }, [handle, msg]); // opts captured by ref — does not trigger re-fire
