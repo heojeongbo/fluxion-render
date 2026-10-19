@@ -4,18 +4,9 @@ import type { Layer } from "../../../shared/model/layer";
 import { RingBuffer } from "../../../shared/model/ring-buffer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface CandlestickConfig {
-  /** Candle color when close >= open. Default "#26a69a". */
-  upColor?: string;
-  /** Candle color when close < open. Default "#ef5350". */
-  downColor?: string;
-  /** Body width in CSS pixels. Default 6. */
-  bodyWidth?: number;
-  capacity?: number;
-  retentionMs?: number;
-  maxHz?: number;
-  visible?: boolean;
-}
+export type { CandlestickConfig } from "../../../shared/model/layer-configs";
+
+import type { CandlestickConfig } from "../../../shared/model/layer-configs";
 
 /**
  * Streaming OHLC candlestick chart.

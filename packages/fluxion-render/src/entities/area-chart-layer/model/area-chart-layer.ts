@@ -5,58 +5,9 @@ import type { Layer } from "../../../shared/model/layer";
 import { createStreamingRing, type RingBuffer } from "../../../shared/model/ring-buffer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface AreaChartConfig {
-  color?: string;
-  /** Fill opacity [0,1]. Default 0.2. */
-  fillOpacity?: number;
-  lineWidth?: number;
-  capacity?: number;
-  retentionMs?: number;
-  maxHz?: number;
-  visible?: boolean;
-  /**
-   * Min/max-decimate both the fill and the outline stroke to ~2–4 points per
-   * x-pixel column when oversampled (visible samples > 2×width), cutting draw
-   * cost from O(samples) to O(width). The fill still closes to the baseline per
-   * gap-segment and the envelope is preserved at display resolution. The ring
-   * keeps every sample (hover/scan/export unaffected). Tri-state: omitted =
-   * AUTO (decimate iff oversampled), `true` = same as auto, `false` = always
-   * draw every sample. Default auto.
-   */
-  decimate?: boolean;
-  /**
-   * Maximum allowed time gap (ms) between consecutive samples before the
-   * area is broken: the current fill polygon closes to the baseline and a
-   * new one starts after the gap (the stroke breaks too). Undefined
-   * (default) keeps the current behavior: one continuous area.
-   */
-  maxGapMs?: number;
-  /**
-   * Canvas `setLineDash` pattern for the outline STROKE, in CSS px. Default
-   * `[]` (solid). The fill is never dashed. Use it to tell apart series whose
-   * values overlap. Visual only: data, hover, and auto-scaling are unaffected.
-   */
-  dashArray?: number[];
-  /**
-   * Vertical offset added to every y at DRAW time, in DATA units. Default 0.
-   * Lifts the whole area (fill + outline) up/down to separate overlapping
-   * series. `scan()` widens the observed y-range so `yMode: "auto"` fits it.
-   * Visual only: hover, export, and the underlying samples are unaffected.
-   * Ignored in lane mode (see `laneCount`).
-   */
-  yOffset?: number;
-  /**
-   * Lane (small-multiples) mode. When `laneCount >= 1`, the area is drawn into
-   * band `laneIndex` of `laneCount`, auto-normalized to its OWN visible y-range
-   * (fill runs to the band's bottom). The shared y-axis no longer applies.
-   * `yOffset` is ignored while active. Default off. See `LineChartConfig`.
-   */
-  laneIndex?: number;
-  /** Total number of lanes. See {@link laneIndex}. Default 0 (off). */
-  laneCount?: number;
-  /** Gap between adjacent lanes, in CSS px. Default 6. */
-  laneGapPx?: number;
-}
+export type { AreaChartConfig } from "../../../shared/model/layer-configs";
+
+import type { AreaChartConfig } from "../../../shared/model/layer-configs";
 
 export class AreaChartLayer implements Layer {
   readonly id: string;

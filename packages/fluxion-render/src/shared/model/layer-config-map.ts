@@ -1,26 +1,28 @@
-import type { AreaChartConfig } from "../../entities/area-chart-layer";
-import type { AxisGridConfig } from "../../entities/axis-grid-layer";
-import type { BarChartConfig } from "../../entities/bar-chart-layer";
-import type { BoxPlotConfig } from "../../entities/box-plot-layer";
-import type { CandlestickConfig } from "../../entities/candlestick-layer";
-import type { CurrentTimeConfig } from "../../entities/current-time-layer";
-import type { EventMarkerConfig } from "../../entities/event-marker-layer";
-import type { HeatmapConfig } from "../../entities/heatmap-layer";
-import type { HeatmapStreamConfig } from "../../entities/heatmap-stream-layer";
-import type { HistogramConfig } from "../../entities/histogram-layer";
-import type { LidarScatterConfig } from "../../entities/lidar-scatter-layer";
-import type { LineChartConfig } from "../../entities/line-chart-layer";
-import type { LineChartStaticConfig } from "../../entities/line-chart-static-layer";
-import type { OccupancyGridConfig } from "../../entities/occupancy-grid-layer";
-import type { PolarConfig } from "../../entities/polar-layer";
-import type { PoseArrowConfig } from "../../entities/pose-arrow-layer";
-import type { ReferenceLineConfig } from "../../entities/reference-line-layer";
-import type { ScatterChartConfig } from "../../entities/scatter-chart-layer";
-import type { ScatterColoredConfig } from "../../entities/scatter-colored-layer";
-import type { StackedAreaConfig } from "../../entities/stacked-area-layer";
-import type { StepChartConfig } from "../../entities/step-chart-layer";
-import type { TrajectoryConfig } from "../../entities/trajectory-layer";
 import type { LayerKind } from "../protocol";
+import type {
+  AreaChartConfig,
+  AxisGridConfig,
+  BarChartConfig,
+  BoxPlotConfig,
+  CandlestickConfig,
+  CurrentTimeConfig,
+  EventMarkerConfig,
+  HeatmapConfig,
+  HeatmapStreamConfig,
+  HistogramConfig,
+  LidarScatterConfig,
+  LineChartConfig,
+  LineChartStaticConfig,
+  OccupancyGridConfig,
+  PolarConfig,
+  PoseArrowConfig,
+  ReferenceLineConfig,
+  ScatterChartConfig,
+  ScatterColoredConfig,
+  StackedAreaConfig,
+  StepChartConfig,
+  TrajectoryConfig,
+} from "./layer-configs";
 
 /**
  * The config shape each {@link LayerKind} accepts. The single source of truth for

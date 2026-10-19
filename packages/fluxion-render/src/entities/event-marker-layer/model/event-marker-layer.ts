@@ -1,16 +1,9 @@
 import type { Layer } from "../../../shared/model/layer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface EventMarkerConfig {
-  /** Colors per severity level: [info, warning, error]. Defaults: ["#4fc3f7","#ffb060","#ff5252"]. */
-  colors?: [string, string, string];
-  /** Line width in pixels. Default 1. */
-  lineWidth?: number;
-  /** Triangle marker height in pixels. Default 8. */
-  markerSize?: number;
-  /** When false, skip draw. Default true. */
-  visible?: boolean;
-}
+export type { EventMarkerConfig } from "../../../shared/model/layer-configs";
+
+import type { EventMarkerConfig } from "../../../shared/model/layer-configs";
 
 interface MarkerRecord {
   t: number;

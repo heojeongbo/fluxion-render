@@ -2,24 +2,9 @@ import { drawLabel } from "../../../shared/lib/label-cache";
 import type { Layer } from "../../../shared/model/layer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface ReferenceLineConfig {
-  /** Y data value at which to draw the reference line. */
-  y: number;
-  /** Lower bound of the tolerance band (drawn as a shaded rect). */
-  bandMin?: number;
-  /** Upper bound of the tolerance band. */
-  bandMax?: number;
-  /** Line color. Default "#4fc3f7". */
-  color?: string;
-  /** Line width in pixels. Default 1.5. */
-  lineWidth?: number;
-  /** Label shown at the right edge. */
-  label?: string;
-  /** Band fill opacity (0–1). Default 0.12. */
-  bandOpacity?: number;
-  /** When false, skip draw. Default true. */
-  visible?: boolean;
-}
+export type { ReferenceLineConfig } from "../../../shared/model/layer-configs";
+
+import type { ReferenceLineConfig } from "../../../shared/model/layer-configs";
 
 /**
  * Static reference line with optional ±tolerance band.

@@ -5,55 +5,9 @@ import type { Layer } from "../../../shared/model/layer";
 import { createStreamingRing, type RingBuffer } from "../../../shared/model/ring-buffer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface StepChartConfig {
-  color?: string;
-  lineWidth?: number;
-  capacity?: number;
-  retentionMs?: number;
-  maxHz?: number;
-  visible?: boolean;
-  /**
-   * Min/max-decimate the DRAW path to ~2–4 points per x-pixel column when
-   * oversampled (visible samples > 2×width), cutting draw cost from O(samples)
-   * to O(width). At sub-pixel density the staircase is indistinguishable from
-   * the decimated path. The ring still holds every sample (hover/scan/export
-   * unaffected). Tri-state: omitted = AUTO (decimate iff oversampled), `true` =
-   * same as auto, `false` = always draw every sample. Default auto.
-   */
-  decimate?: boolean;
-  /**
-   * Maximum allowed time gap (ms) between consecutive samples before the
-   * staircase is broken: the bridging horizontal+vertical segments are
-   * skipped and a new subpath starts after the gap. Undefined (default)
-   * keeps the current behavior: each value holds until the next sample.
-   */
-  maxGapMs?: number;
-  /**
-   * Canvas `setLineDash` pattern for the stroke, in CSS px. Default `[]`
-   * (solid). Use it to tell apart series whose values overlap. Visual only:
-   * data, hover, and auto-scaling are unaffected.
-   */
-  dashArray?: number[];
-  /**
-   * Vertical offset added to every y at DRAW time, in DATA units. Default 0.
-   * Shifts the staircase up/down to separate overlapping series. `scan()`
-   * widens the observed y-range so `yMode: "auto"` fits it. Visual only:
-   * hover, export, and the underlying samples are unaffected. Ignored in lane
-   * mode (see `laneCount`).
-   */
-  yOffset?: number;
-  /**
-   * Lane (small-multiples) mode. When `laneCount >= 1`, the staircase is drawn
-   * into band `laneIndex` of `laneCount`, auto-normalized to its OWN visible
-   * y-range. The shared y-axis no longer applies and `yOffset` is ignored.
-   * Default off. See `LineChartConfig`.
-   */
-  laneIndex?: number;
-  /** Total number of lanes. See {@link laneIndex}. Default 0 (off). */
-  laneCount?: number;
-  /** Gap between adjacent lanes, in CSS px. Default 6. */
-  laneGapPx?: number;
-}
+export type { StepChartConfig } from "../../../shared/model/layer-configs";
+
+import type { StepChartConfig } from "../../../shared/model/layer-configs";
 
 /**
  * Streaming step (staircase) line chart. Same wire format as LineChartLayer

@@ -3,22 +3,9 @@ import type { Layer } from "../../../shared/model/layer";
 import { RingBuffer } from "../../../shared/model/ring-buffer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface PoseArrowConfig {
-  /** Arrow body length in pixels. Default 14. */
-  arrowLength?: number;
-  /** Arrowhead half-width in pixels. Default 5. */
-  arrowWidth?: number;
-  /** Arrow color. Default "#80ffa0". */
-  color?: string;
-  /** Ring buffer capacity. */
-  capacity?: number;
-  /** Retention window in ms. Combined with maxHz to auto-calculate capacity. */
-  retentionMs?: number;
-  /** Expected max sample rate in Hz. */
-  maxHz?: number;
-  /** When false, skip draw and scan. Default true. */
-  visible?: boolean;
-}
+export type { PoseArrowConfig } from "../../../shared/model/layer-configs";
+
+import type { PoseArrowConfig } from "../../../shared/model/layer-configs";
 
 /**
  * Streaming pose layer. Each sample is (t, y, theta) rendered as an arrow

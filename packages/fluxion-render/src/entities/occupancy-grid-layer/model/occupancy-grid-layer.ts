@@ -2,22 +2,9 @@ import { hexToRgb } from "../../../shared/lib/colormap";
 import type { Layer } from "../../../shared/model/layer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface OccupancyGridConfig {
-  /**
-   * Color for occupied cells (probability 100), CSS hex. Free cells (0) fade to
-   * `freeColor`. Default "#1a1a1a" (dark = occupied, matching ROS rviz).
-   */
-  occupiedColor?: string;
-  /** Color for free cells (probability 0), CSS hex. Default "#e0e0e0". */
-  freeColor?: string;
-  /** Color for unknown cells (value < 0). Default "#808080" (grey). */
-  unknownColor?: string;
-  /** Draw a 1px outline around each cell (grid lines). Default false. */
-  showGridLines?: boolean;
-  /** Grid line color when `showGridLines` is on. Default "rgba(0,0,0,0.15)". */
-  gridLineColor?: string;
-  visible?: boolean;
-}
+export type { OccupancyGridConfig } from "../../../shared/model/layer-configs";
+
+import type { OccupancyGridConfig } from "../../../shared/model/layer-configs";
 
 /**
  * 2-D occupancy grid (ROS `nav_msgs/OccupancyGrid` style).

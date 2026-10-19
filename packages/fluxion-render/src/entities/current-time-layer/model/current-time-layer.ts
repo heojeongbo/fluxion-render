@@ -3,18 +3,9 @@ import { type ClipTransform, pxToClip } from "../../../shared/gl/gl-transform";
 import type { Layer } from "../../../shared/model/layer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface CurrentTimeConfig {
-  /** Host-relative milliseconds for a replay playhead. null (default) follows the clock. */
-  currentTime?: number | null;
-  /** Epoch milliseconds corresponding to x=0. Required for live clock mode. */
-  timeOrigin?: number;
-  /** Bar color. Default "#ff5252". */
-  color?: string;
-  /** Bar width in CSS pixels. Default 2; minimum 0.5. */
-  lineWidth?: number;
-  /** Hide the bar and stop its continuous rendering. Default true. */
-  visible?: boolean;
-}
+export type { CurrentTimeConfig } from "../../../shared/model/layer-configs";
+
+import type { CurrentTimeConfig } from "../../../shared/model/layer-configs";
 
 /** Config-only vertical playhead. Add after data layers to draw above them. */
 export class CurrentTimeLayer implements Layer {

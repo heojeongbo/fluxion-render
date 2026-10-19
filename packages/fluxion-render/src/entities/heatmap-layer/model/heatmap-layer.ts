@@ -1,18 +1,9 @@
 import type { Layer } from "../../../shared/model/layer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface HeatmapConfig {
-  /** Cell width in CSS pixels. Default 8. */
-  cellWidth?: number;
-  /** Cell height in CSS pixels. Default 8. */
-  cellHeight?: number;
-  /** Value mapped to the cold end of the colormap. Default: auto (data min). */
-  minValue?: number;
-  /** Value mapped to the hot end of the colormap. Default: auto (data max). */
-  maxValue?: number;
-  colormap?: "viridis" | "plasma" | "hot";
-  visible?: boolean;
-}
+export type { HeatmapConfig } from "../../../shared/model/layer-configs";
+
+import type { HeatmapConfig } from "../../../shared/model/layer-configs";
 
 /**
  * Static heatmap. Replaces the entire grid on each `setData` call.

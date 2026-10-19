@@ -1,16 +1,9 @@
 import type { Layer } from "../../../shared/model/layer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface BarChartConfig {
-  color?: string;
-  /** Bar width in CSS pixels. Default 8. */
-  barWidth?: number;
-  /** "xy" = [x,y,x,y,...] interleaved; "y" = [y0,y1,...] with x inferred from xRange. */
-  layout?: "xy" | "y";
-  /** X range for "y" layout: [xMin, xMax]. Bars are evenly spaced. */
-  xRange?: [number, number];
-  visible?: boolean;
-}
+export type { BarChartConfig } from "../../../shared/model/layer-configs";
+
+import type { BarChartConfig } from "../../../shared/model/layer-configs";
 
 /**
  * Static bar chart. Replaces the entire dataset on each `setData` call.

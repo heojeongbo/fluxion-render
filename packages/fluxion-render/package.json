@@ -77,7 +77,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@heojeongbo/fluxion-worker": "workspace:^"
+    "@heojeongbo/fluxion-worker": "workspace:^0.6.2"
   },
   "peerDependencies": {
     "react": ">=18"

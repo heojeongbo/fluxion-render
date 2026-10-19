@@ -2,16 +2,9 @@ import { intensityLUT } from "../../../shared/lib/color";
 import type { Layer } from "../../../shared/model/layer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface LidarScatterConfig {
-  /** Floats per point. Default 4 (x,y,z,intensity). Minimum 2 (x,y). */
-  stride?: number;
-  /** Point size in pixels. */
-  pointSize?: number;
-  /** Max intensity value for normalization (0..1). Default 1.0. */
-  intensityMax?: number;
-  /** Solid color override. When set, intensity LUT is ignored. */
-  color?: string;
-}
+export type { LidarScatterConfig } from "../../../shared/model/layer-configs";
+
+import type { LidarScatterConfig } from "../../../shared/model/layer-configs";
 
 const LUT_BUCKETS = 256;
 

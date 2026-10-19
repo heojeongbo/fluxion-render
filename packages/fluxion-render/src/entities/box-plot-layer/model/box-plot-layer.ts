@@ -1,21 +1,9 @@
 import type { Layer } from "../../../shared/model/layer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface BoxPlotConfig {
-  /** Box fill color (CSS). Default "#4fc3f7". */
-  color?: string;
-  /** Box fill opacity [0,1]. Default 0.35. */
-  fillOpacity?: number;
-  /** Box / whisker line color. Default "#e2e8f0". */
-  lineColor?: string;
-  /** Box width in CSS pixels. Default 24. */
-  boxWidth?: number;
-  /** Line width in CSS px for the box, median, and whiskers. Default 1.5. */
-  lineWidth?: number;
-  /** Whisker cap width as a fraction of `boxWidth` [0,1]. Default 0.5. */
-  capRatio?: number;
-  visible?: boolean;
-}
+export type { BoxPlotConfig } from "../../../shared/model/layer-configs";
+
+import type { BoxPlotConfig } from "../../../shared/model/layer-configs";
 
 /**
  * Box-plot layer for comparing distributions side by side (e.g. per-joint or

@@ -3,31 +3,9 @@ import type { Layer } from "../../../shared/model/layer";
 import { RingBuffer } from "../../../shared/model/ring-buffer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface StackedAreaConfig {
-  /**
-   * Number of stacked series per sample. Required — sets the data stride to
-   * `seriesCount + 1` (`[t, y0, y1, …]`). Changing it resets the ring buffer.
-   */
-  seriesCount?: number;
-  /** Per-series fill colors (CSS). Cycles if shorter than `seriesCount`. */
-  colors?: string[];
-  /** Fill opacity [0,1]. Default 0.85. */
-  fillOpacity?: number;
-  /** Outline width in CSS px between bands. Default 0 (no outline). */
-  lineWidth?: number;
-  /**
-   * Normalize each sample's stack to 100% (percent-stacked). Bands then show
-   * composition rather than absolute totals. Default false.
-   */
-  normalize?: boolean;
-  /** Ring buffer capacity in samples. Default 2048. */
-  capacity?: number;
-  /** Data retention window in ms (auto-sizes capacity with maxHz). */
-  retentionMs?: number;
-  /** Expected max sample rate in Hz (auto-sizes capacity with retentionMs). */
-  maxHz?: number;
-  visible?: boolean;
-}
+export type { StackedAreaConfig } from "../../../shared/model/layer-configs";
+
+import type { StackedAreaConfig } from "../../../shared/model/layer-configs";
 
 const DEFAULT_COLORS = ["#4fc3f7", "#80ffa0", "#ffb060", "#ff5252", "#b388ff", "#ffd54f"];
 

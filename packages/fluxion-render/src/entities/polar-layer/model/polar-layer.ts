@@ -1,34 +1,9 @@
 import type { Layer } from "../../../shared/model/layer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface PolarConfig {
-  /** Line/marker color (CSS). Default "#4fc3f7". */
-  color?: string;
-  /** Line width in CSS px. Default 1.5. */
-  lineWidth?: number;
-  /** Fill the polygon under the trace with `color` at this opacity. 0 = no fill. Default 0. */
-  fillOpacity?: number;
-  /**
-   * Radius value mapped to the outer edge. When omitted, auto-scales to the
-   * largest `r` in the data each frame.
-   */
-  rMax?: number;
-  /** Connect the last point back to the first (closed radar/rose). Default true. */
-  closed?: boolean;
-  /** Draw a filled dot at each vertex. Default false. */
-  showPoints?: boolean;
-  /** Point radius in CSS px when `showPoints`. Default 3. */
-  pointSize?: number;
-  /** Draw concentric radial grid rings. Default true. */
-  showRings?: boolean;
-  /** Number of grid rings when `showRings`. Default 4. */
-  ringCount?: number;
-  /** Grid color for rings/spokes. Default "rgba(255,255,255,0.12)". */
-  gridColor?: string;
-  /** Inset from the canvas edge in CSS px, reserving room for labels. Default 8. */
-  insetPx?: number;
-  visible?: boolean;
-}
+export type { PolarConfig } from "../../../shared/model/layer-configs";
+
+import type { PolarConfig } from "../../../shared/model/layer-configs";
 
 /**
  * Polar / radar layer — plots `(theta, r)` pairs around a center point.

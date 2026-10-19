@@ -5,32 +5,9 @@ import type { Layer } from "../../../shared/model/layer";
 import { RingBuffer } from "../../../shared/model/ring-buffer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface ScatterColoredConfig {
-  /**
-   * Colormap for the `colorValue` channel (0–1 normalised).
-   * "gradient" uses `minColor`→`maxColor` linear interpolation.
-   * Default "viridis".
-   */
-  colormap?: "viridis" | "plasma" | "hot" | "gradient";
-  /** Start color for "gradient" colormap (CSS hex). Default "#0000ff". */
-  minColor?: string;
-  /** End color for "gradient" colormap (CSS hex). Default "#ff0000". */
-  maxColor?: string;
-  /** Minimum point size in pixels mapped to colorValue=0. Default 2. */
-  minSize?: number;
-  /** Maximum point size in pixels mapped to colorValue=1. Default 8. */
-  maxSize?: number;
-  /** Point shape. Default "circle". */
-  shape?: "square" | "circle";
-  /** Ring buffer capacity. Default 4096. */
-  capacity?: number;
-  /** Data retention window in ms. Combined with maxHz to auto-calculate capacity. */
-  retentionMs?: number;
-  /** Expected max sample rate in Hz. */
-  maxHz?: number;
-  /** When false, skip draw and scan. Default true. */
-  visible?: boolean;
-}
+export type { ScatterColoredConfig } from "../../../shared/model/layer-configs";
+
+import type { ScatterColoredConfig } from "../../../shared/model/layer-configs";
 
 /**
  * Streaming scatter layer with per-point color and size encoding.

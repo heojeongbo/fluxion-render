@@ -1,16 +1,9 @@
 import type { Layer } from "../../../shared/model/layer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface LineChartStaticConfig {
-  color?: string;
-  lineWidth?: number;
-  /**
-   * Data layout:
-   * - "xy" (default): interleaved [x,y,x,y,...] stride=2
-   * - "y": [y0,y1,...] with implicit x = linear sweep across `viewport.bounds.x`
-   */
-  layout?: "xy" | "y";
-}
+export type { LineChartStaticConfig } from "../../../shared/model/layer-configs";
+
+import type { LineChartStaticConfig } from "../../../shared/model/layer-configs";
 
 /**
  * One-shot xy line chart. Replaces the entire series on every `setData`.

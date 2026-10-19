@@ -1,25 +1,9 @@
 import type { Layer } from "../../../shared/model/layer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface HistogramConfig {
-  /** Bar fill color (CSS). Default "#4fc3f7". */
-  color?: string;
-  /** Number of bins. Default 20. */
-  binCount?: number;
-  /**
-   * Fixed value range `[min, max]` to bin over. When omitted, the range is
-   * auto-computed from the data on each `setData`.
-   */
-  range?: [number, number];
-  /**
-   * Normalize counts to a 0–1 density (each bar = count / total) instead of raw
-   * counts. Default false.
-   */
-  density?: boolean;
-  /** Gap between bars in CSS px. Default 1. */
-  gapPx?: number;
-  visible?: boolean;
-}
+export type { HistogramConfig } from "../../../shared/model/layer-configs";
+
+import type { HistogramConfig } from "../../../shared/model/layer-configs";
 
 /**
  * Histogram layer. Takes a flat array of raw sample values and bins them

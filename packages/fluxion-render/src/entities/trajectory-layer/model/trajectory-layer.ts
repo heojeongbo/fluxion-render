@@ -1,39 +1,12 @@
-import { type ColormapName, lutFor } from "../../../shared/lib/colormap";
+import { lutFor } from "../../../shared/lib/colormap";
 import { computeRingCapacity } from "../../../shared/lib/ring-capacity";
 import type { Layer } from "../../../shared/model/layer";
 import { RingBuffer } from "../../../shared/model/ring-buffer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface TrajectoryConfig {
-  /** Polyline / point color when `colorByTime` is off (CSS). Default "#4fc3f7". */
-  color?: string;
-  /** Line width in CSS px. Default 1.5. */
-  lineWidth?: number;
-  /**
-   * Color the path by sample age using a colormap LUT instead of a solid
-   * `color`. Oldest → 0, newest → 1. Default false.
-   */
-  colorByTime?: boolean;
-  /** Colormap for `colorByTime`. Default "viridis". */
-  colormap?: ColormapName;
-  /** Draw a filled marker at the most recent point (current pose). Default true. */
-  headMarker?: boolean;
-  /** Head marker radius in CSS px. Default 4. */
-  headMarkerSize?: number;
-  /**
-   * Fade samples older than this many ms before the latest sample (linear alpha
-   * ramp to 0). 0 disables fading. Default 0.
-   */
-  fadeOlderMs?: number;
-  /** Ring buffer capacity in points. Default 4096. */
-  capacity?: number;
-  /** Data retention window in ms. Combined with maxHz to auto-size capacity. */
-  retentionMs?: number;
-  /** Expected max sample rate in Hz (auto-sizes capacity with retentionMs). */
-  maxHz?: number;
-  /** When false, skip scan and draw. Default true. */
-  visible?: boolean;
-}
+export type { TrajectoryConfig } from "../../../shared/model/layer-configs";
+
+import type { TrajectoryConfig } from "../../../shared/model/layer-configs";
 
 /**
  * Streaming 2-D trajectory / path layer for robot or vehicle position.

@@ -1,27 +1,9 @@
 import type { Layer } from "../../../shared/model/layer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface HeatmapStreamConfig {
-  /**
-   * Number of y-bins (rows) in the heatmap grid.
-   * Must match the length of each column pushed via the handle. Default 32.
-   */
-  yBins?: number;
-  /**
-   * Number of time columns to keep (ring buffer width). Default 256.
-   * Columns older than `maxCols` are evicted.
-   */
-  maxCols?: number;
-  /** Y range of the grid: [yMin, yMax]. Default [0, 1]. */
-  yRange?: [number, number];
-  colormap?: "viridis" | "plasma" | "hot";
-  /** Value mapped to the cold end of the colormap. Default: auto (data min). */
-  minValue?: number;
-  /** Value mapped to the hot end of the colormap. Default: auto (data max). */
-  maxValue?: number;
-  /** When false, skip draw. Default true. */
-  visible?: boolean;
-}
+export type { HeatmapStreamConfig } from "../../../shared/model/layer-configs";
+
+import type { HeatmapStreamConfig } from "../../../shared/model/layer-configs";
 
 /**
  * Streaming heatmap. Accumulates column-by-column updates in a ring buffer.

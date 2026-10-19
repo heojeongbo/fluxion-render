@@ -5,38 +5,9 @@ import type { Layer } from "../../../shared/model/layer";
 import { createStreamingRing, type RingBuffer } from "../../../shared/model/ring-buffer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface ScatterChartConfig {
-  /** Point color. Default "#4fc3f7". */
-  color?: string;
-  /** Point size in pixels. Default 3. */
-  pointSize?: number;
-  /** Point shape. Default "square". */
-  shape?: "square" | "circle";
-  /** Ring buffer capacity (number of [t,y] samples retained). Default 2048. */
-  capacity?: number;
-  /** Data retention window in ms. Combined with maxHz to auto-calculate capacity. */
-  retentionMs?: number;
-  /** Expected max sample rate in Hz. Combined with retentionMs to auto-calculate capacity. */
-  maxHz?: number;
-  /** When false, skip draw and scan. Default true. */
-  visible?: boolean;
-  /**
-   * Thin the drawn points to ~2 per x-pixel column (the column's min-y and
-   * max-y sample) when oversampled (visible samples > 2×width), cutting draw
-   * cost from O(samples) to O(width). The visible distribution envelope is
-   * preserved at display resolution; the ring keeps every sample
-   * (hover/scan/export unaffected). Tri-state: omitted = AUTO (thin iff
-   * oversampled), `true` = same as auto, `false` = always draw every point.
-   * Default auto.
-   */
-  decimate?: boolean;
-  /**
-   * Global point opacity in `[0, 1]`. Default 1 (opaque). Multiplies the canvas
-   * alpha for this layer's points only; saved/restored so it never leaks into
-   * other layers. Visual only — data/hover/scaling are unaffected.
-   */
-  opacity?: number;
-}
+export type { ScatterChartConfig } from "../../../shared/model/layer-configs";
+
+import type { ScatterChartConfig } from "../../../shared/model/layer-configs";
 
 /**
  * Streaming time-series scatter plot. Same data layout as `LineChartLayer`

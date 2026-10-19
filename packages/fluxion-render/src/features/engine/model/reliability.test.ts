@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { AreaChartLayer } from "../../../entities/area-chart-layer/model/area-chart-layer";
 import { AxisGridLayer } from "../../../entities/axis-grid-layer/model/axis-grid-layer";
 import { LayerStack } from "../../../entities/layer-stack/model/layer-stack";

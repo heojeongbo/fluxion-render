@@ -13,80 +13,9 @@ import type { Layer } from "../../../shared/model/layer";
 import { createStreamingRing, type RingBuffer } from "../../../shared/model/ring-buffer";
 import type { Viewport } from "../../../shared/model/viewport";
 
-export interface LineChartConfig {
-  color?: string;
-  lineWidth?: number;
-  /** Ring buffer capacity (number of [t,y] samples retained). Default 2048. */
-  capacity?: number;
-  /** Data retention window in ms. Combined with maxHz to auto-calculate capacity. */
-  retentionMs?: number;
-  /** Expected max sample rate in Hz. Combined with retentionMs to auto-calculate capacity. */
-  maxHz?: number;
-  /** When false, skip draw and scan. Default true. */
-  visible?: boolean;
-  /**
-   * Min/max-decimate the DRAW path to ~2–4 points per x-pixel column when there
-   * are more visible samples than pixels — keeping the rendered line visually
-   * identical (every peak/trough at display resolution is preserved) while
-   * cutting `lineTo` calls from O(samples) to O(width). The ring still holds
-   * EVERY sample, so hover/scan/export are unaffected.
-   *
-   * Tri-state:
-   *   - omitted (default) → AUTO: decimate only when oversampled (visible
-   *     samples > 2×width). Cheap, lossless, and the right default for
-   *     high-rate (e.g. 500 Hz) streams.
-   *   - `true`  → decimate whenever oversampled (same effect as auto).
-   *   - `false` → never decimate; always draw every sample (debugging).
-   */
-  decimate?: boolean;
-  /**
-   * Maximum allowed time gap (ms) between consecutive samples before the
-   * stroke is broken (a new subpath starts instead of a bridging line).
-   * Lets bursty / intermittent streams show genuine discontinuities rather
-   * than a diagonal connecting across the silence. Undefined (default)
-   * keeps the current behavior: every visible sample is connected.
-   */
-  maxGapMs?: number;
-  /**
-   * Canvas `setLineDash` pattern for the stroke, in CSS px. Default `[]`
-   * (solid). Use it to tell apart series whose values overlap — e.g.
-   * `[6, 4]` draws a dashed line that stays distinguishable even when it sits
-   * exactly on top of another series. Visual only: data, hover, and
-   * auto-scaling are unaffected.
-   */
-  dashArray?: number[];
-  /**
-   * Vertical offset added to every y at DRAW time, in DATA units. Default 0.
-   * Shifts this series' stroke up/down so overlapping series spread out
-   * vertically (waterfall). `scan()` widens the observed y-range by the same
-   * amount, so `yMode: "auto"` grows to fit and never clips the shifted line.
-   * Visual only: hover, export, and the underlying samples are unaffected.
-   * Ignored in lane mode (see `laneCount`).
-   */
-  yOffset?: number;
-  /**
-   * Lane (small-multiples) mode. When `laneCount >= 1`, this layer draws into
-   * a horizontal band `laneIndex` of `laneCount`, auto-normalized to ITS OWN
-   * visible y-range — so it no longer shares the chart's y-axis. Use it to
-   * stack several streams that would otherwise overlap, each readable in its
-   * own strip (ECG / oscilloscope style). The shared y-axis becomes
-   * meaningless in this mode (suppress it: `yMode:"fixed"`, `showYLabels:false`).
-   * `yOffset` is ignored while lane mode is active. Default off.
-   */
-  laneIndex?: number;
-  /** Total number of lanes. See {@link laneIndex}. Default 0 (lane mode off). */
-  laneCount?: number;
-  /** Gap between adjacent lanes, in CSS px. Default 6. */
-  laneGapPx?: number;
-  /**
-   * Global stroke opacity in `[0, 1]`. Default 1 (fully opaque). Multiplies the
-   * canvas alpha for this layer's stroke only — useful to de-emphasize a series
-   * or let overlapping lines show through. Visual only: data, hover, and
-   * auto-scaling are unaffected. The alpha is saved and restored around the
-   * draw so it never leaks into other layers sharing the frame.
-   */
-  opacity?: number;
-}
+export type { LineChartConfig } from "../../../shared/model/layer-configs";
+
+import type { LineChartConfig } from "../../../shared/model/layer-configs";
 
 /**
  * Streaming time-series line chart. Expects `Float32Array [t, y, t, y, ...]`
