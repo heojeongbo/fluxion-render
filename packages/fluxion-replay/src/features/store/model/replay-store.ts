@@ -13,7 +13,12 @@ export type {
 import { isQuotaExceededError } from "../../../shared/lib/is-quota-exceeded-error";
 import type { BaseChannel } from "../../../shared/model/base-channel";
 import type { SerializedFrame } from "../../../shared/model/frame";
-import { collectVideoGarbage, deleteFrameBatch, GARBAGE_STORE } from "./frame-eviction";
+import {
+  collectVideoGarbage,
+  deleteFrameBatch,
+  GARBAGE_STORE,
+  type Garbage,
+} from "./frame-eviction";
 
 export interface ReplayStoreOptions {
   dbName?: string;
@@ -41,7 +46,7 @@ export interface ReplayStoreOptions {
 }
 
 const DEFAULT_DB_NAME = "fluxion-replay";
-const DEFAULT_DB_VERSION = 2;
+const DEFAULT_DB_VERSION = 1;
 const DEFAULT_RETENTION_MS = Infinity;
 const DEFAULT_BATCH_INTERVAL_MS = 500;
 // Maximum records written per IDB transaction. Capping this prevents a single
@@ -113,6 +118,7 @@ export class ReplayStore {
   private _flushCount = 0;
   private _storagePressure = false;
   private _garbageTask: Promise<void> | null = null;
+  private readonly _legacyGarbage: Garbage[] = [];
   // channelIds that have had at least one video chunk written this session.
   // Scopes OPFS chunk eviction to real video channels (metric/log channels
   // never write chunks) without having to decode opaque frame payloads.
@@ -130,7 +136,7 @@ export class ReplayStore {
       throw new RangeError("maxPendingFrames must be positive");
     this._onError = opts?.onError;
     this._dbName = opts?.dbName ?? DEFAULT_DB_NAME;
-    this._dbVersion = Math.max(opts?.dbVersion ?? DEFAULT_DB_VERSION, DEFAULT_DB_VERSION);
+    this._dbVersion = opts?.dbVersion ?? DEFAULT_DB_VERSION;
     this._retentionMs = opts?.retentionMs ?? DEFAULT_RETENTION_MS;
     this._batchIntervalMs = opts?.batchIntervalMs ?? DEFAULT_BATCH_INTERVAL_MS;
     if (!(this._retentionMs >= 0))
@@ -288,7 +294,8 @@ export class ReplayStore {
     cutoffMs: number,
     limit = MAX_DELETE_PER_EVICTION,
   ): Promise<void> {
-    await deleteFrameBatch(this._assertOpen(), cutoffMs, limit);
+    const removed = await deleteFrameBatch(this._assertOpen(), cutoffMs, limit);
+    this._legacyGarbage.push(...removed);
     await this._collectGarbage();
   }
 
@@ -302,6 +309,7 @@ export class ReplayStore {
       (channelId, t) =>
         this._videoPaths.has(JSON.stringify([channelId, `${t}.chunk`])) ||
         this._pending.some((frame) => frame.channelId === channelId && frame.t === t),
+      this._legacyGarbage,
     );
     try {
       await this._garbageTask;
@@ -553,12 +561,17 @@ export class ReplayStore {
       await Promise.allSettled([...this._videoWrites]);
       if (this._garbageTask) await this._garbageTask.catch(() => {});
       await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(["frames", GARBAGE_STORE], "readwrite");
+        const persistent = db.objectStoreNames.contains(GARBAGE_STORE);
+        const tx = db.transaction(
+          persistent ? ["frames", GARBAGE_STORE] : "frames",
+          "readwrite",
+        );
         tx.objectStore("frames").clear();
-        tx.objectStore(GARBAGE_STORE).clear();
+        if (persistent) tx.objectStore(GARBAGE_STORE).clear();
         tx.oncomplete = () => resolve();
         tx.onerror = tx.onabort = () => reject(tx.error);
       });
+      this._legacyGarbage.length = 0;
       this._videoChannelIds.clear();
       const root = this._opfsRoot;
       if (!root) return;

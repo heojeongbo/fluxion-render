@@ -162,7 +162,7 @@ const scenarios = {
       s.dispose();
     }
   },
-  async "persisted-v1-schema-upgrade"() {
+  async "persisted-v1-schema-compatibility"() {
     const name = `legacy-schema-${Date.now()}`;
     await new Promise<void>((resolve, reject) => {
       const open = indexedDB.open(name, 1);
@@ -180,10 +180,15 @@ const scenarios = {
     });
     const s = await store({ dbName: name });
     try {
-      check(
-        (await s.getFrames(0, 100))[0]?.t === 42,
-        "schema migration lost legacy recording",
-      );
+      check((await s.getFrames(0, 100))[0]?.t === 42, "legacy schema lost its recording");
+      await new Promise<void>((resolve, reject) => {
+        const legacy = indexedDB.open(name, 1);
+        legacy.onsuccess = () => {
+          legacy.result.close();
+          resolve();
+        };
+        legacy.onerror = () => reject(legacy.error);
+      });
     } finally {
       await s.clearAll();
       s.dispose();

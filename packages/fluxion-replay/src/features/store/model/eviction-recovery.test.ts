@@ -230,3 +230,39 @@ it("retains protection until both writes to the same video path finish", async (
     (store as unknown as { _videoPaths: Map<string, number> })._videoPaths.size,
   ).toBe(0);
 });
+function legacySchema(db: IDBDatabase) {
+  const names = db.objectStoreNames;
+  vi.spyOn(db, "objectStoreNames", "get").mockReturnValue({
+    ...names,
+    contains: (name: string) => name !== "video-garbage" && names.contains(name),
+  } as DOMStringList);
+}
+it("supports an existing v1 schema without an outbox and retries file failures", async () => {
+  const { store, db, dir } = await fixture();
+  legacySchema(db);
+  const tx = vi.spyOn(db, "transaction");
+  vi.spyOn(dir, "removeEntry").mockRejectedValueOnce(new Error("disk busy"));
+  await expect(store.deleteFramesBefore(2)).rejects.toThrow("disk busy");
+  expect(await store.getFrames(0, 2)).toEqual([]);
+  expect(await store.readVideoChunk("cam", "1.chunk")).not.toBeNull();
+  await store.flush();
+  expect(await store.readVideoChunk("cam", "1.chunk")).toBeNull();
+  await store.clearAll();
+  expect(
+    tx.mock.calls.every(([names]) => ![names].flat().includes("video-garbage")),
+  ).toBe(true);
+});
+it("retains protected legacy cleanup entries and releases completed entries", async () => {
+  const { store, db, root } = await fixture();
+  legacySchema(db);
+  await store.writeVideoChunk("cam", "2.chunk", new Uint8Array([2]));
+  store.appendFrame({ t: 2, channelId: "cam", payload: new ArrayBuffer(0) });
+  await store.flush();
+  const pending = await deleteFrameBatch(db, 3, 500);
+  await collectVideoGarbage(db, root, 500, (_channel, t) => t === 2, pending);
+  expect(pending.map((frame) => frame.t)).toEqual([2]);
+  expect(await store.readVideoChunk("cam", "1.chunk")).toBeNull();
+  expect(await store.readVideoChunk("cam", "2.chunk")).not.toBeNull();
+  await collectVideoGarbage(db, root, 500, () => false, pending);
+  expect(pending).toEqual([]);
+});

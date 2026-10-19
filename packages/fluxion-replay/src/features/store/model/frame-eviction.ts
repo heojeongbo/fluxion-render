@@ -1,6 +1,6 @@
-/** Durable outbox: metadata deletion and file cleanup intent commit together. */
+/** New schemas persist cleanup intent atomically; legacy schemas return a retry batch. */
 export const GARBAGE_STORE = "video-garbage";
-interface Garbage {
+export interface Garbage {
   channelId: string;
   t: number;
   video?: boolean;
@@ -10,10 +10,15 @@ export async function deleteFrameBatch(
   db: IDBDatabase,
   cutoff: number,
   limit: number,
-): Promise<void> {
+): Promise<Garbage[]> {
+  const persistent = db.objectStoreNames.contains(GARBAGE_STORE);
+  const removed: Garbage[] = [];
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(["frames", GARBAGE_STORE], "readwrite");
-    const garbage = tx.objectStore(GARBAGE_STORE);
+    const tx = db.transaction(
+      persistent ? ["frames", GARBAGE_STORE] : "frames",
+      "readwrite",
+    );
+    const garbage = persistent ? tx.objectStore(GARBAGE_STORE) : null;
     const req = tx
       .objectStore("frames")
       .index("by_t")
@@ -23,11 +28,11 @@ export async function deleteFrameBatch(
       const cursor = req.result;
       if (!cursor || deleted >= limit) return;
       const frame = cursor.value as Garbage;
-      if (frame.video !== false)
-        garbage.put({ channelId: frame.channelId, t: frame.t }, [
-          frame.channelId,
-          frame.t,
-        ]);
+      if (frame.video !== false) {
+        const entry = { channelId: frame.channelId, t: frame.t };
+        removed.push(entry);
+        garbage?.put(entry, [frame.channelId, frame.t]);
+      }
       cursor.delete();
       deleted++;
       cursor.continue();
@@ -36,23 +41,28 @@ export async function deleteFrameBatch(
     tx.oncomplete = () => resolve();
     tx.onerror = tx.onabort = () => reject(tx.error);
   });
+  return persistent ? [] : removed;
 }
 
-/** Retryable, bounded cleanup. A crash leaves the remaining outbox entries intact. */
+/** Bounded cleanup. Persistent outboxes survive crashes; legacy retry batches stay in memory. */
 export async function collectVideoGarbage(
   db: IDBDatabase,
   root: FileSystemDirectoryHandle,
   limit: number,
   protectedFrame: (channelId: string, t: number) => boolean = () => false,
+  legacyGarbage: Garbage[] = [],
 ): Promise<void> {
-  const entries = await new Promise<Garbage[]>((resolve, reject) => {
-    const req = db
-      .transaction(GARBAGE_STORE)
-      .objectStore(GARBAGE_STORE)
-      .getAll(undefined, limit);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
+  const persistent = db.objectStoreNames.contains(GARBAGE_STORE);
+  const entries = persistent
+    ? await new Promise<Garbage[]>((resolve, reject) => {
+        const req = db
+          .transaction(GARBAGE_STORE)
+          .objectStore(GARBAGE_STORE)
+          .getAll(undefined, limit);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      })
+    : legacyGarbage.slice(0, limit);
   if (entries.length === 0) return;
   const referenced = await new Promise<boolean[]>((resolve, reject) => {
     const tx = db.transaction("frames");
@@ -94,6 +104,12 @@ export async function collectVideoGarbage(
         completed.push(entry);
       }),
     );
+  }
+  if (!persistent) {
+    const done = new Set(completed);
+    const retained = legacyGarbage.filter((entry) => !done.has(entry));
+    legacyGarbage.splice(0, legacyGarbage.length, ...retained);
+    return;
   }
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(GARBAGE_STORE, "readwrite");

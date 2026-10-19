@@ -921,12 +921,16 @@ in-flight query per subscription and ignores results from disposed subscriptions
 `ReplaySession` and `useReplaySession` accept a structural `ReplayStorage` adapter;
 the default store and inferred default return type remain `ReplayStore`.
 
-The default database schema is version 2. Opening a version 1 recording upgrades it
-without changing its frame records or indexes. Metadata deletion and file cleanup
-intent commit together; failed OPFS deletions remain in a durable outbox for retry
-on the next flush/open. Cleanup never deletes shared legacy OPFS root files. Older
-clients explicitly opening database version 1 cannot open a database already upgraded
-to version 2; use a different `dbName` when running old and new clients side by side.
+The default database version remains 1. Existing databases are never automatically
+upgraded, so clients that explicitly open version 1 can continue to share them. New
+databases include a cleanup outbox: metadata deletion and file cleanup intent commit
+together, and failed file deletion survives restart. Existing databases without that
+store use the same selected-record deletion with an in-memory retry queue. Metadata
+always commits before files are deleted; a crash in that legacy fallback can leave
+unreferenced files, but cannot leave retained metadata pointing at a deleted file.
+To enable durable cleanup on an existing database, explicitly choose a higher
+`dbVersion` during an application-managed migration (older version-pinned clients
+must be closed/upgraded first). Cleanup never deletes shared legacy OPFS root files.
 Quota cleanup remains bounded to batches and a 50 ms continuation budget. Once the
 high watermark is reached, every flush checks pressure until usage falls 5 percentage
 points below it. The default disk retention remains unlimited; DVR pauses automatic
