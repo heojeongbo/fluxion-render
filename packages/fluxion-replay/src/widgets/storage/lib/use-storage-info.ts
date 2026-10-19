@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReplaySession } from "../../../features/session/model/replay-session";
 import type { StorageInfo } from "../../../features/store/model/replay-store";
+import { poll } from "../../../shared/lib/poll";
+import type { ReplayStorage } from "../../../shared/model/storage";
 
 export interface UseStorageInfoOptions {
   /** How often to poll in milliseconds. Default: 5000. */
@@ -22,20 +24,18 @@ export interface UseStorageInfoOptions {
  * // info?.idbFrameCount → 8320
  */
 export function useStorageInfo(
-  session: ReplaySession | null,
+  session: ReplaySession<ReplayStorage> | null,
   options?: UseStorageInfoOptions,
 ): StorageInfo | null {
   const intervalMs = options?.intervalMs ?? 5_000;
   const logToConsole = options?.logToConsole ?? false;
   const [info, setInfo] = useState<StorageInfo | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   useEffect(() => {
+    setInfo(null);
     if (!session) return;
-
-    const fetch = async () => {
-      try {
-        const result = await session.getStorageInfo();
+    return poll(
+      () => session.getStorageInfo(),
+      (result) => {
         setInfo(result);
         if (logToConsole) {
           console.log(
@@ -45,20 +45,10 @@ export function useStorageInfo(
               ` ${result.idbFrameCount} frames`,
           );
         }
-      } catch {
-        // ignore
-      }
-    };
-
-    void fetch();
-    const timer = setInterval(fetch, intervalMs);
-    timerRef.current = timer;
-
-    return () => {
-      clearInterval(timer);
-      timerRef.current = null;
-    };
-  }, [session, intervalMs]);
+      },
+      intervalMs,
+    );
+  }, [session, intervalMs, logToConsole]);
 
   return info;
 }

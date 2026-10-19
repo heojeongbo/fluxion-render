@@ -1,14 +1,16 @@
+import { useCallback, useRef, useState } from "react";
+import type { ReplayPlayer } from "../../../features/player/model/replay-player";
 import type { ReplaySession } from "../../../features/session/model/replay-session";
+import type { ReplayStorage } from "../../../shared/model/storage";
 import type { UseReplayPlayerResult } from "../../replay-timeline/lib/use-replay-player";
 import { useReplayPlayer } from "../../replay-timeline/lib/use-replay-player";
 import { useReplayScrubber } from "../../replay-timeline/lib/use-replay-scrubber";
 import { useScrubberControls } from "../../replay-timeline/lib/use-scrubber-controls";
-import { usePlaybackRate } from "./use-playback-rate";
 import { type UseReplayDvrResult, useReplayDvr } from "./use-replay-dvr";
 
 export interface UseDvrControllerOptions {
   /** Session from `useReplaySession`. Stays idle while `null`. */
-  session: ReplaySession | null;
+  session: ReplaySession<ReplayStorage> | null;
   /** `enterReplay` callback from `useReplaySession`. */
   enterReplay: (
     t?: number,
@@ -111,7 +113,8 @@ export function useDvrController(opts: UseDvrControllerOptions): UseDvrControlle
     snapMs,
   } = opts;
 
-  // Order matters — each hook below consumes the previous one's output.
+  const [rate, setRateState] = useState(initialRate);
+  const playerRef = useRef<ReplayPlayer | null>(null);
   const dvr = useReplayDvr({
     session,
     enterReplay,
@@ -119,10 +122,14 @@ export function useDvrController(opts: UseDvrControllerOptions): UseDvrControlle
     liveTimeRange,
     autoPlay,
     autoExitToLive,
-    rate: initialRate,
+    rate,
   });
 
-  const { rate, setRate } = usePlaybackRate({ player: dvr.player, initialRate });
+  playerRef.current = dvr.player;
+  const setRate = useCallback((value: number) => {
+    setRateState(value);
+    if (playerRef.current?.state === "playing") playerRef.current.play(value);
+  }, []);
 
   const replayPlayer = useReplayPlayer(dvr.player);
 

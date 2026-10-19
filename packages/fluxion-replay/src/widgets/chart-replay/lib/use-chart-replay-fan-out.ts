@@ -9,11 +9,11 @@ import type {
   ReplayPlayer,
   ReplayPlayerFrame,
 } from "../../../features/player/model/replay-player";
+import type { BaseChannel } from "../../../shared/model/base-channel";
 import type {
   DecodedFrame,
-  ReplayStore,
-} from "../../../features/store/model/replay-store";
-import type { BaseChannel } from "../../../shared/model/base-channel";
+  ReplayStorage as ReplayStore,
+} from "../../../shared/model/storage";
 
 /** Default ms fetched + cached on each side of the visible window. */
 const DEFAULT_PREFETCH_MARGIN_MS = 3000;
@@ -128,11 +128,6 @@ export function useChartReplayFanOut<T>(
   // Cache the last hydrate's query so same-window re-scrubs skip the IDB round
   // trip. The query is channel+window only (independent of lines), so it's
   // reusable across every fan-out target.
-  const cacheRef = useRef<{
-    from: number;
-    to: number;
-    frames: DecodedFrame<T>[];
-  } | null>(null);
 
   // Live frames accumulated between ticks; each fans across N lines on drain.
   const liveBufferRef = useRef<ReplayPlayerFrame<T>[]>([]);
@@ -160,6 +155,12 @@ export function useChartReplayFanOut<T>(
         ? host.scatter(line.layerId)
         : host.line(line.layerId);
 
+    let cache: {
+      from: number;
+      to: number;
+      frames: DecodedFrame<T>[];
+      generation?: number;
+    } | null = null;
     let cancelled = false;
     let inFlight = false;
     let queuedT: number | null = null;
@@ -205,13 +206,19 @@ export function useChartReplayFanOut<T>(
           const visibleFrom = t - windowMs;
           const fetchFrom = visibleFrom - marginMs;
           const fetchTo = t + marginMs;
-          const cache = cacheRef.current;
+          const generation = store.recordingGeneration;
           let frames: DecodedFrame<T>[];
-          if (cache && cache.from <= visibleFrom && cache.to >= t) {
+          if (
+            cache &&
+            cache.generation === generation &&
+            cache.from <= visibleFrom &&
+            cache.to >= t
+          ) {
             frames = cache.frames;
           } else {
             frames = await store.getFramesByChannel(channel, fetchFrom, fetchTo);
-            cacheRef.current = { from: fetchFrom, to: fetchTo, frames };
+            if (cancelled || generation !== store.recordingGeneration) return;
+            cache = { from: fetchFrom, to: fetchTo, frames, generation };
           }
           // Yield so a React cleanup that sets `cancelled` can land before we
           // touch the charts (defeats the stale-hydrate-wipes-live race).

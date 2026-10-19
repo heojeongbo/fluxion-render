@@ -63,9 +63,7 @@ describe("useRecordingSession", () => {
     const stub = makeSessionStub();
     const session = stubAsSession(stub);
     // StrictMode runs effect → cleanup → effect again with the SAME session.
-    // The startedSessionRef guard makes the second mount a no-op (exercises the
-    // `startedSessionRef.current === session` early return). startRecording is
-    // therefore never called more than once.
+    // Initialization is shared; the surviving effect must actually start recording.
     const { result } = renderHook(() => useRecordingSession({ session, enabled: true }), {
       wrapper: StrictMode,
     });
@@ -73,7 +71,8 @@ describe("useRecordingSession", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(stub.startRecording.mock.calls.length).toBeLessThanOrEqual(1);
+    expect(stub.startRecording).toHaveBeenCalledOnce();
+    expect(result.current.isRecording).toBe(true);
     expect(result.current.error).toBeNull();
   });
 

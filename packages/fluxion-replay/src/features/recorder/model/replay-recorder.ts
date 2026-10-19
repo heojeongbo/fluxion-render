@@ -98,15 +98,15 @@ export class ReplayRecorder {
     const payload = channel.encode(data);
     const frame: SerializedFrame = { t, channelId, payload };
 
+    this._store.appendFrame(frame);
     this._memoryBuffer.push(frame);
     this._memoryBuffer.evictWhile((f) => f.t < t - this._retentionMs);
-
-    this._store.appendFrame(frame);
 
     if (t - this._lastIndexMs >= this._indexIntervalMs) {
       this._index.insert(t);
       this._lastIndexMs = t;
     }
+    this._index.pruneBefore(Math.max(t - this._retentionMs, this._memoryBuffer.at(0)!.t));
   }
 
   /** Synchronous in-memory query. Fastest path for recent data. */

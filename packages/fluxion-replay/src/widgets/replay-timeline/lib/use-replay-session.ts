@@ -5,13 +5,16 @@ import {
   type ReplaySessionMode,
   type ReplaySessionOptions,
 } from "../../../features/session/model/replay-session";
+import type { ReplayStore } from "../../../features/store/model/replay-store";
+import type { ReplayStorage } from "../../../shared/model/storage";
 
-export interface UseReplaySessionOptions extends ReplaySessionOptions {
+export interface UseReplaySessionOptions<S extends ReplayStorage = ReplayStore>
+  extends ReplaySessionOptions<S> {
   autoOpen?: boolean;
 }
 
-export interface UseReplaySessionResult {
-  session: ReplaySession | null;
+export interface UseReplaySessionResult<S extends ReplayStorage = ReplayStore> {
+  session: ReplaySession<S> | null;
   isReady: boolean;
   /**
    * Surfaces any error thrown by `session.open()` (IDB quota, OPFS blocked,
@@ -31,11 +34,13 @@ export interface UseReplaySessionResult {
   exitReplay: () => void;
 }
 
-export function useReplaySession(opts: UseReplaySessionOptions): UseReplaySessionResult {
+export function useReplaySession<S extends ReplayStorage = ReplayStore>(
+  opts: UseReplaySessionOptions<S>,
+): UseReplaySessionResult<S> {
   const optsRef = useRef(opts);
   optsRef.current = opts;
 
-  const [session, setSession] = useState<ReplaySession | null>(null);
+  const [session, setSession] = useState<ReplaySession<S> | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [mode, setMode] = useState<ReplaySessionMode>("live");

@@ -1,5 +1,5 @@
 import { act, render } from "@testing-library/react";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { MetricChannel } from "../../../entities/metric-channel/metric-channel";
 import { ReplaySession } from "../../../features/session/model/replay-session";

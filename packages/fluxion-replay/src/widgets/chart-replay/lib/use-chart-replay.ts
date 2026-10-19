@@ -8,11 +8,11 @@ import type {
   ReplayPlayer,
   ReplayPlayerFrame,
 } from "../../../features/player/model/replay-player";
+import type { BaseChannel } from "../../../shared/model/base-channel";
 import type {
   DecodedFrame,
-  ReplayStore,
-} from "../../../features/store/model/replay-store";
-import type { BaseChannel } from "../../../shared/model/base-channel";
+  ReplayStorage as ReplayStore,
+} from "../../../shared/model/storage";
 
 /** Default ms fetched + cached on each side of the visible window. */
 const DEFAULT_PREFETCH_MARGIN_MS = 3000;
@@ -102,11 +102,6 @@ export function useChartReplay<T>(opts: UseChartReplayOptions<T>): UseChartRepla
 
   // Fix 1: cache the last hydrate result so seeks within the same window
   // skip the IDB round-trip entirely.
-  const cacheRef = useRef<{
-    from: number;
-    to: number;
-    frames: DecodedFrame<T>[];
-  } | null>(null);
 
   // Fix 3: accumulate onFrame events per tick instead of calling handle.push()
   // once per frame — drained as a single pushBatch() in onTick.
@@ -131,6 +126,12 @@ export function useChartReplay<T>(opts: UseChartReplayOptions<T>): UseChartRepla
   useEffect(() => {
     if (!handle || !player || !store) return;
 
+    let cache: {
+      from: number;
+      to: number;
+      frames: DecodedFrame<T>[];
+      generation?: number;
+    } | null = null;
     let cancelled = false;
     // Sequential hydrate queue. At most one IDB query in flight at a time.
     // Additional seek bursts collapse into `queuedT` — the last requested
@@ -177,9 +178,14 @@ export function useChartReplay<T>(opts: UseChartReplayOptions<T>): UseChartRepla
           // Only the visible window is ever pushed (filtered below).
           const fetchFrom = visibleFrom - marginMs;
           const fetchTo = t + marginMs;
-          const cache = cacheRef.current;
+          const generation = store.recordingGeneration;
           let frames: DecodedFrame<T>[];
-          if (cache && cache.from <= visibleFrom && cache.to >= t) {
+          if (
+            cache &&
+            cache.generation === generation &&
+            cache.from <= visibleFrom &&
+            cache.to >= t
+          ) {
             // Cache hit: the cached span covers the visible window. Keep the
             // whole cached span; the visible-window filter below narrows it.
             frames = cache.frames;
@@ -188,7 +194,8 @@ export function useChartReplay<T>(opts: UseChartReplayOptions<T>): UseChartRepla
             // (not the channelId) so the store decodes payloads up-front and
             // we don't need to `as T` the result. Phase 20-B-3.
             frames = await store.getFramesByChannel(channel, fetchFrom, fetchTo);
-            cacheRef.current = { from: fetchFrom, to: fetchTo, frames };
+            if (cancelled || generation !== store.recordingGeneration) return;
+            cache = { from: fetchFrom, to: fetchTo, frames, generation };
           }
           // Yield once so a React cleanup that sets `cancelled = true` has a
           // chance to run before we touch the chart. Without this yield, a

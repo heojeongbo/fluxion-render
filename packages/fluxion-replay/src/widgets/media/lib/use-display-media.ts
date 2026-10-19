@@ -23,8 +23,13 @@ export interface UseDisplayMediaResult {
 export function useDisplayMedia(): UseDisplayMediaResult {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const generation = useRef(0);
+  const removeEnded = useRef<(() => void) | null>(null);
 
   const stop = useCallback(() => {
+    generation.current++;
+    removeEnded.current?.();
+    removeEnded.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     setStream(null);
@@ -33,16 +38,23 @@ export function useDisplayMedia(): UseDisplayMediaResult {
   const start = useCallback(
     async (constraints?: DisplayMediaStreamOptions): Promise<MediaStream> => {
       stop(); // clear any existing stream first
+      const gen = generation.current;
       const s = await navigator.mediaDevices.getDisplayMedia(
         constraints ?? {
           video: { frameRate: 30 } as MediaTrackConstraints,
           audio: false,
         },
       );
+      if (gen !== generation.current) {
+        for (const track of s.getTracks()) track.stop();
+        return s; // Preserve the resolved stream contract; stale streams are ended.
+      }
       streamRef.current = s;
       setStream(s);
       // Auto-stop when the user ends sharing via browser UI
-      s.getVideoTracks()[0]?.addEventListener("ended", stop, { once: true });
+      const track = s.getVideoTracks()[0];
+      track?.addEventListener("ended", stop, { once: true });
+      removeEnded.current = () => track?.removeEventListener("ended", stop);
       return s;
     },
     [stop],

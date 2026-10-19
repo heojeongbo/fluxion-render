@@ -55,6 +55,11 @@ export class TimelineIndex {
     return result;
   }
 
+  /** Drop index entries outside the retained in-memory history. */
+  pruneBefore(t: number): void {
+    this._entries.splice(0, this._lowerBound(t));
+  }
+
   clear(): void {
     this._entries = [];
   }

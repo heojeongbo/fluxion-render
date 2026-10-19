@@ -77,11 +77,11 @@ export type { BaseChannel, ChannelSchema } from "./shared/model/base-channel";
 export type { ChannelId } from "./shared/model/channel-types";
 export type { ReplayFrame, SerializedFrame } from "./shared/model/frame";
 export { GenericRingBuffer } from "./shared/model/generic-ring-buffer";
-
 export type {
   FrameReader,
   FrameWriter,
   ReplayClock,
+  ReplayStorage,
   VideoChunkReader,
   VideoChunkWriter,
 } from "./shared/model/storage";

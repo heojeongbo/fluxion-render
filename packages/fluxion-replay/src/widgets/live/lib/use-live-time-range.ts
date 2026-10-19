@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ReplaySession } from "../../../features/session/model/replay-session";
 import type { RecordingSegment } from "../../../features/store/model/replay-store";
+import { poll } from "../../../shared/lib/poll";
+import type { ReplayStorage } from "../../../shared/model/storage";
 
 export type { RecordingSegment };
 
@@ -28,7 +30,7 @@ export interface UseLiveTimeRangeResult {
  * seed({ earliest: now, latest: now });
  */
 export function useLiveTimeRange(
-  session: ReplaySession | null,
+  session: ReplaySession<ReplayStorage> | null,
   options?: UseLiveTimeRangeOptions,
 ): UseLiveTimeRangeResult {
   const intervalMs = options?.intervalMs ?? 500;
@@ -36,29 +38,18 @@ export function useLiveTimeRange(
     null,
   );
   const [segments, setSegments] = useState<RecordingSegment[]>([]);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   useEffect(() => {
+    setTimeRange(null);
+    setSegments([]);
     if (!session) return;
-
-    const poll = async () => {
-      try {
-        const range = await session.getTimeRange();
+    return poll(
+      () => session.getTimeRange(),
+      (range) => {
         if (range) setTimeRange(range);
         setSegments([...session.store.getSegments()]);
-      } catch {
-        // Store may not be open yet — ignore
-      }
-    };
-
-    void poll();
-    const timer = setInterval(poll, intervalMs);
-    timerRef.current = timer;
-
-    return () => {
-      clearInterval(timer);
-      timerRef.current = null;
-    };
+      },
+      intervalMs,
+    );
   }, [session, intervalMs]);
 
   // MUST be stable across re-renders. Consumers (e.g. chart-replay's

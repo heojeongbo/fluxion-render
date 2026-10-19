@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReplayPlayer } from "../../../features/player/model/replay-player";
 import type { ReplaySession } from "../../../features/session/model/replay-session";
+import type { ReplayStorage } from "../../../shared/model/storage";
 
 export interface UseReplayDvrOptions {
   /** Session from `useReplaySession`. */
-  session: ReplaySession | null;
+  session: ReplaySession<ReplayStorage> | null;
   /** `enterReplay` callback returned by `useReplaySession`. */
   enterReplay: (
     t?: number,
@@ -127,6 +128,7 @@ export function useReplayDvr(opts: UseReplayDvrOptions): UseReplayDvrResult {
   // onChanges would call enter() N times — they'd all setPlayer in
   // arbitrary resolution order and leak (N - 1) parallel rAF loops.
   const enterGenRef = useRef(0);
+  const ownedPlayerRef = useRef<ReplayPlayer | null>(null);
 
   // True when the most recent gen bump RETURNED THE APP TO LIVE (exit / onEnd)
   // rather than superseding with a newer enter(). A cancelled enter() resolves
@@ -143,10 +145,9 @@ export function useReplayDvr(opts: UseReplayDvrOptions): UseReplayDvrResult {
     genBumpReturnedToLiveRef.current = true;
     offEndRef.current?.();
     offEndRef.current = null;
-    setPlayer((current) => {
-      current?.dispose();
-      return null;
-    });
+    ownedPlayerRef.current?.dispose();
+    ownedPlayerRef.current = null;
+    setPlayer(null);
     frozenLatestRef.current = null;
     setFrozenLatest(null);
     exitReplay();
@@ -197,6 +198,7 @@ export function useReplayDvr(opts: UseReplayDvrOptions): UseReplayDvrResult {
 
       frozenLatestRef.current = frozen;
       setFrozenLatest(frozen);
+      ownedPlayerRef.current = p;
       setPlayer(p);
 
       if (autoExitRef.current) {
@@ -209,6 +211,7 @@ export function useReplayDvr(opts: UseReplayDvrOptions): UseReplayDvrResult {
           genBumpReturnedToLiveRef.current = true;
           offEndRef.current = null;
           p.dispose();
+          ownedPlayerRef.current = null;
           setPlayer(null);
           frozenLatestRef.current = null;
           setFrozenLatest(null);
@@ -230,10 +233,17 @@ export function useReplayDvr(opts: UseReplayDvrOptions): UseReplayDvrResult {
   // caller's useReplaySession). Stopping the player is enough.
   useEffect(() => {
     return () => {
+      enterGenRef.current++;
+      genBumpReturnedToLiveRef.current = false;
       offEndRef.current?.();
       offEndRef.current = null;
+      ownedPlayerRef.current?.dispose();
+      ownedPlayerRef.current = null;
+      setPlayer(null);
+      frozenLatestRef.current = null;
+      setFrozenLatest(null);
     };
-  }, []);
+  }, [session]);
 
   // Memoised so consumers that put `effectiveTimeRange` in useEffect deps
   // don't re-fire on every parent render. Same (player, frozenLatest,

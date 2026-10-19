@@ -4,8 +4,8 @@ import type {
   LineSample,
 } from "@heojeongbo/fluxion-render";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReplayStore } from "../../../features/store/model/replay-store";
 import type { BaseChannel } from "../../../shared/model/base-channel";
+import type { ReplayStorage as ReplayStore } from "../../../shared/model/storage";
 
 export interface UseChartLiveBackfillOptions<T> {
   /** Host returned by `<FluxionCanvas onReady={setHost}>`. `null` while mounting. */

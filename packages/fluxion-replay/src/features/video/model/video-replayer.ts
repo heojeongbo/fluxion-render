@@ -174,7 +174,7 @@ export class VideoReplayer {
     const chunk = new EncodedVideoChunk({
       type: isKeyframe ? "key" : "delta",
       timestamp: Math.round(t * 1000),
-      data: data.buffer as ArrayBuffer,
+      data: data as Uint8Array<ArrayBuffer>,
     });
 
     decoder.decode(chunk);

@@ -1,17 +1,19 @@
+import type {
+  DecodedFrame,
+  RecordingSegment,
+  StorageInfo,
+} from "../../../shared/model/storage";
+
+export type {
+  DecodedFrame,
+  RecordingSegment,
+  StorageInfo,
+} from "../../../shared/model/storage";
+
 import { isQuotaExceededError } from "../../../shared/lib/is-quota-exceeded-error";
 import type { BaseChannel } from "../../../shared/model/base-channel";
 import type { SerializedFrame } from "../../../shared/model/frame";
-
-/**
- * Result of a typed `getFramesByChannel(channel, ...)` query. The payload
- * has already been decoded by the channel, so consumers don't have to
- * `channel.decode(payload) as T` themselves.
- */
-export interface DecodedFrame<T> {
-  t: number;
-  channelId: string;
-  data: T;
-}
+import { collectVideoGarbage, deleteFrameBatch, GARBAGE_STORE } from "./frame-eviction";
 
 export interface ReplayStoreOptions {
   dbName?: string;
@@ -38,26 +40,8 @@ export interface ReplayStoreOptions {
   storageLogIntervalMs?: number;
 }
 
-export interface StorageInfo {
-  /** Total bytes used by this origin (IDB + OPFS + all storage). */
-  usedBytes: number;
-  /** Storage quota for this origin in bytes. */
-  quotaBytes: number;
-  /** Percentage of quota used (0–100). */
-  percentUsed: number;
-  /** Number of frame records currently in IndexedDB. */
-  idbFrameCount: number;
-}
-
-export interface RecordingSegment {
-  /** Segment start timestamp (ms since epoch). */
-  start: number;
-  /** Segment end timestamp (ms since epoch). null = currently recording. */
-  end: number | null;
-}
-
 const DEFAULT_DB_NAME = "fluxion-replay";
-const DEFAULT_DB_VERSION = 1;
+const DEFAULT_DB_VERSION = 2;
 const DEFAULT_RETENTION_MS = Infinity;
 const DEFAULT_BATCH_INTERVAL_MS = 500;
 // Maximum records written per IDB transaction. Capping this prevents a single
@@ -85,6 +69,8 @@ interface FrameRecord {
   t: number;
   channelId: string;
   payload: ArrayBuffer;
+  /** Legacy rows omit this marker; new metric rows need no file cleanup intent. */
+  video?: boolean;
 }
 
 export class ReplayStore {
@@ -104,7 +90,11 @@ export class ReplayStore {
   private readonly _onError?: (error: unknown) => void;
   private _lastWriteError: unknown = null;
   private readonly _videoWrites = new Set<Promise<void>>();
+  private readonly _videoPaths = new Map<string, number>();
 
+  get recordingGeneration(): number {
+    return this._writeGeneration;
+  }
   get pendingFrameCount(): number {
     return this._pending.length;
   }
@@ -121,6 +111,8 @@ export class ReplayStore {
   private _storageLogIntervalMs: number;
   private _storageLogTimer: ReturnType<typeof setInterval> | null = null;
   private _flushCount = 0;
+  private _storagePressure = false;
+  private _garbageTask: Promise<void> | null = null;
   // channelIds that have had at least one video chunk written this session.
   // Scopes OPFS chunk eviction to real video channels (metric/log channels
   // never write chunks) without having to decode opaque frame payloads.
@@ -138,7 +130,7 @@ export class ReplayStore {
       throw new RangeError("maxPendingFrames must be positive");
     this._onError = opts?.onError;
     this._dbName = opts?.dbName ?? DEFAULT_DB_NAME;
-    this._dbVersion = opts?.dbVersion ?? DEFAULT_DB_VERSION;
+    this._dbVersion = Math.max(opts?.dbVersion ?? DEFAULT_DB_VERSION, DEFAULT_DB_VERSION);
     this._retentionMs = opts?.retentionMs ?? DEFAULT_RETENTION_MS;
     this._batchIntervalMs = opts?.batchIntervalMs ?? DEFAULT_BATCH_INTERVAL_MS;
     if (!(this._retentionMs >= 0))
@@ -180,6 +172,8 @@ export class ReplayStore {
       this._legacyRoot = null;
       return;
     }
+    await this._collectGarbage().catch(() => {});
+    if (this._disposed) return;
     this._startFlushTimer();
     if (this._storageLogIntervalMs > 0) {
       this._startStorageLogTimer();
@@ -196,6 +190,7 @@ export class ReplayStore {
       t: frame.t,
       channelId: frame.channelId,
       payload: frame.payload,
+      video: this._videoChannelIds.has(frame.channelId),
     });
   }
 
@@ -293,28 +288,26 @@ export class ReplayStore {
     cutoffMs: number,
     limit = MAX_DELETE_PER_EVICTION,
   ): Promise<void> {
-    const db = this._assertOpen();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction("frames", "readwrite");
-      const index = tx.objectStore("frames").index("by_t");
-      const range = IDBKeyRange.upperBound(cutoffMs, true);
-      const req = index.openCursor(range);
-      let deleted = 0;
-      req.onsuccess = (e) => {
-        const cursor = (e.target as IDBRequest<IDBCursorWithValue | null>).result;
-        // Stop when there are no more records or the per-pass limit is reached.
-        // Limiting deletes per eviction keeps the cursor loop from blocking the
-        // main thread for seconds when tens of thousands of records are stale.
-        if (!cursor || deleted >= limit) {
-          resolve();
-          return;
-        }
-        cursor.delete();
-        deleted++;
-        cursor.continue();
-      };
-      req.onerror = () => reject(req.error);
-    });
+    await deleteFrameBatch(this._assertOpen(), cutoffMs, limit);
+    await this._collectGarbage();
+  }
+
+  private async _collectGarbage(): Promise<void> {
+    if (this._garbageTask) return this._garbageTask;
+    if (!this._db || !this._opfsRoot) return;
+    this._garbageTask = collectVideoGarbage(
+      this._db,
+      this._opfsRoot,
+      MAX_DELETE_PER_EVICTION,
+      (channelId, t) =>
+        this._videoPaths.has(JSON.stringify([channelId, `${t}.chunk`])) ||
+        this._pending.some((frame) => frame.channelId === channelId && frame.t === t),
+    );
+    try {
+      await this._garbageTask;
+    } finally {
+      this._garbageTask = null;
+    }
   }
 
   /**
@@ -483,12 +476,17 @@ export class ReplayStore {
     data: Uint8Array,
   ): Promise<void> {
     if (this._clearTask) await this._clearTask;
+    const key = JSON.stringify([channelId, filename]);
+    this._videoPaths.set(key, (this._videoPaths.get(key) ?? 0) + 1);
     const write = this._writeVideoChunk(channelId, filename, data);
     this._videoWrites.add(write);
     try {
       await write;
     } finally {
       this._videoWrites.delete(write);
+      const remaining = this._videoPaths.get(key)! - 1;
+      if (remaining) this._videoPaths.set(key, remaining);
+      else this._videoPaths.delete(key);
     }
   }
 
@@ -553,9 +551,11 @@ export class ReplayStore {
       // resurrect an earlier recording after this promise resolves.
       if (this._writeTask) await this._writeTask.catch(() => {});
       await Promise.allSettled([...this._videoWrites]);
+      if (this._garbageTask) await this._garbageTask.catch(() => {});
       await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction("frames", "readwrite");
+        const tx = db.transaction(["frames", GARBAGE_STORE], "readwrite");
         tx.objectStore("frames").clear();
+        tx.objectStore(GARBAGE_STORE).clear();
         tx.oncomplete = () => resolve();
         tx.onerror = tx.onabort = () => reject(tx.error);
       });
@@ -650,9 +650,13 @@ export class ReplayStore {
         this._pending.splice(0, batch.length);
         this._lastWriteError = null;
       }
+      await this._collectGarbage();
       if (
         generation === this._writeGeneration &&
-        (forceEvict || ++this._flushCount % EVICT_EVERY_N_FLUSHES === 0)
+        (forceEvict ||
+          this._storagePressure ||
+          Number.isFinite(this._retentionMs) ||
+          ++this._flushCount % EVICT_EVERY_N_FLUSHES === 0)
       )
         await this._maybeEvict();
     };
@@ -681,16 +685,19 @@ export class ReplayStore {
         const range = await this.getTimeRange();
         if (range) {
           const cutoff = range.latest - this._retentionMs;
-          await this.deleteVideoChunksBefore(cutoff);
-          await this.deleteFramesBefore(cutoff);
-          this._trimSegmentsBefore(cutoff);
+          await this._evictBefore(cutoff);
         }
       }
       if (this._evictThresholdPct >= 100) return;
       // withCount:false — the eviction gate only needs percentUsed, so skip the
       // full IDB _countFrames() the UI-facing getStorageInfo() does.
       const info = await this.getStorageInfo({ withCount: false });
-      if (info.percentUsed < this._evictThresholdPct) return;
+      // Stay active until the low watermark; pressure checks run on every flush.
+      this._storagePressure =
+        info.percentUsed >= this._evictThresholdPct ||
+        (this._storagePressure &&
+          info.percentUsed >= Math.max(0, this._evictThresholdPct - 5));
+      if (!this._storagePressure) return;
       // Delete the oldest 10 % of the recorded time span.
       await this._evictOldest(0.1);
     } catch {
@@ -700,8 +707,8 @@ export class ReplayStore {
 
   /**
    * Delete the oldest `fraction` (0–1) of the recorded time span from BOTH
-   * backends: OPFS video chunks first (while their metadata is still queryable),
-   * then IDB frame rows, then clip in-memory segments to match. Returns the
+   * backends: commit IDB deletions and file cleanup intents, collect files,
+   * then clip in-memory segments to the actual retained range. Returns the
    * cutoff timestamp used, or null when there is nothing to evict.
    *
    * Used by the periodic threshold eviction (`_maybeEvict`, 10 %) and by
@@ -715,15 +722,24 @@ export class ReplayStore {
     if (spanMs <= 0) return null;
 
     const cutoffMs = timeRange.earliest + Math.floor(spanMs * fraction);
-    // OPFS chunks BEFORE IDB rows: deleteVideoChunksBefore reads frame metadata
-    // to locate the `${t}.chunk` files, so the rows must still exist.
-    await this.deleteVideoChunksBefore(cutoffMs);
-    await this.deleteFramesBefore(cutoffMs);
-    // Clip in-memory segments to match the new IDB lower bound so that
-    // getSegments() / detectGaps() / snapTimeToSegment() stay consistent
-    // with what actually exists in the database.
-    this._trimSegmentsBefore(cutoffMs);
+    await this._evictBefore(cutoffMs);
     return cutoffMs;
+  }
+
+  private async _evictBefore(cutoff: number): Promise<void> {
+    const generation = this._writeGeneration;
+    const started = performance.now();
+    let previous = -Infinity;
+    do {
+      await this.deleteFramesBefore(cutoff);
+      const remaining = await this.getTimeRange();
+      if (generation !== this._writeGeneration || !remaining) return;
+      this._trimSegmentsBefore(remaining.earliest);
+      if (remaining.earliest >= cutoff || remaining.earliest <= previous) return;
+      previous = remaining.earliest;
+      // Each IDB transaction yields to the browser. Continue on the next flush
+      // once the time budget is spent, without scanning the full recording.
+    } while (performance.now() - started < 50 && !this._evictionPaused);
   }
 
   private _trimSegmentsBefore(cutoffMs: number): void {
@@ -760,7 +776,7 @@ export class ReplayStore {
       const tx = db.transaction("frames", "readwrite");
       const store = tx.objectStore("frames");
       for (const record of records) {
-        store.add({ t: record.t, channelId: record.channelId, payload: record.payload });
+        store.add(record);
       }
       tx.oncomplete = () => resolve();
       tx.onerror = tx.onabort = () => reject(tx.error);
@@ -772,6 +788,8 @@ export class ReplayStore {
       const req = indexedDB.open(this._dbName, this._dbVersion);
       req.onupgradeneeded = (e) => {
         const db = (e.target as IDBOpenDBRequest).result;
+        if (!db.objectStoreNames.contains(GARBAGE_STORE))
+          db.createObjectStore(GARBAGE_STORE);
         if (!db.objectStoreNames.contains("frames")) {
           const store = db.createObjectStore("frames", { autoIncrement: true });
           store.createIndex("by_t", "t");

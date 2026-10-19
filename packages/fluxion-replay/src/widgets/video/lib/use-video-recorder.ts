@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { ReplaySession } from "../../../features/session/model/replay-session";
 import { VideoRecorder } from "../../../features/video/model/video-recorder";
+import type { ReplayStorage } from "../../../shared/model/storage";
 
 export interface UseVideoRecorderOptions {
   /**
@@ -9,7 +10,7 @@ export interface UseVideoRecorderOptions {
    */
   channelId: string;
   /** Session that owns the store and recorder. `null` while opening. */
-  session: ReplaySession | null;
+  session: ReplaySession<ReplayStorage> | null;
   /**
    * Whether the session is actively recording. The hook starts the
    * `VideoRecorder` on every `false → true` transition and stops it on

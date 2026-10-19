@@ -4,12 +4,12 @@ import type {
   ReplayPlayer,
   ReplayPlayerFrame,
 } from "../../../features/player/model/replay-player";
-import type { ReplayStore } from "../../../features/store/model/replay-store";
 import { TimelineIndex } from "../../../features/timeline/model/timeline-index";
 import {
   type VideoDecoderConfig,
   VideoReplayer,
 } from "../../../features/video/model/video-replayer";
+import type { ReplayStorage as ReplayStore } from "../../../shared/model/storage";
 
 /**
  * Minimum lookback (ms) for the keyframe re-decode window on seek. Must comfortably

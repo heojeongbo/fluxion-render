@@ -893,8 +893,8 @@ pnpm --filter @heojeongbo/fluxion-render build
 cd packages/fluxion-replay && pnpm vitest run --coverage
 ```
 
-Enforced thresholds (`vitest.config.ts`): **100% lines · 99% statements ·
-97% functions · 96% branches**. `testTimeout` is set once for the whole package
+Enforced thresholds (`vitest.config.ts`): **100% lines · 100% statements ·
+100% functions · 100% branches**. `testTimeout` is set once for the whole package
 in `vitest.config.ts`; don't add per-test `timeout:` options.
 
 ---
@@ -902,3 +902,48 @@ in `vitest.config.ts`; don't add per-test `timeout:` options.
 ## License
 
 MIT
+
+## Recording ownership and bounded storage
+
+`useRecordingSession` stops recording when disabled or unmounted and starts again
+when enabled. `clearOnStart` clears once per session in the mounted hook, including
+under React StrictMode; toggling enabled preserves recorded history. Ticker producer
+callbacks use their latest values. The initial ticker channel IDs and intervals
+remain fixed for that active recording cycle. `useDisplayMedia.stop()` also cancels
+pending capture ownership: a late permission result resolves with its tracks stopped.
+
+Chart hydration caches live within the player/store/channel subscription. Replacing
+any of those identities discards the cache and ignores unfinished queries. DVR entry
+uses the current rate, invalidates pending entry on unmount/session replacement,
+and restores storage eviction if entry fails. Range/storage polling permits one
+in-flight query per subscription and ignores results from disposed subscriptions.
+
+`ReplaySession` and `useReplaySession` accept a structural `ReplayStorage` adapter;
+the default store and inferred default return type remain `ReplayStore`.
+
+The default database schema is version 2. Opening a version 1 recording upgrades it
+without changing its frame records or indexes. Metadata deletion and file cleanup
+intent commit together; failed OPFS deletions remain in a durable outbox for retry
+on the next flush/open. Cleanup never deletes shared legacy OPFS root files. Older
+clients explicitly opening database version 1 cannot open a database already upgraded
+to version 2; use a different `dbName` when running old and new clients side by side.
+Quota cleanup remains bounded to batches and a 50 ms continuation budget. Once the
+high watermark is reached, every flush checks pressure until usage falls 5 percentage
+points below it. The default disk retention remains unlimited; DVR pauses automatic
+history eviction.
+
+`VideoRecorder` defaults to at most 4 queued encoder inputs, 60 pending chunks and
+16 MiB of pending encoded data. Configure `maxEncodeQueueSize`, `maxPendingChunks`,
+and `maxPendingBytes` with positive finite values. Overflow drops frames until a new
+keyframe; `pressure` reports pending chunks/bytes and the cumulative dropped count.
+Use the explicit drain before stopping the session when the final encoder output
+must be preserved:
+
+```ts
+await videoRecorder.stopAndFlush();
+session.stopRecording();
+await session.store.flush();
+```
+
+`stop()` remains synchronous and immediate. Already accepted file writes finish,
+but a restarted video recorder never records a previous generation's completion.

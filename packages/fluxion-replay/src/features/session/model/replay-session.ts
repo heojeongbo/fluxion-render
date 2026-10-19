@@ -1,4 +1,5 @@
 import type { BaseChannel } from "../../../shared/model/base-channel";
+import type { ReplayStorage } from "../../../shared/model/storage";
 import { ReplayPlayer } from "../../player/model/replay-player";
 import { ReplayRecorder } from "../../recorder/model/replay-recorder";
 import type { RecordingSegment } from "../../store/model/replay-store";
@@ -10,10 +11,10 @@ import {
 
 export type ReplaySessionMode = "live" | "replay";
 
-export interface ReplaySessionOptions {
+export interface ReplaySessionOptions<S extends ReplayStorage = ReplayStore> {
   channels: BaseChannel<unknown>[];
   /** Optional owned store instance; defaults to ReplayStore(storeOptions). */
-  store?: ReplayStore;
+  store?: S;
   /** In-memory history only. Set storeOptions.retentionMs for persisted retention. */
   retentionMs?: number;
   memoryCapacity?: number;
@@ -31,8 +32,8 @@ export interface ReplaySessionOptions {
   storageLogIntervalMs?: number;
 }
 
-export class ReplaySession {
-  private readonly _store: ReplayStore;
+export class ReplaySession<S extends ReplayStorage = ReplayStore> {
+  private readonly _store: S;
   private readonly _recorder: ReplayRecorder;
   private readonly _channelMap: Map<string, BaseChannel<unknown>>;
   private _player: ReplayPlayer | null = null;
@@ -42,15 +43,15 @@ export class ReplaySession {
   // a race to a newer call — it must not install its player or flip the mode
   // (last-to-CALL wins, not last-to-RESOLVE).
   private _opGen = 0;
+  private _recordingGeneration = 0;
 
-  constructor(opts: ReplaySessionOptions) {
-    this._store =
-      opts.store ??
+  constructor(opts: ReplaySessionOptions<S>) {
+    this._store = (opts.store ??
       new ReplayStore({
         evictThresholdPct: opts.evictThresholdPct,
         storageLogIntervalMs: opts.storageLogIntervalMs,
         ...opts.storeOptions,
-      });
+      })) as S;
 
     this._channelMap = new Map(opts.channels.map((ch) => [ch.channelId, ch]));
 
@@ -68,11 +69,14 @@ export class ReplaySession {
   }
 
   async startRecording(): Promise<void> {
+    if (this._recorder.isRecording) return;
+    this._recordingGeneration++;
     this._store.startSegment();
     this._recorder.start();
   }
 
   stopRecording(): void {
+    this._recordingGeneration++;
     this._store.endSegment();
     this._recorder.stop();
   }
@@ -99,56 +103,65 @@ export class ReplaySession {
     // range — otherwise the last ~500ms of frames (still in the in-memory
     // queue) are invisible to both `getTimeRange()` and the player's
     // prefetch, leaving a tail gap right where the user just entered.
-    await this._store.flush();
+    try {
+      await this._store.flush();
 
-    const idbRange = await this._store.getTimeRange();
-    const fallback = idbRange ?? {
-      earliest: Date.now() - 10 * 60 * 1000,
-      latest: Date.now(),
-    };
+      const idbRange = await this._store.getTimeRange();
+      const fallback = idbRange ?? {
+        earliest: Date.now() - 10 * 60 * 1000,
+        latest: Date.now(),
+      };
 
-    let range: { earliest: number; latest: number };
-    // Only honour caller-supplied bounds when they describe a real interval.
-    // A zero-width or inverted range (e.g. a freshly-seeded liveTimeRange
-    // before the first poll) collapses the player to its start point —
-    // onEnd fires on the first tick. Fall back to the IDB range instead.
-    if (opts?.timeRange && opts.timeRange.latest > opts.timeRange.earliest) {
-      const clamped = idbRange
-        ? {
-            earliest: Math.max(opts.timeRange.earliest, idbRange.earliest),
-            latest: Math.min(opts.timeRange.latest, idbRange.latest),
-          }
-        : opts.timeRange;
-      // Belt-and-suspenders: if the intersection collapsed (caller's range
-      // doesn't overlap what IDB actually has), fall back to IDB so the
-      // player has something to play.
-      range = clamped.latest > clamped.earliest ? clamped : fallback;
-    } else {
-      range = fallback;
-    }
+      let range: { earliest: number; latest: number };
+      // Only honour caller-supplied bounds when they describe a real interval.
+      // A zero-width or inverted range (e.g. a freshly-seeded liveTimeRange
+      // before the first poll) collapses the player to its start point —
+      // onEnd fires on the first tick. Fall back to the IDB range instead.
+      if (opts?.timeRange && opts.timeRange.latest > opts.timeRange.earliest) {
+        const clamped = idbRange
+          ? {
+              earliest: Math.max(opts.timeRange.earliest, idbRange.earliest),
+              latest: Math.min(opts.timeRange.latest, idbRange.latest),
+            }
+          : opts.timeRange;
+        // Belt-and-suspenders: if the intersection collapsed (caller's range
+        // doesn't overlap what IDB actually has), fall back to IDB so the
+        // player has something to play.
+        range = clamped.latest > clamped.earliest ? clamped : fallback;
+      } else {
+        range = fallback;
+      }
 
-    const player = new ReplayPlayer({
-      store: this._store,
-      channels: this._channelMap,
-      timeRange: range,
-    });
+      const player = new ReplayPlayer({
+        store: this._store,
+        channels: this._channelMap,
+        timeRange: range,
+      });
 
-    if (timestamp !== undefined) {
-      player.seek(timestamp);
-    }
+      if (timestamp !== undefined) {
+        player.seek(timestamp);
+      }
 
-    // A newer enterReplay()/exitReplay()/dispose() landed while we awaited.
-    // Don't install this player or flip the mode — return it disposed so the
-    // caller's own gen guard (e.g. useReplayDvr) can treat it uniformly
-    // (its dispose() call on the returned player is idempotent).
-    if (gen !== this._opGen) {
-      player.dispose();
+      // A newer enterReplay()/exitReplay()/dispose() landed while we awaited.
+      // Don't install this player or flip the mode — return it disposed so the
+      // caller's own gen guard (e.g. useReplayDvr) can treat it uniformly
+      // (its dispose() call on the returned player is idempotent).
+      if (gen !== this._opGen) {
+        player.dispose();
+        return player;
+      }
+
+      this._player = player;
+      this._mode = "replay";
       return player;
+    } catch (error) {
+      if (gen === this._opGen) {
+        this._player = null;
+        this._mode = "live";
+        this._store.setEvictionPaused(false);
+      }
+      throw error;
     }
-
-    this._player = player;
-    this._mode = "replay";
-    return player;
   }
 
   exitReplay(): void {
@@ -174,10 +187,11 @@ export class ReplaySession {
 
   async clearRecording(): Promise<void> {
     const wasRecording = this._recorder.isRecording;
+    const generation = this._recordingGeneration;
     this._recorder.stop();
     await this._store.clearAll();
     this._recorder.clear();
-    if (wasRecording) this._recorder.start();
+    if (wasRecording && generation === this._recordingGeneration) this._recorder.start();
   }
 
   get mode(): ReplaySessionMode {
@@ -188,7 +202,7 @@ export class ReplaySession {
     return this._player;
   }
 
-  get store(): ReplayStore {
+  get store(): S {
     return this._store;
   }
 
@@ -197,6 +211,7 @@ export class ReplaySession {
   }
 
   dispose(): void {
+    this._recordingGeneration++;
     this._opGen++; // an in-flight enterReplay must not resurrect a player
     this._player?.dispose();
     this._player = null;

@@ -3,6 +3,7 @@ import { useFluxionStream } from "@heojeongbo/fluxion-render/react";
 import { useRef } from "react";
 import type { ReplaySession } from "../../../features/session/model/replay-session";
 import type { BaseChannel } from "../../../shared/model/base-channel";
+import type { ReplayStorage } from "../../../shared/model/storage";
 import type { UseReplayDvrResult } from "../../dvr/lib/use-replay-dvr";
 import { useChartLiveBackfill } from "./use-chart-live-backfill";
 import { type UseChartReplayResult, useChartReplay } from "./use-chart-replay";
@@ -12,7 +13,7 @@ export interface UseChartReplayBridgeOptions<T> {
   host: FluxionHost | null;
   /** Session — needed for live recording (`session.record`) and for the
    *  replay-mode chart hydrate (`session.store`). `null` while opening. */
-  session: ReplaySession | null;
+  session: ReplaySession<ReplayStorage> | null;
   /** DVR controller from `useReplayDvr`. */
   dvr: UseReplayDvrResult;
   /**

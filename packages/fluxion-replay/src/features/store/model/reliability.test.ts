@@ -184,7 +184,7 @@ it("surfaces request and transaction failures without discarding staged frames",
   transaction.mockImplementationOnce(failTransaction);
   await expect(store.getFramesByChannel("cam", 0, 10)).rejects.toThrow("request failed");
   transaction.mockImplementationOnce(failTransaction);
-  await expect(store.deleteFramesBefore(10)).rejects.toThrow("request failed");
+  await expect(store.deleteFramesBefore(10)).rejects.toThrow("transaction failed");
   transaction.mockImplementationOnce(failTransaction);
   await expect(store.getTimeRange()).rejects.toThrow("transaction failed");
   transaction.mockImplementationOnce(failTransaction);

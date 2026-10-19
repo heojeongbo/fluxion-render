@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReplaySession } from "../../../features/session/model/replay-session";
+import type { ReplayStorage } from "../../../shared/model/storage";
 
 export interface RecordingTickerSpec {
   /** Channel id to record into. Must be registered on the session. */
@@ -13,11 +14,11 @@ export interface RecordingTickerSpec {
 
 export interface UseRecordingSessionOptions {
   /** Session from `useReplaySession`. Recording stays idle while `null`. */
-  session: ReplaySession | null;
+  session: ReplaySession<ReplayStorage> | null;
   /** Set to `false` to suspend recording (e.g. a "pause" toggle in the UI). */
   enabled: boolean;
   /**
-   * Wipe the store before starting (`session.clearRecording()`). Default
+   * Wipe the store once per session in this hook (`session.clearRecording()`). Default
    * `true` for "the demo IS the recording" pages; set `false` to keep
    * historical data across remounts.
    */
@@ -47,9 +48,8 @@ export interface UseRecordingSessionResult {
 
 /**
  * Bundles the recording start/stop dance + optional per-channel tickers
- * the demos write by hand. Captures the StrictMode-safe ref guard so a
- * second mount can't double-start the recorder, and the cancellation
- * flag so a fast unmount doesn't race the async `startRecording()`.
+ * the demos write by hand. Shares initialization across StrictMode effects;
+ * each active effect owns its recording cycle and cancels obsolete starts.
  *
  * @example
  * useRecordingSession({
@@ -76,14 +76,22 @@ export function useRecordingSession(
   channelsRef.current = channels;
   const seedRef = useRef(seedTimeRange);
   seedRef.current = seedTimeRange;
-  const startedSessionRef = useRef<ReplaySession | null>(null);
+  const initialization = useRef<{
+    session: ReplaySession<ReplayStorage>;
+    promise: Promise<void>;
+  } | null>(null);
+  const generation = useRef(0);
 
   useEffect(() => {
     if (!session || !enabled) return;
-    // Same session, already initialised by a previous (StrictMode) mount
-    // — don't restart, just no-op.
-    if (startedSessionRef.current === session) return;
-    startedSessionRef.current = session;
+    const gen = ++generation.current;
+    if (initialization.current?.session !== session) {
+      initialization.current = {
+        session,
+        promise: clearOnStart ? session.clearRecording() : Promise.resolve(),
+      };
+    }
+    const ready = initialization.current.promise;
 
     let cancelled = false;
     const intervalIds: ReturnType<typeof setInterval>[] = [];
@@ -92,10 +100,14 @@ export function useRecordingSession(
 
     void (async () => {
       try {
-        if (clearOnStart) await session.clearRecording();
+        await ready;
         if (cancelled) return;
         await session.startRecording();
-        if (cancelled) return;
+        if (cancelled) {
+          if (generation.current === gen || initialization.current?.session !== session)
+            session.stopRecording();
+          return;
+        }
 
         if (seedRef.current) {
           const now = Date.now();
@@ -107,7 +119,11 @@ export function useRecordingSession(
           intervalIds.push(
             setInterval(() => {
               const wallT = Date.now();
-              session.record(spec.channelId, spec.produce(wallT), wallT);
+              const current = channelsRef.current?.find(
+                (item) => item.channelId === spec.channelId,
+              );
+              if (current)
+                session.record(current.channelId, current.produce(wallT), wallT);
             }, spec.intervalMs),
           );
         }
@@ -116,7 +132,7 @@ export function useRecordingSession(
         if (!cancelled) {
           setError(e instanceof Error ? e : new Error(String(e)));
           // Allow a retry on next render after a failure.
-          startedSessionRef.current = null;
+          initialization.current = null;
         }
       }
     })();
@@ -125,10 +141,7 @@ export function useRecordingSession(
       cancelled = true;
       for (const id of intervalIds) clearInterval(id);
       setIsRecording(false);
-      // We deliberately do NOT call session.stopRecording() here: in
-      // StrictMode this cleanup fires immediately after the first mount,
-      // and stopping would terminate the recorder mid-init. The session's
-      // own dispose() — owned by useReplaySession — handles teardown.
+      session.stopRecording();
     };
   }, [session, enabled, clearOnStart]);
 

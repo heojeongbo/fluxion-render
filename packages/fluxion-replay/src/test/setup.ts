@@ -15,7 +15,7 @@ afterEach(() => {
 
 // ─── IndexedDB in-memory stub ─────────────────────────────────────────────────
 
-type IDBRecord = { _key: number; [key: string]: unknown };
+type IDBRecord = { _key: IDBValidKey; [key: string]: unknown };
 
 /**
  * Lexicographic compare matching IDB's array-key ordering. Returns -1, 0, or 1.
@@ -84,6 +84,14 @@ class FakeIDBIndex {
     private readonly _field: string | string[],
   ) {}
 
+  count(key?: IDBValidKey): FakeIDBRequest<number> {
+    return new FakeIDBRequest(
+      this._store._records.filter(
+        (r) => key === undefined || cmpKey(this._keyOf(r), key) === 0,
+      ).length,
+    );
+  }
+
   /** Extract this index's key from a record. Composite indexes return a tuple. */
   private _keyOf(r: IDBRecord): unknown {
     const f = this._field;
@@ -128,17 +136,17 @@ class FakeIDBIndex {
     return req;
   }
 
-  getAll(range?: FakeIDBKeyRange): FakeIDBRequest<IDBRecord[]> {
+  getAll(range?: FakeIDBKeyRange, limit?: number): FakeIDBRequest<IDBRecord[]> {
     const results = this._store._records
       .filter((r) => !range || range.includes(this._keyOf(r)))
       .sort((a, b) => cmpKey(this._keyOf(a), this._keyOf(b)));
-    return new FakeIDBRequest([...results]);
+    return new FakeIDBRequest(results.slice(0, limit));
   }
 }
 
 interface FakeIDBCursorWithValue {
   value: IDBRecord;
-  key: number;
+  key: IDBValidKey;
   delete(): FakeIDBRequest<undefined>;
   continue(): void;
 }
@@ -185,19 +193,22 @@ class FakeIDBObjectStore {
     return new FakeIDBRequest(key);
   }
 
-  put(value: unknown): FakeIDBRequest<number> {
-    return this.add(value);
+  put(value: unknown, key?: IDBValidKey): FakeIDBRequest<IDBValidKey> {
+    if (key === undefined) return this.add(value);
+    this.delete(key);
+    this._records.push({ ...(value as object), _key: key });
+    return new FakeIDBRequest(key);
   }
 
-  getAll(range?: FakeIDBKeyRange): FakeIDBRequest<IDBRecord[]> {
+  getAll(range?: FakeIDBKeyRange, limit?: number): FakeIDBRequest<IDBRecord[]> {
     const results = range
       ? this._records.filter((r) => range.includes(r._key))
       : [...this._records];
-    return new FakeIDBRequest(results);
+    return new FakeIDBRequest(results.slice(0, limit));
   }
 
-  delete(key: number): FakeIDBRequest<undefined> {
-    const i = this._records.findIndex((r) => r._key === key);
+  delete(key: IDBValidKey): FakeIDBRequest<undefined> {
+    const i = this._records.findIndex((r) => cmpKey(r._key, key) === 0);
     if (i !== -1) this._records.splice(i, 1);
     return new FakeIDBRequest(undefined);
   }
