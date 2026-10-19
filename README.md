@@ -248,8 +248,10 @@ written under `.cache/`.
   Optional `maxPendingFrames` rejects before accepting an overflowing frame;
   its default is unlimited to preserve existing ingestion behavior.
 
-For a release containing these changes, publish worker first, then update render's
-minimum worker dependency to that published version before releasing render and
-replay. The new render hooks import worker's resource-lifecycle helper, so consumers
-must not resolve an older worker release. Package versions are not bumped merely
-by running the verification commands.
+The prepared worker package version is 0.6.2 and render's packed minimum dependency
+is explicitly `^0.6.2`; worker 0.6.1 lacks the resource lifecycle API. Publish worker
+before render/replay. `test:package` checks the range and the packaged entry points;
+`test:architecture` prevents shared contracts from importing implementation layers.
+`verify:release` runs coverage, package/architecture checks, CPU benchmarks, browser
+E2E and browser performance tests before release-it can create a tag. A browser
+launch/server failure is a failed gate, not a skipped success.

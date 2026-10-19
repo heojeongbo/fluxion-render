@@ -17,15 +17,10 @@
     "publish": false
   },
   "hooks": {
-    "before:init": [
-      "pnpm -w run build",
-      "pnpm -w run typecheck",
-      "pnpm -w run test",
-      "pnpm -w run lint"
-    ],
+    "before:init": ["pnpm -w run verify:release"],
     "after:bump": ["echo 'Version bumped to ${version}'"],
     "after:release": [
-      "echo 'Tagged ${name} v${version} — the release workflow publishes it on tag push. Watch: gh run watch'"
+      "echo 'Tagged ${name} v${version} \u2014 the release workflow publishes it on tag push. Watch: gh run watch'"
     ]
   },
   "plugins": {

@@ -13,9 +13,9 @@
       "**/*.jsx",
       "**/*.json",
       "**/*.jsonc",
-      "!**/dist/**",
-      "!**/node_modules/**",
-      "!**/.turbo/**"
+      "!**/dist",
+      "!**/node_modules",
+      "!**/.turbo"
     ]
   },
   "formatter": {

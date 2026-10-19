@@ -1,8 +1,14 @@
 import { createFluxionWorkerFactory } from "@heojeongbo/fluxion-render";
 import { FluxionCanvas, useFluxionWorkerPool } from "@heojeongbo/fluxion-render/react";
-import { MetricChannel, ReplayPlayer, ReplayStore } from "@heojeongbo/fluxion-replay";
+import {
+  MetricChannel,
+  ReplayPlayer,
+  ReplaySession,
+  ReplayStore,
+} from "@heojeongbo/fluxion-replay";
+import { useDvrController, useRecordingSession } from "@heojeongbo/fluxion-replay/react";
 import { WorkerHandle } from "@heojeongbo/fluxion-worker";
-import { StrictMode } from "react";
+import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 
 function check(ok: unknown, message: string): asserts ok {
@@ -74,7 +80,137 @@ async function store(options: ConstructorParameters<typeof ReplayStore>[0] = {})
   await s.open();
   return s;
 }
+let hookState: {
+  recording: ReturnType<typeof useRecordingSession>;
+  dvr: ReturnType<typeof useDvrController>;
+} | null = null;
+function RecordingDvr({
+  session,
+  enabled,
+}: {
+  session: ReplaySession;
+  enabled: boolean;
+}) {
+  const recording = useRecordingSession({
+    session,
+    enabled,
+    clearOnStart: false,
+    channels: [
+      { channelId: "m", intervalMs: 10, produce: () => ({ name: "m", value: 1 }) },
+    ],
+  });
+  const dvr = useDvrController({
+    session,
+    enterReplay: (t, opts) => session.enterReplay(t, opts),
+    exitReplay: () => session.exitReplay(),
+    liveTimeRange: { earliest: 0, latest: Date.now() },
+    autoPlay: false,
+  });
+  useEffect(() => {
+    hookState = { recording, dvr };
+  });
+  return <div data-testid="recording">{String(recording.isRecording)}</div>;
+}
 const scenarios = {
+  async "recording-and-dvr-hooks"() {
+    const s = new ReplaySession({
+      channels: [new MetricChannel("m")],
+      storeOptions: { dbName: `hooks-${Date.now()}`, evictThresholdPct: 100 },
+    });
+    await s.open();
+    const draw = (enabled: boolean) =>
+      root.render(
+        <StrictMode>
+          <RecordingDvr session={s} enabled={enabled} />
+        </StrictMode>,
+      );
+    try {
+      hookState = null;
+      draw(true);
+      await until(
+        () => Boolean(hookState?.recording.isRecording),
+        "StrictMode recording did not start",
+      );
+      await delay(50);
+      draw(false);
+      await until(() => !s.recorder.isRecording, "disabled hook left recording active");
+      await s.store.flush();
+      const count = (await s.store.getStorageInfo()).idbFrameCount;
+      check(count > 0, "recording produced no frames");
+      draw(true);
+      await until(
+        () => Boolean(hookState?.recording.isRecording),
+        "recording did not restart",
+      );
+      await delay(50);
+      await s.store.flush();
+      check(
+        (await s.store.getStorageInfo()).idbFrameCount > count,
+        "restart cleared history or produced no samples",
+      );
+      hookState!.dvr.setRate(2);
+      await until(() => hookState?.dvr.rate === 2, "rate was not stored");
+      await hookState!.dvr.dvr.enter();
+      await until(() => Boolean(hookState?.dvr.isDvr), "DVR entry did not complete");
+      check(s.mode === "replay", "session mode diverged");
+      root.render(null);
+      await until(() => !s.recorder.isRecording, "unmount left recording active");
+    } finally {
+      root.render(null);
+      await delay(20);
+      await s.store.clearAll();
+      s.dispose();
+    }
+  },
+  async "persisted-v1-schema-upgrade"() {
+    const name = `legacy-schema-${Date.now()}`;
+    await new Promise<void>((resolve, reject) => {
+      const open = indexedDB.open(name, 1);
+      open.onupgradeneeded = () => {
+        const frames = open.result.createObjectStore("frames", { autoIncrement: true });
+        frames.createIndex("by_t", "t");
+        frames.createIndex("by_channel_t", ["channelId", "t"]);
+        frames.add(frame(42));
+      };
+      open.onsuccess = () => {
+        open.result.close();
+        resolve();
+      };
+      open.onerror = () => reject(open.error);
+    });
+    const s = await store({ dbName: name });
+    try {
+      check(
+        (await s.getFrames(0, 100))[0]?.t === 42,
+        "schema migration lost legacy recording",
+      );
+    } finally {
+      await s.clearAll();
+      s.dispose();
+    }
+  },
+  async "video-retention-matches-metadata"() {
+    const s = await store({ retentionMs: 100 });
+    try {
+      for (let t = 0; t <= 1000; t++) {
+        await s.writeVideoChunk("cam", `${t}.chunk`, new Uint8Array([1]));
+        s.appendFrame(frame(t));
+      }
+      await s.flush();
+      for (const retained of await s.getFrames(0, 1000))
+        check(
+          await s.readVideoChunk("cam", `${retained.t}.chunk`),
+          `missing retained video ${retained.t}`,
+        );
+      check(
+        (await s.readVideoChunk("cam", "0.chunk")) === null,
+        "old video not reclaimed",
+      );
+    } finally {
+      await s.clearAll();
+      s.dispose();
+    }
+  },
   async "worker-rpc-and-sliced-data"() {
     const handle = new WorkerHandle<{ job: string; delay?: number }>(
       () =>

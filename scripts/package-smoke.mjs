@@ -25,6 +25,13 @@ try {
     for (const section of ["dependencies", "peerDependencies", "optionalDependencies", "devDependencies"]) {
       for (const version of Object.values(manifest[section] ?? {})) assert(!version.startsWith("workspace:"), `${slug}: unpublished workspace range`);
     }
+    if (slug === "render") {
+      assert.equal(manifest.dependencies["@heojeongbo/fluxion-worker"], "^0.6.2", "render must reject worker 0.6.1, which lacks useDisposableResource");
+    }
+    if (slug === "worker") {
+      const [major, minor, patch] = manifest.version.split(".").map(Number);
+      assert(major > 0 || minor > 6 || (minor === 6 && patch >= 2), "worker must include the 0.6.2 resource lifecycle API");
+    }
     const targets = Object.values(manifest.exports).flatMap(value => Object.values(value));
     for (const target of targets) await readFile(path.join(destination, target));
   }
@@ -39,10 +46,15 @@ import { WorkerPool } from '@heojeongbo/fluxion-worker';
 import { useWorkerPool } from '@heojeongbo/fluxion-worker/react';
 import { FluxionHost, createFluxionWorkerFactory } from '@heojeongbo/fluxion-render';
 import { FluxionCanvas, useFluxionWorkerPool, useHostRecyclePool } from '@heojeongbo/fluxion-render/react';
-import { ReplayStore, ReplayPlayer, type FrameReader } from '@heojeongbo/fluxion-replay';
+import { ReplayStore, ReplayPlayer, ReplaySession, createReplaySession, type FrameReader, type ReplayStorage } from '@heojeongbo/fluxion-replay';
 const factory = createFluxionWorkerFactory();
 const pool = new WorkerPool({ workerFactory: factory }); pool.dispose();
 const reader: FrameReader = new ReplayStore();
+const defaultStore: ReplayStore = new ReplaySession({ channels: [] }).store;
+const adapter: ReplayStorage = new ReplayStore();
+const customSession = createReplaySession({ channels: [], store: adapter });
+const customStore: ReplayStorage = customSession.store;
+void defaultStore; void customStore;
 new ReplayPlayer({ store: reader, channels: new Map(), timeRange: { earliest: 0, latest: 100 } });
 function Consumer() { useWorkerPool({ workerFactory: factory }).stats(); useFluxionWorkerPool({ size: 1, workerFactory: factory }).stats(); useHostRecyclePool().dispose(); return FluxionCanvas; }
 void Consumer; void FluxionHost;
