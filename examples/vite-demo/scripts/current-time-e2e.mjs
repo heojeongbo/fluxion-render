@@ -12,8 +12,8 @@ preview.stderr.on("data", (chunk) => { startupError += chunk; });
 const artifacts = "../../.cache/current-time-e2e";
 await mkdir(artifacts, { recursive: true });
 
-async function pixels(chart, screenshot = false) {
-  const png = screenshot ? await chart.screenshot({ animations: "disabled" }) : null;
+async function pixels(chart, screenshotPath) {
+  const png = screenshotPath ? await chart.screenshot({ animations: "disabled", path: screenshotPath }) : null;
   return chart.evaluate(async (element, base64) => {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d");
@@ -25,9 +25,9 @@ async function pixels(chart, screenshot = false) {
       ctx.drawImage(bitmap, 0, 0);
       bitmap.close();
     } else {
-      // Firefox's screenshot protocol can wait 10s for a continuously painted
-      // surface. Read the actual worker-produced canvas bitmaps immediately so
-      // a live 10s window cannot expire while the driver captures the image.
+      // Read actual worker-produced bitmaps and independently verify screenshot
+      // parity below. The live fixture spans 60s because Firefox readback can
+      // wait 10s while synchronizing a continuously painted surface.
       const rect = element.getBoundingClientRect();
       const dpr = window.devicePixelRatio;
       canvas.width = Math.round(rect.width * dpr);
@@ -111,19 +111,24 @@ try {
           const held = await slider.inputValue();
           await new Promise((r) => setTimeout(r, 150));
           assert.equal(await slider.inputValue(), held, "pause holds");
+          // Remove the paused frame before entering live mode so the first
+          // observation cannot accidentally sample the old fixed playhead.
+          await page.getByRole("checkbox", { name: "Show current time" }).uncheck();
+          await poll(read, (p) => p.peak === 0, "paused frame cleared before live");
           await page.getByRole("button", { name: "Live clock" }).click();
           await page.getByRole("button", { name: "Live clock", pressed: true }).waitFor();
-          // A click can finish before the worker replaces the paused frame.
-          // Start from the reset live window, leaving room to observe motion.
-          const first = await poll(read, (p) => p.peak > p.height * 0.7 && p.x >= inset && p.x < inset + (p.width - inset) * 0.5, "live bar resets into the first half of the plot");
+          await page.getByRole("checkbox", { name: "Show current time" }).check();
+          // Reproduce delayed observation even when Firefox readback is fast.
+          if (name === "firefox" && renderer === "2d" && axes === "bare" && dpr === 2)
+            await new Promise((resolve) => setTimeout(resolve, 10000));
+          const first = await poll(read, (p) => p.peak > p.height * 0.7 && p.x >= inset && p.x < inset + (p.width - inset) * 0.8, "live bar appears with room to observe motion");
           await poll(read, (p) => p.x > first.x + 20 * dpr, `live clock advances without data from ${JSON.stringify(first)}`);
           await slider.fill("5000");
           await at(0.5);
           await page.setViewportSize({ width: 1000, height: 700 });
           const actual = await at(0.5);
-          const captured = await pixels(chart, true);
+          const captured = await pixels(chart, `${artifacts}/${name}-${renderer}-${axes}-${dpr}.png`);
           assert(captured.peak > captured.height * 0.7 && Math.abs(captured.x - actual.x) <= 4 * dpr, "canvas pixels match the browser screenshot");
-          await chart.screenshot({ path: `${artifacts}/${name}-${renderer}-${axes}-${dpr}.png` });
           assert.deepEqual(errors, [], "browser errors");
           console.log(`PASS ${name} ${renderer} ${axes} DPR=${dpr}: seek, boundaries, hide, play, pause, live, resize`);
           await context.close();

@@ -34,7 +34,8 @@ export function CurrentTimeDemoPage() {
   const layers = useMemo(
     () => [
       axisGridLayer("axis", {
-        xRange: [0, 10000],
+        // Leave a useful live viewing window even when browser readback is slow.
+        xRange: [0, live ? 60000 : 10000],
         yRange: [-1.2, 1.2],
         showXLabels: false,
         showYLabels: false,
@@ -88,7 +89,7 @@ export function CurrentTimeDemoPage() {
           onClick={() => {
             setPlaying(false);
             setLive(true);
-            setTimeOrigin(Date.now() - 2500);
+            setTimeOrigin(Date.now() - 15000);
           }}
         >
           Live clock

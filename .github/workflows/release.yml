@@ -126,7 +126,15 @@ jobs:
       - run: pnpm test:coverage
       - run: pnpm lint
 
-      - run: pnpm -C examples/vite-demo exec playwright install --with-deps chromium firefox
+      - name: Install browser dependencies
+        run: |
+          # The runner's Azure mirror has taken >17 minutes for these packages.
+          for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
+            if [ -f "$source" ]; then
+              sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' "$source"
+            fi
+          done
+          pnpm -C examples/vite-demo exec playwright install --with-deps chromium firefox
       - run: pnpm test:architecture
       - run: pnpm test:package
       - run: pnpm test:perf:cpu
