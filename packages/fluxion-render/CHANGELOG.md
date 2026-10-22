@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/heojeongbo/fluxion-render/compare/fluxion-render-v1.7.0...fluxion-render-v1.7.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **render:** isolate frame phases and bound visible-window work ([ceec470](https://github.com/heojeongbo/fluxion-render/commit/ceec4707046d22f78e3540907f40e5ac8cb2f359))
+
 # [1.7.0](https://github.com/heojeongbo/fluxion-render/compare/fluxion-render-v1.6.0...fluxion-render-v1.7.0) (2026-10-07)
 
 
