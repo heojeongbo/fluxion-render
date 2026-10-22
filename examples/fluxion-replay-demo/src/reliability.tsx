@@ -405,8 +405,9 @@ async function storagePerformance(durationMs = 60_000) {
     await s.flush();
     const drainMs = performance.now() - drainStart;
     const count = (await s.getStorageInfo()).idbFrameCount;
-    check(count === input, "sustained recording lost frames");
-    check(peakPending < 5000, "unbounded recording backlog");
+    const metrics = JSON.stringify({ durationMs, input, count, peakPending, drainMs });
+    check(count === input, `sustained recording lost frames: ${metrics}`);
+    check(peakPending < 5000, `unbounded recording backlog: ${metrics}`);
     return { durationMs, input, count, peakPending, drainMs };
   } finally {
     await s.clearAll();

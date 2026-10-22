@@ -20,7 +20,9 @@ try {
     const errors = []; page.on("pageerror", e => errors.push(e.message));
     await page.goto(`http://localhost:${port}/reliability.html`);
     await page.waitForFunction(() => Boolean(window.reliability));
+    await page.bringToFront();
     if (perf) {
+      assert.equal(await page.evaluate(() => document.visibilityState), "visible", "storage benchmark must run in a foreground page");
       results.push({ browser: name, performance: await page.evaluate(() => window.reliability.storagePerformance()) });
     } else {
       const scenarios = await page.evaluate(() => Object.keys(window.reliability.scenarios));
