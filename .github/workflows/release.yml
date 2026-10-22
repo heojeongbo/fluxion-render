@@ -33,7 +33,8 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Include cold browser dependency downloads as well as all release gates.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
