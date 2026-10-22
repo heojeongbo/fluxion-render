@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.2](https://github.com/heojeongbo/fluxion-render/compare/fluxion-worker-v0.6.1...fluxion-worker-v0.6.2) (2026-10-22)
+
+
+### Bug Fixes
+
+* **worker:** correlate requests and preserve React resource lifetimes ([87eed81](https://github.com/heojeongbo/fluxion-render/commit/87eed819597e7a0d292d4ae47bebb2dc9c8bb1b3))
+* **worker:** isolate stream replies and serialize host state updates ([3b4abe0](https://github.com/heojeongbo/fluxion-render/commit/3b4abe08fba06399011bff0762d056363a72c4d1))
+
 ## [0.6.1](https://github.com/heojeongbo/fluxion-render/compare/fluxion-worker-v0.6.0...fluxion-worker-v0.6.1) (2026-09-15)
 
 
