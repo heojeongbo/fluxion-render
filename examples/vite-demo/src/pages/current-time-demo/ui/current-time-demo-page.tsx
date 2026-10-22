@@ -5,11 +5,12 @@ import {
   type FluxionHost,
   lineLayer,
 } from "@heojeongbo/fluxion-render/react";
-import { useEffect, useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 /** Replay controls also serve as the real-worker browser test fixture. */
 export function CurrentTimeDemoPage() {
   const [currentTime, setCurrentTime] = useState(2500);
+  const playbackTime = useRef(2500);
   const [playing, setPlaying] = useState(false);
   const [live, setLive] = useState(false);
   const [visible, setVisible] = useState(true);
@@ -18,14 +19,15 @@ export function CurrentTimeDemoPage() {
   const query = new URLSearchParams(window.location.search);
   const renderer = query.get("renderer") === "webgl" ? "webgl" : "2d";
   const axes = query.get("axes") ?? "inline";
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!playing) return;
     let previous = performance.now();
     const timer = setInterval(() => {
       const now = performance.now();
       const dt = now - previous;
       previous = now;
-      setCurrentTime((t) => Math.min(10000, t + dt));
+      playbackTime.current = Math.min(10000, playbackTime.current + dt);
+      setCurrentTime(playbackTime.current);
     }, 1000 / 30);
     return () => clearInterval(timer);
   }, [playing]);
@@ -72,6 +74,9 @@ export function CurrentTimeDemoPage() {
           type="button"
           onClick={() => {
             setLive(false);
+            // Commit the last tick with the pause. A previously queued timer
+            // update must not move the controlled slider after pause commits.
+            setCurrentTime(playbackTime.current);
             setPlaying(!playing);
           }}
         >
@@ -79,6 +84,7 @@ export function CurrentTimeDemoPage() {
         </button>
         <button
           type="button"
+          aria-pressed={live}
           onClick={() => {
             setPlaying(false);
             setLive(true);
@@ -105,7 +111,8 @@ export function CurrentTimeDemoPage() {
         onChange={(e) => {
           setPlaying(false);
           setLive(false);
-          setCurrentTime(Number(e.target.value));
+          playbackTime.current = Number(e.target.value);
+          setCurrentTime(playbackTime.current);
         }}
       />
       <output data-testid="ready">{ready ? "ready" : "loading"}</output>

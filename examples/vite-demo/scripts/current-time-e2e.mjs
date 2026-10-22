@@ -12,17 +12,31 @@ preview.stderr.on("data", (chunk) => { startupError += chunk; });
 const artifacts = "../../.cache/current-time-e2e";
 await mkdir(artifacts, { recursive: true });
 
-async function pixels(page, chart) {
-  const png = await chart.screenshot({ animations: "disabled" });
-  return page.evaluate(async (base64) => {
-    const blob = await (await fetch(`data:image/png;base64,${base64}`)).blob();
-    const bitmap = await createImageBitmap(blob);
+async function pixels(chart, screenshot = false) {
+  const png = screenshot ? await chart.screenshot({ animations: "disabled" }) : null;
+  return chart.evaluate(async (element, base64) => {
     const canvas = document.createElement("canvas");
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
     const ctx = canvas.getContext("2d");
-    ctx.drawImage(bitmap, 0, 0);
-    bitmap.close();
+    if (base64) {
+      const blob = await (await fetch(`data:image/png;base64,${base64}`)).blob();
+      const bitmap = await createImageBitmap(blob);
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      ctx.drawImage(bitmap, 0, 0);
+      bitmap.close();
+    } else {
+      // Firefox's screenshot protocol can wait 10s for a continuously painted
+      // surface. Read the actual worker-produced canvas bitmaps immediately so
+      // a live 10s window cannot expire while the driver captures the image.
+      const rect = element.getBoundingClientRect();
+      const dpr = window.devicePixelRatio;
+      canvas.width = Math.round(rect.width * dpr);
+      canvas.height = Math.round(rect.height * dpr);
+      for (const source of element.querySelectorAll("canvas")) {
+        const bounds = source.getBoundingClientRect();
+        ctx.drawImage(source, (bounds.x - rect.x) * dpr, (bounds.y - rect.y) * dpr, bounds.width * dpr, bounds.height * dpr);
+      }
+    }
     const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const columns = new Array(canvas.width).fill(0);
     let maxY = -1;
@@ -37,17 +51,20 @@ async function pixels(page, chart) {
     }
     const peak = Math.max(...columns);
     return { x: columns.indexOf(peak), peak, maxY, width: canvas.width, height: canvas.height };
-  }, png.toString("base64"));
+  }, png?.toString("base64") ?? null);
 }
 
 async function poll(fn, accept, message) {
   let last;
+  const started = Date.now();
+  const samples = [];
   for (let i = 0; i < 30; i++) {
     last = await fn();
     if (accept(last)) return last;
+    samples.push({ elapsedMs: Date.now() - started, value: last });
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  assert.fail(`${message}: ${JSON.stringify(last)}`);
+  assert.fail(`${message}: ${JSON.stringify(samples)}`);
 }
 
 let browser;
@@ -60,6 +77,7 @@ try {
         // External canvases are unsupported by the engine's GL backend.
         if (renderer === "webgl" && axes === "external") continue;
         for (const dpr of [1, 2]) {
+          console.log(`RUN ${name} ${renderer} ${axes} DPR=${dpr}`);
           const context = await browser.newContext({ viewport: { width: 1200, height: 800 }, deviceScaleFactor: dpr });
           const page = await context.newPage();
           const errors = [];
@@ -68,7 +86,7 @@ try {
           await page.goto(`${url}/current-time?renderer=${renderer}&axes=${axes}`);
           await page.getByTestId("ready").filter({ hasText: "ready" }).waitFor();
           const chart = page.getByTestId("current-time-chart");
-          const read = () => pixels(page, chart);
+          const read = () => pixels(chart);
           const inset = axes === "bare" ? 0 : 40 * dpr;
           const bottom = axes === "bare" ? 0 : 24 * dpr;
           const at = (fraction) => poll(read, (p) => p.peak > p.height * 0.7 && Math.abs(p.x - (inset + (p.width - inset) * fraction)) <= 4 * dpr, `playhead at ${fraction}`);
@@ -94,12 +112,17 @@ try {
           await new Promise((r) => setTimeout(r, 150));
           assert.equal(await slider.inputValue(), held, "pause holds");
           await page.getByRole("button", { name: "Live clock" }).click();
-          const first = await poll(read, (p) => p.peak > 0, "live bar appears");
-          await poll(read, (p) => p.x > first.x + 20 * dpr, "live clock advances without data");
+          await page.getByRole("button", { name: "Live clock", pressed: true }).waitFor();
+          // A click can finish before the worker replaces the paused frame.
+          // Start from the reset live window, leaving room to observe motion.
+          const first = await poll(read, (p) => p.peak > p.height * 0.7 && p.x >= inset && p.x < inset + (p.width - inset) * 0.5, "live bar resets into the first half of the plot");
+          await poll(read, (p) => p.x > first.x + 20 * dpr, `live clock advances without data from ${JSON.stringify(first)}`);
           await slider.fill("5000");
           await at(0.5);
           await page.setViewportSize({ width: 1000, height: 700 });
-          await at(0.5);
+          const actual = await at(0.5);
+          const captured = await pixels(chart, true);
+          assert(captured.peak > captured.height * 0.7 && Math.abs(captured.x - actual.x) <= 4 * dpr, "canvas pixels match the browser screenshot");
           await chart.screenshot({ path: `${artifacts}/${name}-${renderer}-${axes}-${dpr}.png` });
           assert.deepEqual(errors, [], "browser errors");
           console.log(`PASS ${name} ${renderer} ${axes} DPR=${dpr}: seek, boundaries, hide, play, pause, live, resize`);
