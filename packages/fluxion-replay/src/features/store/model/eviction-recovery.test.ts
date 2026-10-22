@@ -182,6 +182,31 @@ it("stops an eviction when its recording is cleared", async () => {
   await (store as unknown as { _evictBefore(t: number): Promise<void> })._evictBefore(2);
   expect(await store.getTimeRange()).toBeNull();
 });
+it.each([
+  "time budget",
+  "pause",
+])("yields eviction at the %s and resumes remaining batches", async (reason) => {
+  const { store } = await fixture();
+  await store.clearAll();
+  for (let t = 0; t <= 1000; t++)
+    store.appendFrame({ t, channelId: "metric", payload: new ArrayBuffer(0) });
+  await store.flush();
+  const now = vi.spyOn(performance, "now").mockReturnValue(0);
+  const remove = store.deleteFramesBefore.bind(store);
+  vi.spyOn(store, "deleteFramesBefore").mockImplementationOnce(async (cutoff) => {
+    await remove(cutoff);
+    if (reason === "pause") store.setEvictionPaused(true);
+    else now.mockReturnValue(51);
+  });
+  const eviction = store as unknown as { _evictBefore(t: number): Promise<void> };
+  await eviction._evictBefore(1000);
+  expect(await store.getTimeRange()).toEqual({ earliest: 500, latest: 1000 });
+  expect((await store.getFrames(0, 1000)).length).toBe(501);
+  store.setEvictionPaused(false);
+  now.mockReturnValue(0);
+  await eviction._evictBefore(1000);
+  expect(await store.getTimeRange()).toEqual({ earliest: 1000, latest: 1000 });
+});
 it("protects an in-flight rewrite and its pending metadata from file cleanup", async () => {
   const { store, db } = await fixture();
   await deleteFrameBatch(db, 2, 500);

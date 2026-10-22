@@ -88,6 +88,8 @@ try {
           await page.getByRole("button", { name: "Play", exact: true }).click();
           await poll(async () => Number(await slider.inputValue()), (t) => t > 3000, "replay advances");
           await page.getByRole("button", { name: "Pause", exact: true }).click();
+          // Wait for React to commit the pause before sampling its controlled input.
+          await page.getByRole("button", { name: "Play", exact: true }).waitFor();
           const held = await slider.inputValue();
           await new Promise((r) => setTimeout(r, 150));
           assert.equal(await slider.inputValue(), held, "pause holds");
