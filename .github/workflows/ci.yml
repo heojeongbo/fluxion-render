@@ -100,3 +100,4 @@ jobs:
         with:
           name: browser-regressions
           path: .cache/
+          include-hidden-files: true

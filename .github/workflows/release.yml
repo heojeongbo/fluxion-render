@@ -145,6 +145,7 @@ jobs:
         with:
           name: browser-regressions
           path: .cache/
+          include-hidden-files: true
 
       # Pack with pnpm, publish with npm — each does the half the other can't.
       # `fluxion-render` depends on `@heojeongbo/fluxion-worker: workspace:^`;
