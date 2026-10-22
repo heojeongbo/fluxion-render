@@ -1,5 +1,7 @@
 # Changelog
 
+## [1.7.2](https://github.com/heojeongbo/fluxion-render/compare/fluxion-render-v1.7.1...fluxion-render-v1.7.2) (2026-10-22)
+
 ## [1.7.1](https://github.com/heojeongbo/fluxion-render/compare/fluxion-render-v1.7.0...fluxion-render-v1.7.1) (2026-10-22)
 
 
