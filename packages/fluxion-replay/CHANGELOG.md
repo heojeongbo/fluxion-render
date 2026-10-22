@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.13.3](https://github.com/heojeongbo/fluxion-render/compare/fluxion-replay-v0.13.2...fluxion-replay-v0.13.3) (2026-10-22)
+
+
+### Bug Fixes
+
+* **replay:** preserve existing database version compatibility ([51a67c6](https://github.com/heojeongbo/fluxion-render/commit/51a67c65bafc6b23078237bb5474a2f4873b93a2))
+* **replay:** preserve recording isolation and ordered playback ([1cc3de4](https://github.com/heojeongbo/fluxion-render/commit/1cc3de4edb30a86e81e5d4c7daaa642a2fbef323))
+* **replay:** recover storage cleanup and own asynchronous lifecycles ([4701c17](https://github.com/heojeongbo/fluxion-render/commit/4701c176c974f7aa3720a24783ef4580059a76c0))
+
 ## [0.13.2](https://github.com/heojeongbo/fluxion-render/compare/fluxion-replay-v0.13.1...fluxion-replay-v0.13.2) (2026-09-15)
 
 
