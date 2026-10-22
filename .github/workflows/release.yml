@@ -33,7 +33,11 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # Include cold browser dependency downloads as well as all release gates.
+    # Match the Playwright version in pnpm-lock.yaml; browsers and OS libraries
+    # are preinstalled so publishing does not depend on a slow apt mirror.
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.0-noble@sha256:baed2032d533817f3dbe6425de795788430ba345e819a1201337009ba17c9d07
+      options: --init --ipc=host
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -126,15 +130,7 @@ jobs:
       - run: pnpm test:coverage
       - run: pnpm lint
 
-      - name: Install browser dependencies
-        run: |
-          # The runner's Azure mirror has taken >17 minutes for these packages.
-          for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
-            if [ -f "$source" ]; then
-              sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' "$source"
-            fi
-          done
-          pnpm -C examples/vite-demo exec playwright install --with-deps chromium firefox
+      - run: pnpm -C examples/vite-demo exec playwright install chromium firefox
       - run: pnpm test:architecture
       - run: pnpm test:package
       - run: pnpm test:perf:cpu

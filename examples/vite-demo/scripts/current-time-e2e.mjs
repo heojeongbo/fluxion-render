@@ -13,30 +13,16 @@ const artifacts = "../../.cache/current-time-e2e";
 await mkdir(artifacts, { recursive: true });
 
 async function pixels(chart, screenshotPath) {
-  const png = screenshotPath ? await chart.screenshot({ animations: "disabled", path: screenshotPath }) : null;
-  return chart.evaluate(async (element, base64) => {
+  const png = await chart.screenshot({ animations: "disabled", path: screenshotPath });
+  return chart.evaluate(async (_element, base64) => {
+    const blob = await (await fetch(`data:image/png;base64,${base64}`)).blob();
+    const bitmap = await createImageBitmap(blob);
     const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
     const ctx = canvas.getContext("2d");
-    if (base64) {
-      const blob = await (await fetch(`data:image/png;base64,${base64}`)).blob();
-      const bitmap = await createImageBitmap(blob);
-      canvas.width = bitmap.width;
-      canvas.height = bitmap.height;
-      ctx.drawImage(bitmap, 0, 0);
-      bitmap.close();
-    } else {
-      // Read actual worker-produced bitmaps and independently verify screenshot
-      // parity below. The live fixture spans 60s because Firefox readback can
-      // wait 10s while synchronizing a continuously painted surface.
-      const rect = element.getBoundingClientRect();
-      const dpr = window.devicePixelRatio;
-      canvas.width = Math.round(rect.width * dpr);
-      canvas.height = Math.round(rect.height * dpr);
-      for (const source of element.querySelectorAll("canvas")) {
-        const bounds = source.getBoundingClientRect();
-        ctx.drawImage(source, (bounds.x - rect.x) * dpr, (bounds.y - rect.y) * dpr, bounds.width * dpr, bounds.height * dpr);
-      }
-    }
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
     const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const columns = new Array(canvas.width).fill(0);
     let maxY = -1;
@@ -51,7 +37,7 @@ async function pixels(chart, screenshotPath) {
     }
     const peak = Math.max(...columns);
     return { x: columns.indexOf(peak), peak, maxY, width: canvas.width, height: canvas.height };
-  }, png?.toString("base64") ?? null);
+  }, png.toString("base64"));
 }
 
 async function poll(fn, accept, message) {
@@ -126,9 +112,11 @@ try {
           await slider.fill("5000");
           await at(0.5);
           await page.setViewportSize({ width: 1000, height: 700 });
-          const actual = await at(0.5);
-          const captured = await pixels(chart, `${artifacts}/${name}-${renderer}-${axes}-${dpr}.png`);
-          assert(captured.peak > captured.height * 0.7 && Math.abs(captured.x - actual.x) <= 4 * dpr, "canvas pixels match the browser screenshot");
+          await poll(
+            () => pixels(chart, `${artifacts}/${name}-${renderer}-${axes}-${dpr}.png`),
+            (p) => p.peak > p.height * 0.7 && Math.abs(p.x - (inset + (p.width - inset) * 0.5)) <= 4 * dpr,
+            "resized screenshot shows the centered playhead",
+          );
           assert.deepEqual(errors, [], "browser errors");
           console.log(`PASS ${name} ${renderer} ${axes} DPR=${dpr}: seek, boundaries, hide, play, pause, live, resize`);
           await context.close();
