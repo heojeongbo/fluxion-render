@@ -285,8 +285,8 @@ Storage is bounded by **quota eviction, not `retentionMs`** (which only trims th
 
 Long recordings would otherwise fill OPFS and make `writeVideoChunk` throw `QuotaExceededError`. The engine handles this on three levels:
 
-- **Automatic eviction (IDB + OPFS).** After each flush, if origin storage is over `evictThresholdPct`, the oldest ~10% of the recorded span is evicted from IndexedDB **and** its OPFS video chunks are reclaimed (`ReplayStore.deleteVideoChunksBefore`). This is what keeps usage from climbing to the quota. Set `evictThresholdPct: 100` to disable.
-- **Emergency reclaim + retry.** If `writeVideoChunk` still hits `QuotaExceededError`, the store evicts a larger slice (oldest 25%) and retries the write once before giving up.
+- **Automatic eviction (IDB + OPFS).** Usage is checked every 10th flush; once origin storage reaches `evictThresholdPct`, every flush trims the oldest 1% of the recorded span from IndexedDB **and** reclaims its OPFS video chunks, until usage falls 5 points below the threshold. Draining every flush keeps up with high-rate ingestion, while usage this store cannot reclaim (another database's data) shrinks history no faster than 10% per 5 s. Set `evictThresholdPct: 100` to disable.
+- **Emergency reclaim + retry.** If `writeVideoChunk` or a frame batch still hits `QuotaExceededError`, the store evicts a larger slice (oldest 25%) and retries the write before giving up. At the quota the eviction itself deletes files before rows, so it never needs the space it is trying to free.
 - **Graceful drop + notification.** If a chunk still can't persist, the `VideoRecorder` drops that frame (no dangling metadata), logs a throttled warning, and invokes your `onWriteError` callback — no unhandled rejection, recording continues. Wire `onWriteError` (on `VideoRecorder` / `useVideoRecorder`) to a "storage full" indicator.
 
 Eviction is **paused while a `ReplaySession` is in replay mode** (`enterReplay` → `exitReplay`) so time-travel never deletes the history being reviewed; the emergency reclaim above still runs as a backstop.

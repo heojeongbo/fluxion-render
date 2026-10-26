@@ -19,7 +19,7 @@ npm install @heojeongbo/fluxion-worker
 - **`WorkerHandle`** — thin wrapper over a single Worker with `hostId` filtering and optional pool integration
 - **`defineWorker`** — worker-side helper that eliminates `self.onmessage` / `self.postMessage` boilerplate and auto-echoes `hostId`
 - **`defineWorkerWithState` stream mode** — optional second `streamHandler` argument for fire-and-forget high-frequency paths (no Promise, no GC pressure)
-- **`/react` subpath** — `useWorkerHandle`, `useWorkerPool`, `useWorkerRequest`, `useWorkerStream` hooks (React 18+, optional)
+- **`/react` subpath** — `useWorkerHandle`, `useWorkerPool`, `useWorkerRequest`, `useWorkerStream`, `useDisposableResource` hooks (React 18+, optional)
 
 ---
 
@@ -137,6 +137,23 @@ function Dashboard() {
 
   return <button onClick={onClick}>Calculate</button>;
 }
+```
+
+### `useDisposableResource` — own any disposable for the component's lifetime
+
+The primitive behind `useWorkerPool` (and fluxion-render's pool hooks). The factory
+runs during render, so it must be pure — start workers or timers in an effect or on
+first use. Disposal is deferred one microtask so StrictMode's effect replay keeps the
+same instance; a real unmount (or a `deps` change) disposes it once. A React 19
+`<Activity>` hide disposes it too, and revealing hands out a fresh instance.
+
+```tsx
+import { useDisposableResource } from "@heojeongbo/fluxion-worker/react";
+
+const pool = useDisposableResource(() => new WorkerPool({ workerFactory, lazy: true }), [size]);
+useEffect(() => {
+  if (!pool.isDisposed) pool.start();
+}, [pool]);
 ```
 
 ### `useWorkerRequest` — declarative request/response
@@ -312,6 +329,7 @@ const pool = new WorkerPool<TMsg>({
   size?: number,               // INITIAL worker count — default 4, clamped to [1, 16]
   maxSize?: number,            // default = size (growth disabled). Upper bound for runtime growth, clamped to [size, 16]
   targetPerWorker?: number,    // default 12, min 1. Active hosts/worker that triggers growth toward maxSize
+  lazy?: boolean,              // default false. true: spawn no workers until start()/acquire()/stream()
   workerFactory: () => Worker, // required
 });
 ```
@@ -321,6 +339,7 @@ const pool = new WorkerPool<TMsg>({
 | `size` | **Initial** worker count (default `4`, clamped `[1, 16]`). When `maxSize` is larger, the pool starts here and grows on demand |
 | `maxSize` | Upper bound for runtime growth (default `= size`, i.e. growth disabled / fixed-size pool). Clamped to `[size, 16]` |
 | `targetPerWorker` | Active hosts per worker that triggers growth (default `12`, min `1`). Lower it for heavier per-host workloads (e.g. high-Hz streaming) so hosts spread across more workers sooner. Only has an effect when `maxSize > size` |
+| `lazy` | Defer spawning the initial workers until `start()` (or the first `acquire()` / `stream()`). Default `false`: the constructor spawns them, as before. The React hooks construct lazily and start at commit, so rendering never creates workers |
 
 **Fixed vs. growing** — existing fixed-size usage is unchanged: omit `maxSize` (it defaults to `size`) and the pool stays at exactly `size` workers. When `maxSize > size`, the pool starts at `size` workers and spawns more on demand (up to `maxSize`) as the average active hosts per worker reaches `targetPerWorker`:
 
@@ -339,6 +358,7 @@ const growing = new WorkerPool<TMsg>({
 
 | Method / Property | Description |
 |-------------------|-------------|
+| `pool.start()` | Spawns the initial workers of a `lazy` pool. Idempotent; `acquire()` and `stream()` call it |
 | `pool.acquire()` | Returns a `WorkerHandle` bound to the least-busy worker |
 | `pool.dispatch(msg, opts?, transfer?)` | One-liner: acquire → request → release |
 | `pool.onError(callback)` | Global error handler for fire-and-forget errors. Returns an `off` fn |
