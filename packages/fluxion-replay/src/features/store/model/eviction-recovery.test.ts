@@ -151,11 +151,15 @@ it("rechecks storage at the low watermark while pressure remains high", async ()
   expect(estimate).toHaveBeenCalledTimes(3);
 });
 it("does not install timers when disposed during recovery", async () => {
-  const s = new ReplayStore();
+  const s = new ReplayStore({ storageLogIntervalMs: 1000 });
   stores.push(s);
-  const internals = s as unknown as { _collectGarbage(): Promise<void> };
+  const internals = s as unknown as {
+    _collectGarbage(): Promise<void>;
+    _flushTimer: unknown;
+    _storageLogTimer: unknown;
+  };
   let release!: () => void;
-  vi.spyOn(internals, "_collectGarbage").mockImplementation(
+  const recovery = vi.spyOn(internals, "_collectGarbage").mockImplementation(
     () =>
       new Promise((r) => {
         release = r;
@@ -163,9 +167,13 @@ it("does not install timers when disposed during recovery", async () => {
   );
   const opening = s.open();
   for (let i = 0; i < 20; i++) await Promise.resolve();
+  // dispose() must land while recovery is in flight, not before it started.
+  expect(recovery).toHaveBeenCalledTimes(1);
   s.dispose();
   release();
   await opening;
+  expect(internals._flushTimer).toBeNull();
+  expect(internals._storageLogTimer).toBeNull();
 });
 it("opens even when stale file recovery fails and retries on later cleanup", async () => {
   const s = new ReplayStore();

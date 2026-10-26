@@ -124,19 +124,28 @@ it("reports an already-aborted request without posting work", async () => {
 it("ignores a late success from a non-cooperative request after cleanup", async () => {
   const b = bridge();
   const h = new WorkerHandle<{ op: string }>(() => b.worker);
-  let resolve!: (v: object) => void;
+  // Non-cooperative: ignores the abort signal and settles whenever it likes.
+  const replies: ((v: object) => void)[] = [];
   vi.spyOn(h, "request").mockImplementation(
     () =>
       new Promise((r) => {
-        resolve = r;
+        replies.push(r);
       }),
   );
-  const msg = { op: "rpc" };
-  const view = renderHook(() => useWorkerRequest(h, msg));
-  view.unmount();
-  await act(async () => {
-    resolve({});
+  const view = renderHook(({ msg }) => useWorkerRequest(h, msg), {
+    initialProps: { msg: { op: "old" } },
   });
+  view.rerender({ msg: { op: "new" } });
+  await act(async () => {
+    replies[1]!({ v: "new" });
+  });
+  // The superseded request resolving last must not overwrite the newer data.
+  await act(async () => {
+    replies[0]!({ v: "stale" });
+  });
+  expect(view.result.current.data).toEqual({ v: "new" });
+  expect(view.result.current.loading).toBe(false);
+  view.unmount();
   h.dispose();
 });
 it("routes stream errors only to error subscribers", () => {
