@@ -106,4 +106,54 @@ describe("replay frame identity", () => {
     await Promise.resolve();
     expect(events).toEqual(["frame", "end"]);
   });
+  for (const interrupt of ["stop", "replay"] as const) {
+    it(`keeps prefetching after ${interrupt === "stop" ? "stop()" : "a restart from stopped"} lands mid-fetch`, async () => {
+      const channel = new MetricChannel("metric");
+      const clock = new Clock();
+      const rows = [0, 500, 1000].map((t) => ({
+        t,
+        channelId: "metric",
+        payload: channel.encode({ name: "n", value: t }),
+      }));
+      const reads: (() => void)[] = [];
+      const store = {
+        getFrames: vi.fn(
+          (from: number, to: number) =>
+            new Promise<typeof rows>((resolve) =>
+              reads.push(() => resolve(rows.filter((f) => f.t > from && f.t <= to))),
+            ),
+        ),
+      };
+      const player = new ReplayPlayer({
+        store,
+        clock,
+        channels: new Map([["metric", channel]]),
+        timeRange: { earliest: 0, latest: 1000 },
+      });
+      const events: (number | string)[] = [];
+      player.onFrame((f) => events.push(f.t));
+      player.onEnd(() => events.push("end"));
+      player.play();
+      clock.advance(0); // first tick starts a fetch...
+      player.stop(); // ...that is still in flight when playback stops
+      if (interrupt === "replay") {
+        player.play();
+        player.stop();
+      }
+      reads.shift()!(); // the superseded fetch settles late
+      await Promise.resolve();
+      await Promise.resolve();
+      player.play();
+      for (const t of [0, 1000]) {
+        clock.advance(t);
+        while (reads.length) {
+          reads.shift()!();
+          await Promise.resolve();
+          await Promise.resolve();
+        }
+      }
+      expect(events).toEqual([0, 500, 1000, "end"]);
+      player.dispose();
+    });
+  }
 });

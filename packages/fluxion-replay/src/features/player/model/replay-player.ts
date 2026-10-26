@@ -154,6 +154,8 @@ export class ReplayPlayer {
         Math.min(this._timeRange.latest, this._lastKnownT),
       );
       this._prefetchGeneration++;
+      // A superseded fetch never clears the flag itself (see _prefetch's finally).
+      this._isPrefetching = false;
       this._prefetchedUpTo = Math.max(startT - 3_000, this._timeRange.earliest) - 1;
       this._prefetchBuffer = [];
       this._ended = false;
@@ -185,6 +187,7 @@ export class ReplayPlayer {
     this._offTick?.();
     this._offTick = null;
     this._prefetchGeneration++;
+    this._isPrefetching = false;
     this._prefetchBuffer = [];
     this._prefetchedUpTo = this._timeRange.earliest;
     this._ended = false;
@@ -254,6 +257,7 @@ export class ReplayPlayer {
 
   dispose(): void {
     this._prefetchGeneration++;
+    this._isPrefetching = false;
     this._ended = true;
     this._clock.dispose();
     this._offTick?.();
