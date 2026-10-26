@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.13.5](https://github.com/heojeongbo/fluxion-render/compare/fluxion-replay-v0.13.4...fluxion-replay-v0.13.5) (2026-10-26)
+
+
+### Bug Fixes
+
+* **replay:** clear the in-flight prefetch flag when playback restarts ([9aed5e9](https://github.com/heojeongbo/fluxion-render/commit/9aed5e98cabfe1914c4449fb43789c1be383fde5))
+* **replay:** keep a shared session recording until the last hook leaves ([cccfc73](https://github.com/heojeongbo/fluxion-render/commit/cccfc739fc8e542bad44262717f398132db08b89))
+* **replay:** leave an injected store to the caller ([1953e95](https://github.com/heojeongbo/fluxion-render/commit/1953e9536a194e1e04212833fc477fe649bb621e))
+* **replay:** make store writes and cleanup recover instead of wedging ([3291d16](https://github.com/heojeongbo/fluxion-render/commit/3291d16fec41408c54bf8cfd118f40bfb74a0762))
+* **replay:** remove video chunks no metadata row will reference ([bc66d5f](https://github.com/heojeongbo/fluxion-render/commit/bc66d5f0d2d21d324c54066f66d637ec68af6484))
+
 ## [0.13.4](https://github.com/heojeongbo/fluxion-render/compare/fluxion-replay-v0.13.3...fluxion-replay-v0.13.4) (2026-10-22)
 
 ## [0.13.3](https://github.com/heojeongbo/fluxion-render/compare/fluxion-replay-v0.13.2...fluxion-replay-v0.13.3) (2026-10-22)
