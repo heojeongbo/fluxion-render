@@ -1,5 +1,9 @@
 import { act, renderHook } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MetricChannel } from "../../../entities/metric-channel/metric-channel";
+import { ReplaySession } from "../../../features/session/model/replay-session";
+import { ReplayStore } from "../../../features/store/model/replay-store";
 import { useReplaySession } from "./use-replay-session";
 
 describe("useReplaySession", () => {
@@ -444,4 +448,31 @@ it("returns null before the first session effect commits", async () => {
   });
   await expect(first()).resolves.toBeNull();
   view.unmount();
+});
+it("keeps an injected store usable across StrictMode's session re-creation", async () => {
+  const store = new ReplayStore({ dbName: `injected-${Date.now()}` });
+  const channel = new MetricChannel("m");
+  const view = renderHook(() => useReplaySession({ channels: [channel], store }), {
+    wrapper: StrictMode,
+  });
+  await act(async () => {
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+  });
+  expect(view.result.current.isReady).toBe(true);
+  // The first (StrictMode-discarded) session must not have disposed it.
+  await view.result.current.session!.startRecording();
+  expect(() => view.result.current.record("m", { name: "m", value: 1 }, 5)).not.toThrow();
+  await store.flush();
+  expect((await store.getFrames(0, 10)).map((f) => f.t)).toEqual([5]);
+  view.unmount();
+  // Unmount disposes the session, never the caller's store.
+  store.appendFrame({ t: 6, channelId: "m", payload: new ArrayBuffer(0) });
+  store.dispose();
+});
+it("disposes the store a session created for itself", () => {
+  const session = new ReplaySession({ channels: [] });
+  session.dispose();
+  expect(() =>
+    session.store.appendFrame({ t: 1, channelId: "m", payload: new ArrayBuffer(0) }),
+  ).toThrow("disposed");
 });

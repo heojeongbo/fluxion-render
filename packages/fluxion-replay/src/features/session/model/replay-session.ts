@@ -13,7 +13,11 @@ export type ReplaySessionMode = "live" | "replay";
 
 export interface ReplaySessionOptions<S extends ReplayStorage = ReplayStore> {
   channels: BaseChannel<unknown>[];
-  /** Optional owned store instance; defaults to ReplayStore(storeOptions). */
+  /**
+   * Optional store instance. It stays the caller's: `dispose()` leaves it open,
+   * so one store can back successive sessions (StrictMode, remounts). Without
+   * it the session creates a ReplayStore(storeOptions) and disposes it.
+   */
   store?: S;
   /** In-memory history only. Set storeOptions.retentionMs for persisted retention. */
   retentionMs?: number;
@@ -34,6 +38,7 @@ export interface ReplaySessionOptions<S extends ReplayStorage = ReplayStore> {
 
 export class ReplaySession<S extends ReplayStorage = ReplayStore> {
   private readonly _store: S;
+  private readonly _ownsStore: boolean;
   private readonly _recorder: ReplayRecorder;
   private readonly _channelMap: Map<string, BaseChannel<unknown>>;
   private _player: ReplayPlayer | null = null;
@@ -46,6 +51,7 @@ export class ReplaySession<S extends ReplayStorage = ReplayStore> {
   private _recordingGeneration = 0;
 
   constructor(opts: ReplaySessionOptions<S>) {
+    this._ownsStore = opts.store === undefined;
     this._store = (opts.store ??
       new ReplayStore({
         evictThresholdPct: opts.evictThresholdPct,
@@ -216,6 +222,6 @@ export class ReplaySession<S extends ReplayStorage = ReplayStore> {
     this._player?.dispose();
     this._player = null;
     this._recorder.stop();
-    this._store.dispose();
+    if (this._ownsStore) this._store.dispose();
   }
 }
