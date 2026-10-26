@@ -41,7 +41,7 @@
     "build:examples": "pnpm -C examples/vite-demo build && pnpm -C examples/fluxion-replay-demo build",
     "test:e2e": "pnpm build:examples && pnpm -C examples/vite-demo test:e2e && pnpm -C examples/vite-demo test:reliability",
     "test:perf": "pnpm build:examples && pnpm -C examples/vite-demo test:perf && pnpm -C examples/vite-demo test:storage-perf",
-    "test:package": "node scripts/package-smoke.mjs",
+    "test:package": "node packages/fluxion-replay/scripts/check-render-peer.mjs && node scripts/package-smoke.mjs",
     "test:perf:cpu": "node scripts/render-performance.mjs",
     "test:architecture": "node scripts/check-boundaries.mjs",
     "verify:release": "pnpm build && pnpm typecheck && pnpm test:coverage && pnpm lint && pnpm test:architecture && pnpm test:package && pnpm test:perf:cpu && pnpm test:e2e && pnpm test:perf"

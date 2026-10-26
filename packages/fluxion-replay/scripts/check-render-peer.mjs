@@ -2,7 +2,8 @@
  * Release guard: fail if the fluxion-render major version has drifted outside
  * the range replay declares in peerDependencies. (This caught the ">=0.14.0 <1"
  * vs render 1.x mismatch that ERESOLVE-failed consumer installs.)
- * Wired into replay's release-it `before:init`.
+ * Run by root `pnpm test:package`, so CI, release.yml and every package's
+ * release-it `before:init` (via `verify:release`) gate on it.
  */
 import { readFileSync } from "node:fs";
 

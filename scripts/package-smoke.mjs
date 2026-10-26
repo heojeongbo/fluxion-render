@@ -26,7 +26,10 @@ try {
       for (const version of Object.values(manifest[section] ?? {})) assert(!version.startsWith("workspace:"), `${slug}: unpublished workspace range`);
     }
     if (slug === "render") {
-      assert.equal(manifest.dependencies["@heojeongbo/fluxion-worker"], "^0.6.2", "render must reject worker 0.6.1, which lacks useDisposableResource");
+      // Assert the floor, not the literal range, so a later worker bump does not trip this.
+      const range = manifest.dependencies["@heojeongbo/fluxion-worker"];
+      const [major, minor, patch] = (/^\^(\d+)\.(\d+)\.(\d+)$/.exec(range) ?? []).slice(1).map(Number);
+      assert(major > 0 || minor > 6 || (minor === 6 && patch >= 2), `render must reject worker 0.6.1, which lacks useDisposableResource (got "${range}")`);
     }
     if (slug === "worker") {
       const [major, minor, patch] = manifest.version.split(".").map(Number);
