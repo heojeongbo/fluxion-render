@@ -6,10 +6,16 @@ import { useRecordingSession } from "./use-recording-session";
 
 /** Minimal ReplaySession stub — only the methods the hook touches. */
 function makeSessionStub() {
+  const recorder = { isRecording: false };
   return {
+    recorder,
     clearRecording: vi.fn(async () => {}),
-    startRecording: vi.fn(async () => {}),
-    stopRecording: vi.fn(() => {}),
+    startRecording: vi.fn(async () => {
+      recorder.isRecording = true;
+    }),
+    stopRecording: vi.fn(() => {
+      recorder.isRecording = false;
+    }),
     record: vi.fn(),
   };
 }
@@ -312,5 +318,92 @@ describe("useRecordingSession", () => {
     });
     // Error should NOT surface because cancelled=true
     expect(result.current.error).toBeNull();
+  });
+
+  const settle = () =>
+    act(async () => {
+      for (let i = 0; i < 4; i++) await Promise.resolve();
+    });
+
+  it("keeps a shared session recording until the last hook lets go", async () => {
+    const stub = makeSessionStub();
+    const session = stubAsSession(stub);
+    const a = renderHook(
+      ({ enabled }) => useRecordingSession({ session, enabled, clearOnStart: false }),
+      { initialProps: { enabled: true } },
+    );
+    const b = renderHook(
+      ({ enabled }) => useRecordingSession({ session, enabled, clearOnStart: false }),
+      { initialProps: { enabled: true } },
+    );
+    await settle();
+    b.rerender({ enabled: false }); // panel B goes away first
+    await settle();
+    expect(stub.stopRecording).not.toHaveBeenCalled();
+    expect(stub.recorder.isRecording).toBe(true);
+    a.rerender({ enabled: false });
+    await settle();
+    expect(stub.stopRecording).toHaveBeenCalledTimes(1);
+    a.unmount();
+    b.unmount();
+  });
+
+  it("never stops a recording the app started itself", async () => {
+    const stub = makeSessionStub();
+    stub.recorder.isRecording = true;
+    const hook = renderHook(() =>
+      useRecordingSession({
+        session: stubAsSession(stub),
+        enabled: true,
+        clearOnStart: false,
+      }),
+    );
+    await settle();
+    hook.unmount();
+    await settle();
+    expect(stub.stopRecording).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a failing ticker record() once instead of throwing every tick", async () => {
+    const stub = makeSessionStub();
+    stub.record.mockImplementation(() => {
+      throw new RangeError("ReplayStore write queue is full");
+    });
+    const hook = renderHook(() =>
+      useRecordingSession({
+        session: stubAsSession(stub),
+        enabled: true,
+        clearOnStart: false,
+        channels: [{ channelId: "m", intervalMs: 10, produce: () => 1 }],
+      }),
+    );
+    await settle();
+    await act(async () => {
+      vi.advanceTimersByTime(35);
+    });
+    expect(stub.record).toHaveBeenCalledTimes(3);
+    expect(hook.result.current.error).toBeInstanceOf(RangeError);
+    hook.unmount();
+  });
+
+  it("wraps a non-Error value thrown by a ticker's record()", async () => {
+    const stub = makeSessionStub();
+    stub.record.mockImplementation(() => {
+      throw "queue full";
+    });
+    const hook = renderHook(() =>
+      useRecordingSession({
+        session: stubAsSession(stub),
+        enabled: true,
+        clearOnStart: false,
+        channels: [{ channelId: "m", intervalMs: 10, produce: () => 1 }],
+      }),
+    );
+    await settle();
+    await act(async () => {
+      vi.advanceTimersByTime(15);
+    });
+    expect(hook.result.current.error?.message).toBe("queue full");
+    hook.unmount();
   });
 });

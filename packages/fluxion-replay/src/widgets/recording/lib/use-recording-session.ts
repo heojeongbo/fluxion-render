@@ -62,6 +62,14 @@ export interface UseRecordingSessionResult {
  *   ],
  * });
  */
+// Hooks sharing one session keep it recording until the last of them is
+// disabled or unmounted. A recording that was already running when the first
+// hook joined (the app started it) is never stopped by a hook.
+const recordingHolds = new WeakMap<
+  object,
+  { holders: number; startedByHooks: boolean }
+>();
+
 export function useRecordingSession(
   opts: UseRecordingSessionOptions,
 ): UseRecordingSessionResult {
@@ -80,11 +88,9 @@ export function useRecordingSession(
     session: ReplaySession<ReplayStorage>;
     promise: Promise<void>;
   } | null>(null);
-  const generation = useRef(0);
 
   useEffect(() => {
     if (!session || !enabled) return;
-    const gen = ++generation.current;
     if (initialization.current?.session !== session) {
       initialization.current = {
         session,
@@ -95,6 +101,20 @@ export function useRecordingSession(
 
     let cancelled = false;
     const intervalIds: ReturnType<typeof setInterval>[] = [];
+    let held = false;
+    const hold = () => {
+      const claim = recordingHolds.get(session) ?? { holders: 0, startedByHooks: false };
+      if (claim.holders === 0) claim.startedByHooks = !session.recorder.isRecording;
+      claim.holders++;
+      recordingHolds.set(session, claim);
+      held = true;
+    };
+    const release = () => {
+      if (!held) return;
+      held = false;
+      const claim = recordingHolds.get(session)!;
+      if (--claim.holders === 0 && claim.startedByHooks) session.stopRecording();
+    };
 
     setError(null);
 
@@ -102,10 +122,13 @@ export function useRecordingSession(
       try {
         await ready;
         if (cancelled) return;
+        hold();
         await session.startRecording();
         if (cancelled) {
-          if (generation.current === gen || initialization.current?.session !== session)
-            session.stopRecording();
+          // Released while the start was pending: a late start may have turned
+          // recording back on. Stop it unless another hook now holds the session.
+          const claim = recordingHolds.get(session)!;
+          if (claim.holders === 0 && claim.startedByHooks) session.stopRecording();
           return;
         }
 
@@ -122,8 +145,16 @@ export function useRecordingSession(
               const current = channelsRef.current?.find(
                 (item) => item.channelId === spec.channelId,
               );
-              if (current)
+              if (!current) return;
+              try {
                 session.record(current.channelId, current.produce(wallT), wallT);
+              } catch (e) {
+                // e.g. a full write queue (maxPendingFrames): drop the sample,
+                // surface the first failure instead of throwing every tick.
+                setError(
+                  (prev) => prev ?? (e instanceof Error ? e : new Error(String(e))),
+                );
+              }
             }, spec.intervalMs),
           );
         }
@@ -141,7 +172,7 @@ export function useRecordingSession(
       cancelled = true;
       for (const id of intervalIds) clearInterval(id);
       setIsRecording(false);
-      session.stopRecording();
+      release();
     };
   }, [session, enabled, clearOnStart]);
 
