@@ -64,14 +64,16 @@ export class AreaChartLayer implements Layer {
     const lane = this.laneActive();
     const off0 = lane ? 0 : this.yOffset; // lanes normalize per-layer
     // Sliding-window y-extent in O(log n); see LineChartLayer.scan for the
-    // bit-exactness rationale (constant off0 added after the min/max).
-    const rawMin = this.ring.extentMin(xMin, viewport.bounds.xMax);
+    // bit-exactness rationale (constant off0 added after the min/max) and why
+    // a lane band includes the right-edge neighbour.
+    const xMax = viewport.bounds.xMax;
+    const rawMin = this.ring.extentMin(xMin, xMax, lane);
     if (lane) {
       this.scannedYMin = rawMin;
-      this.scannedYMax = this.ring.extentMax(xMin, viewport.bounds.xMax);
+      this.scannedYMax = this.ring.extentMax(xMin, xMax, true);
     } else if (rawMin !== Number.POSITIVE_INFINITY) {
       const lo = rawMin + off0;
-      const hi = this.ring.extentMax(xMin, viewport.bounds.xMax) + off0;
+      const hi = this.ring.extentMax(xMin, xMax) + off0;
       if (lo < viewport.observedYMin) viewport.observedYMin = lo;
       if (hi > viewport.observedYMax) viewport.observedYMax = hi;
     }
@@ -124,6 +126,9 @@ export class AreaChartLayer implements Layer {
     const yPx = (y: number): number =>
       lane ? this.yToBandPx(y, viewport) : viewport.yToPx(y + this.yOffset);
     const gap = this.maxGapMs;
+    // Both passes walk the decimated/WebGL sample window: up to the first
+    // sample past xMax (the edge stroke), which scan() keeps inside a lane band.
+    const xMax = viewport.bounds.xMax;
 
     // Pass 1 — fill: one closed-to-baseline polygon per gap-separated
     // segment. With maxGapMs unset there is exactly one segment, producing
@@ -139,26 +144,30 @@ export class AreaChartLayer implements Layer {
       ctx.lineTo(segFirstPx, baselinePy);
       ctx.closePath();
     };
-    this.ring.forEach((data, off) => {
-      const t = data[off];
-      if (t < xMin) return;
-      const px = viewport.xToPx(t);
-      const py = yPx(data[off + 1]);
-      if (inSeg && gap !== undefined && t - prevT > gap) {
-        closeSeg();
-        inSeg = false;
-      }
-      if (!inSeg) {
-        ctx.moveTo(px, py);
-        segFirstPx = px;
-        inSeg = true;
-        any = true;
-      } else {
-        ctx.lineTo(px, py);
-      }
-      prevPx = px;
-      prevT = t;
-    });
+    this.ring.forEachRange(
+      xMin,
+      xMax,
+      (data, off) => {
+        const t = data[off];
+        const px = viewport.xToPx(t);
+        const py = yPx(data[off + 1]);
+        if (inSeg && gap !== undefined && t - prevT > gap) {
+          closeSeg();
+          inSeg = false;
+        }
+        if (!inSeg) {
+          ctx.moveTo(px, py);
+          segFirstPx = px;
+          inSeg = true;
+          any = true;
+        } else {
+          ctx.lineTo(px, py);
+        }
+        prevPx = px;
+        prevT = t;
+      },
+      true,
+    );
 
     if (!any) return; // no visible points
 
@@ -170,19 +179,23 @@ export class AreaChartLayer implements Layer {
     ctx.beginPath();
     let first = true;
     prevT = 0;
-    this.ring.forEach((data, off) => {
-      const t = data[off];
-      if (t < xMin) return;
-      const px = viewport.xToPx(t);
-      const py = yPx(data[off + 1]);
-      if (first || (gap !== undefined && t - prevT > gap)) {
-        ctx.moveTo(px, py);
-        first = false;
-      } else {
-        ctx.lineTo(px, py);
-      }
-      prevT = t;
-    });
+    this.ring.forEachRange(
+      xMin,
+      xMax,
+      (data, off) => {
+        const t = data[off];
+        const px = viewport.xToPx(t);
+        const py = yPx(data[off + 1]);
+        if (first || (gap !== undefined && t - prevT > gap)) {
+          ctx.moveTo(px, py);
+          first = false;
+        } else {
+          ctx.lineTo(px, py);
+        }
+        prevT = t;
+      },
+      true,
+    );
     ctx.strokeStyle = this.color;
     ctx.lineWidth = this.lineWidth;
     const dashed = this.dashArray.length > 0;

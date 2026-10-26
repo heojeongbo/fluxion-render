@@ -34,6 +34,7 @@ export class RingBuffer {
     revision: -1,
     xMin: NaN,
     xMax: NaN,
+    rightNeighbor: false,
     min: Infinity,
     max: -Infinity,
   };
@@ -101,19 +102,36 @@ export class RingBuffer {
     }
   }
 
-  private queryRange(xMin: number, xMax: number): typeof this.rangeCache {
+  private queryRange(
+    xMin: number,
+    xMax: number,
+    rightNeighbor: boolean,
+  ): typeof this.rangeCache {
     const c = this.rangeCache;
-    if (c.revision === this.revision && c.xMin === xMin && c.xMax === xMax) return c;
+    if (
+      c.revision === this.revision &&
+      c.xMin === xMin &&
+      c.xMax === xMax &&
+      c.rightNeighbor === rightNeighbor
+    ) {
+      return c;
+    }
     c.revision = this.revision;
     c.xMin = xMin;
     c.xMax = xMax;
+    c.rightNeighbor = rightNeighbor;
     c.min = Infinity;
     c.max = -Infinity;
-    this.forEachRange(xMin, xMax, (data, off) => {
-      const value = data[off + this.extentCol]!;
-      if (value < c.min) c.min = value;
-      if (value > c.max) c.max = value;
-    });
+    this.forEachRange(
+      xMin,
+      xMax,
+      (data, off) => {
+        const value = data[off + this.extentCol]!;
+        if (value < c.min) c.min = value;
+        if (value > c.max) c.max = value;
+      },
+      rightNeighbor,
+    );
     return c;
   }
 
@@ -211,24 +229,29 @@ export class RingBuffer {
 
   /**
    * Min of the tracked value column over retained records whose `t` (column 0)
-   * is in `[xMin, xMax]`. `+Infinity` when none (or extent tracking is off).
-   * Requires {@link enableExtent}.
+   * is in `[xMin, xMax]` — plus the first record past `xMax` when
+   * `rightNeighbor` (see {@link forEachRange}). `+Infinity` when none (or extent
+   * tracking is off). Requires {@link enableExtent}.
    *
    * O(log n) through the sliding-window deques unless records lie past `xMax`
    * (then a walk over the window only). Unordered data ignores `xMax`, exactly
    * as 1.7.0 did, until the order break is evicted.
    */
-  extentMin(xMin: number, xMax = Infinity): number {
+  extentMin(xMin: number, xMax = Infinity, rightNeighbor = false): number {
     if (!this.extent) return Number.POSITIVE_INFINITY;
-    if (xMax < this.lastT && this.ordered) return this.queryRange(xMin, xMax).min;
+    if (xMax < this.lastT && this.ordered) {
+      return this.queryRange(xMin, xMax, rightNeighbor).min;
+    }
     const minSeq = this.totalPushed - this.capacity;
     return this.extent.queryMin(minSeq > 0 ? minSeq : 0, xMin);
   }
 
   /** Max counterpart of {@link extentMin}; `-Infinity` when none. */
-  extentMax(xMin: number, xMax = Infinity): number {
+  extentMax(xMin: number, xMax = Infinity, rightNeighbor = false): number {
     if (!this.extent) return Number.NEGATIVE_INFINITY;
-    if (xMax < this.lastT && this.ordered) return this.queryRange(xMin, xMax).max;
+    if (xMax < this.lastT && this.ordered) {
+      return this.queryRange(xMin, xMax, rightNeighbor).max;
+    }
     const minSeq = this.totalPushed - this.capacity;
     return this.extent.queryMax(minSeq > 0 ? minSeq : 0, xMin);
   }

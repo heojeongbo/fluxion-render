@@ -109,17 +109,21 @@ export class LineChartLayer implements Layer {
     const off0 = lane ? 0 : this.yOffset;
     // Sliding-window y-extent in O(log n) (two monotonic deques in the ring),
     // replacing the per-frame full-ring scan. `rawMin`/`rawMax` are over samples
-    // with t >= xMin; +/-Infinity when the window is empty. Adding the constant
+    // in [xMin, xMax]; +/-Infinity when the window is empty. Adding the constant
     // `off0` after the min/max is bit-identical to adding it per sample.
-    const rawMin = this.ring.extentMin(xMin, viewport.bounds.xMax);
+    // A lane band also covers the first sample past xMax: every draw path
+    // strokes to it to reach the right edge, and the band is not clipped, so
+    // leaving it out would throw that edge segment out of the lane.
+    const xMax = viewport.bounds.xMax;
+    const rawMin = this.ring.extentMin(xMin, xMax, lane);
     if (lane) {
       this.scannedYMin = rawMin;
-      this.scannedYMax = this.ring.extentMax(xMin, viewport.bounds.xMax);
+      this.scannedYMax = this.ring.extentMax(xMin, xMax, true);
     } else if (rawMin !== Number.POSITIVE_INFINITY) {
       // Non-empty window: widen the shared observed range (an empty window left
       // the old loop's min/max at the incoming observed values — a no-op).
       const lo = rawMin + off0;
-      const hi = this.ring.extentMax(xMin, viewport.bounds.xMax) + off0;
+      const hi = this.ring.extentMax(xMin, xMax) + off0;
       if (lo < viewport.observedYMin) viewport.observedYMin = lo;
       if (hi > viewport.observedYMax) viewport.observedYMax = hi;
     }
@@ -280,23 +284,30 @@ export class LineChartLayer implements Layer {
     const lane = this.laneActive();
     let first = true;
     let prevT = 0;
-    this.ring.forEach((data, off) => {
-      const t = data[off];
-      if (t < xMin) return;
-      const px = viewport.xToPx(t);
-      const py = lane
-        ? this.yToBandPx(data[off + 1], viewport)
-        : viewport.yToPx(data[off + 1] + this.yOffset);
-      // Break the stroke across a time gap larger than maxGapMs — the
-      // silence shows as a real hole instead of a bridging diagonal.
-      if (first || (gap !== undefined && t - prevT > gap)) {
-        ctx.moveTo(px, py);
-        first = false;
-      } else {
-        ctx.lineTo(px, py);
-      }
-      prevT = t;
-    });
+    // Same sample window as the decimated and WebGL paths: up to the first
+    // sample past xMax (the stroke into the right edge), which scan() keeps
+    // inside a lane band.
+    this.ring.forEachRange(
+      xMin,
+      viewport.bounds.xMax,
+      (data, off) => {
+        const t = data[off];
+        const px = viewport.xToPx(t);
+        const py = lane
+          ? this.yToBandPx(data[off + 1], viewport)
+          : viewport.yToPx(data[off + 1] + this.yOffset);
+        // Break the stroke across a time gap larger than maxGapMs — the
+        // silence shows as a real hole instead of a bridging diagonal.
+        if (first || (gap !== undefined && t - prevT > gap)) {
+          ctx.moveTo(px, py);
+          first = false;
+        } else {
+          ctx.lineTo(px, py);
+        }
+        prevT = t;
+      },
+      true,
+    );
     ctx.stroke();
     if (dashed) ctx.setLineDash([]);
     if (faded) ctx.globalAlpha = prevAlpha;

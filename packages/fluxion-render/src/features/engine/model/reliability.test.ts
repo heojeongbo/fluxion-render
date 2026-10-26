@@ -160,6 +160,74 @@ function pathPoints(layer: StreamingLayer, vp: Viewport): Array<[number, number]
     .map((c) => [c.args[0] as number, c.args[1] as number]);
 }
 
+describe("lane bands hold every drawn vertex", () => {
+  // Lane 1 of 2 on a 100×100 plot (no pad, no gap) → band px [50, 100]. The
+  // window is [0, 10] with in-window y of 0/1, but every draw path also strokes
+  // to the first sample past xMax (t=11, y=100) to reach the right edge.
+  function laneSetup(Layer: new (id: string) => StreamingLayer, dense: boolean) {
+    const vp = new Viewport();
+    vp.setSize(100, 100, 1);
+    vp.setBounds({ xMin: 0, xMax: 10, yMin: 0, yMax: 1 });
+    const layer = new Layer("lane");
+    layer.setConfig({ laneCount: 2, laneIndex: 1, laneGapPx: 0, decimate: dense });
+    const pts: number[] = [];
+    // dense: 300 samples > 2×plotWidth → the decimated path.
+    if (dense) for (let i = 0; i < 300; i++) pts.push(i * 0.03, i % 2);
+    else for (let t = 0; t <= 9; t++) pts.push(t, t % 2);
+    // The right neighbour, then a further sample no draw path should reach.
+    pts.push(11, 100, 12, -500);
+    const data = new Float32Array(pts);
+    layer.setData(data.buffer, data.length, vp);
+    vp.beginScan();
+    layer.scan(vp);
+    return { vp, layer };
+  }
+
+  for (const [name, Layer] of STREAMING_LAYERS) {
+    for (const dense of [false, true]) {
+      const path = dense ? "decimated" : "full-resolution";
+      it(`${name}: the ${path} 2d path stays inside its band at the right edge`, () => {
+        const { vp, layer } = laneSetup(Layer, dense);
+        const pts = pathPoints(layer, vp);
+        // The edge neighbour is drawn (x = 110, past the 100px plot edge) …
+        expect(Math.max(...pts.map(([x]) => x))).toBe(110);
+        // … and, like every other vertex, inside lane 1's band.
+        for (const [, y] of pts) {
+          expect(y).toBeGreaterThanOrEqual(50);
+          expect(y).toBeLessThanOrEqual(100);
+        }
+      });
+    }
+  }
+
+  it("line: the WebGL strip stays inside its band at the right edge", () => {
+    const drawLineStrip = vi.fn();
+    const { vp, layer } = laneSetup(LineChartLayer, false);
+    (layer as LineChartLayer).drawGl({ drawLineStrip } as unknown as GlRenderer, vp);
+    const [verts, count, , transform] = drawLineStrip.mock.calls[0]! as [
+      Float32Array,
+      number,
+      number[],
+      Float32Array,
+    ];
+    // Vertex shader: clip = (v - origin) * scale + offset, per axis.
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const clipX = (verts[i * 2]! - transform[0]!) * transform[2]! + transform[4]!;
+      const clipY = (verts[i * 2 + 1]! - transform[1]!) * transform[3]! + transform[5]!;
+      xs.push(((clipX + 1) * vp.widthPx) / 2);
+      ys.push(((1 - clipY) * vp.heightPx) / 2);
+    }
+    expect(count).toBe(11); // t = 0..9 plus the right neighbour
+    expect(Math.max(...xs)).toBeCloseTo(110, 3);
+    for (const y of ys) {
+      expect(y).toBeGreaterThanOrEqual(50 - 1e-3);
+      expect(y).toBeLessThanOrEqual(100 + 1e-3);
+    }
+  });
+});
+
 describe("timestamp glitches keep 1.7.0 draw coverage", () => {
   // A backward t makes WindowExtent warn once; keep output clean.
   beforeEach(() => {

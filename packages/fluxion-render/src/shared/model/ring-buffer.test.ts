@@ -186,6 +186,28 @@ describe("bounded time queries", () => {
     // Ordered again after clear(): the bounded query excludes t=2.
     expect(ring.extentMax(0, 1)).toBe(5);
   });
+
+  it("includes the first sample past xMax only when a right neighbour is asked for", () => {
+    const ring = new RingBuffer(8, 2);
+    ring.enableExtent();
+    for (const [t, y] of [
+      [0, 0],
+      [5, 1],
+      [10, 2],
+      [11, 100],
+      [12, -100],
+    ]) {
+      ring.push([t!, y!]);
+    }
+    expect(ring.extentMax(0, 10)).toBe(2);
+    expect(ring.extentMax(0, 10, true)).toBe(100);
+    expect(ring.extentMin(0, 10, true)).toBe(0);
+    // Same revision and bounds: the cached walk must not leak across the flag.
+    expect(ring.extentMax(0, 10)).toBe(2);
+    expect(ring.extentMin(0, 10)).toBe(0);
+    // A window with nothing past xMax has no right neighbour to add.
+    expect(ring.extentMin(5, 12, true)).toBe(-100);
+  });
 });
 
 describe("time-order tracking", () => {
