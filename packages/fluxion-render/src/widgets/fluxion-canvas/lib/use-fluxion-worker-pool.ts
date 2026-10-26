@@ -15,7 +15,9 @@ export function useFluxionWorkerPool(opts: FluxionWorkerPoolOptions): FluxionWor
     () => new FluxionWorkerPool({ ...optsRef.current, lazy: true }),
   );
   useEffect(() => {
-    pool.start();
+    // A reveal after <Activity> hid us replays effects with the disposed pool
+    // before the re-render that hands out its replacement — skip, don't throw.
+    if (!pool.isDisposed) pool.start();
   }, [pool]);
   return pool;
 }

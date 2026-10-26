@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, realpath, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const scratch = await mkdtemp(path.join(tmpdir(), "fluxion-consumer-"));
 const packages = ["worker", "render", "replay"];
+const tarballPaths = {};
 try {
   const modules = path.join(scratch, "node_modules");
   await mkdir(path.join(modules, "@heojeongbo"), { recursive: true });
@@ -18,9 +19,10 @@ try {
     execFileSync("pnpm", ["pack", "--pack-destination", output], { cwd: path.join(root, "packages", `fluxion-${slug}`), stdio: "pipe" });
     const tarballs = (await readdir(output)).filter(name => name.endsWith(".tgz"));
     assert.equal(tarballs.length, 1);
+    tarballPaths[slug] = path.join(output, tarballs[0]);
     const destination = path.join(modules, "@heojeongbo", `fluxion-${slug}`);
     await mkdir(destination);
-    execFileSync("tar", ["-xzf", path.join(output, tarballs[0]), "--strip-components=1", "-C", destination]);
+    execFileSync("tar", ["-xzf", tarballPaths[slug], "--strip-components=1", "-C", destination]);
     const manifest = JSON.parse(await readFile(path.join(destination, "package.json"), "utf8"));
     for (const section of ["dependencies", "peerDependencies", "optionalDependencies", "devDependencies"]) {
       for (const version of Object.values(manifest[section] ?? {})) assert(!version.startsWith("workspace:"), `${slug}: unpublished workspace range`);
@@ -64,6 +66,23 @@ void Consumer; void FluxionHost;
 `);
   execFileSync(process.execPath, [path.join(root, "node_modules/typescript/bin/tsc"), "--noEmit", "--strict", "--skipLibCheck", "--target", "ES2022", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--lib", "ES2022,DOM", "consumer.ts"], { cwd: scratch, stdio: "inherit" });
   console.log(`PASS tarball consumer: ${imports.length} runtime entrypoints + TypeScript public APIs`);
+
+  // Same tarballs under React 19 (what downstream apps run). A separate copy,
+  // not a symlink: Node resolves `react` from a package's real path.
+  const react19 = path.join(scratch, "react19");
+  const modules19 = path.join(react19, "node_modules");
+  await mkdir(path.join(modules19, "@heojeongbo"), { recursive: true });
+  await writeFile(path.join(react19, "package.json"), JSON.stringify({ private: true, type: "module" }));
+  for (const slug of packages) {
+    const destination = path.join(modules19, "@heojeongbo", `fluxion-${slug}`);
+    await mkdir(destination);
+    execFileSync("tar", ["-xzf", tarballPaths[slug], "--strip-components=1", "-C", destination]);
+  }
+  for (const [name, source] of [["react", "node_modules/react-19"], ["react-dom", "node_modules/react-dom-19"], ["happy-dom", "packages/fluxion-render/node_modules/happy-dom"]])
+    await symlink(await realpath(path.join(root, source)), path.join(modules19, name), "dir");
+  await copyFile(path.join(root, "scripts/react19-activity.mjs"), path.join(react19, "activity.mjs"));
+  // A regression here used to re-render forever; fail on a hang instead of wedging CI.
+  execFileSync(process.execPath, ["activity.mjs"], { cwd: react19, stdio: "inherit", timeout: 120_000 });
 } finally {
   await rm(scratch, { recursive: true, force: true });
 }
