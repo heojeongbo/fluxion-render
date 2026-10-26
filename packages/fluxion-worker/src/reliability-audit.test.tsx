@@ -194,9 +194,12 @@ it("serves a non-echoing worker under StrictMode's abort-and-resend", async () =
     queueMicrotask(() => b.side.postMessage({ hostId: e.data.hostId, sum: 6 }));
   const h = new WorkerHandle<{ op: string }>(() => b.worker);
   const msg = { op: "sum" };
-  const view = renderHook(() => useWorkerRequest<{ op: string }, { sum: number }>(h, msg), {
-    wrapper: StrictMode,
-  });
+  const view = renderHook(
+    () => useWorkerRequest<{ op: string }, { sum: number }>(h, msg),
+    {
+      wrapper: StrictMode,
+    },
+  );
   await act(async () => {
     for (let i = 0; i < 4; i++) await Promise.resolve();
   });
