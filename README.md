@@ -223,7 +223,9 @@ written under `.cache/`.
 - Player and recorder depend on `FrameReader` / `FrameWriter`; video components
   depend on chunk reader/writer ports. `ReplayPlayer` accepts an optional clock
   port, and `ReplaySession` accepts an optional store. Defaults remain the browser
-  implementations. A supplied player clock is owned and disposed by the player.
+  implementations. A supplied player clock is owned and disposed by the player; a
+  supplied store stays the caller's (`session.dispose()` leaves it open, so it can
+  back the next session after a StrictMode replay or remount).
 - Layers advertise an optional structural axis capability. The stack prepares
   axes, scans data layers, then finalizes bounds, independent of insertion order.
   Declarative layer types live outside React; imperative and React APIs share them.
@@ -237,20 +239,27 @@ written under `.cache/`.
   requests are matched exactly. Workers that do not echo it keep the 0.6.1
   contract: untagged replies go, in order, to the oldest pending request.
 - Replay video files are stored under `fluxion-replay/<encoded-dbName>/` in OPFS.
-  Clearing a recording deletes only that namespace. Legacy root files remain
-  readable while referenced by that database; shared legacy files are not deleted
-  automatically because their ownership cannot be established safely.
+  Clearing a recording deletes that namespace and, for an upgraded database, the
+  origin-root channel directories it recorded with 0.13.2 or earlier, as clearing
+  did then; other databases' namespaces and unrelated origin files are untouched.
+  Legacy root chunks stay readable while referenced and are removed with their rows.
 - Disk time retention is opt-in via `ReplayStore({ retentionMs })` or
   `ReplaySession({ storeOptions: { retentionMs } })`; the session's top-level
-  `retentionMs` continues to control memory history. Eviction is incremental.
-  Pending writes survive failed transactions and drain in batches of 200.
-  `pendingFrameCount`, `lastWriteError` and `onError` expose pressure/failures.
-  Optional `maxPendingFrames` rejects before accepting an overflowing frame;
-  its default is unlimited to preserve existing ingestion behavior.
+  `retentionMs` continues to control memory history. Eviction is incremental:
+  over `evictThresholdPct`, each flush trims the oldest 1% of the span until usage
+  falls 5 points below it, so usage this store cannot reclaim shrinks history no
+  faster than 0.13.2's 10% per 5 s. Pending writes drain in batches of 200 and
+  survive a transient transaction failure (dropped after three attempts in a row);
+  a frame IndexedDB cannot store is dropped alone, and a full disk triggers the
+  emergency reclaim first. `flush()` resolves once everything appended before it is
+  written. `pendingFrameCount`, `lastWriteError` and `onError` expose pressure and
+  failures. Optional `maxPendingFrames` rejects before accepting an overflowing
+  frame; its default is unlimited to preserve existing ingestion behavior.
 
-The prepared worker package version is 0.6.2 and render's packed minimum dependency
-is explicitly `^0.6.2`; worker 0.6.1 lacks the resource lifecycle API. Publish worker
-before render/replay. `test:package` checks the range and the packaged entry points;
+Render's worker dependency is `workspace:^`, so it packs the worker version the
+workspace holds (worker 0.6.1 lacks the resource lifecycle API render's hooks use).
+Publish worker before render/replay. `test:package` checks the range, replay's render
+peer range, the packaged entry points, and the hooks under React 19 `<Activity>`;
 `test:architecture` prevents shared contracts from importing implementation layers.
 `verify:release` runs coverage, package/architecture checks, CPU benchmarks, browser
 E2E and browser performance tests before release-it can create a tag. A browser
