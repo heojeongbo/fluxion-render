@@ -22,7 +22,12 @@ export class RingBuffer {
   private extent: WindowExtent | null = null;
   private extentCol = 1;
   private totalPushed = 0;
-  private ordered = true;
+  // Sequence number of the most recent push that broke time order (non-finite
+  // `t`, or `t` below its predecessor's); -Infinity when none since clear().
+  // The retained window is sorted again once that sample is evicted, so one
+  // glitch (clock step, merged producers, a NaN) costs at most one ring-length
+  // of slow path instead of latching it for the ring's lifetime.
+  private breakSeq = -Infinity;
   private lastT = -Infinity;
   private revision = 0;
   private rangeCache = {
@@ -36,6 +41,15 @@ export class RingBuffer {
   /** Changes whenever data is added or cleared; useful for derived-data caches. */
   get version(): number {
     return this.revision;
+  }
+
+  /**
+   * Every retained `t` is finite and non-decreasing — the precondition for the
+   * indexed fast paths. O(1): the last order break is older than the oldest
+   * retained sample (seq `totalPushed - capacity`; negative while not full).
+   */
+  private get ordered(): boolean {
+    return this.breakSeq < this.totalPushed - this.capacity;
   }
 
   /** First chronological index >= t (or > t for upper). Unordered data falls back to a full scan. */
@@ -52,22 +66,38 @@ export class RingBuffer {
     return lo;
   }
 
-  /** Iterate a time window without walking old retained history. */
+  /**
+   * Iterate a time window without walking old retained history. `rightNeighbor`
+   * adds the first sample past `xMax` — the one the draw paths stroke toward to
+   * reach the right edge. Unordered data has no index bounds, so it is walked
+   * whole and filtered per sample: a right-neighbor walk keeps 1.7.0's draw set
+   * (everything not left of `xMin`; the canvas clips what lies past `xMax`),
+   * otherwise `[xMin, xMax]`.
+   */
   forEachRange(
     xMin: number,
     xMax: number,
     fn: (data: Float32Array, offset: number, index: number) => void,
     rightNeighbor = false,
   ): void {
+    const { capacity, stride, data } = this;
+    const ordered = this.ordered;
     const from = this.timeIndex(xMin);
     const end = Math.min(
       this.count,
       this.timeIndex(xMax, true) + (rightNeighbor ? 1 : 0),
     );
+    // Incremental wrap instead of a per-sample `% capacity` (this walk runs once
+    // per visible sample per streaming draw).
+    let slot = (this.start + from) % capacity;
     for (let i = from; i < end; i++) {
-      const off = ((this.start + i) % this.capacity) * this.stride;
-      const t = this.data[off]!;
-      if (this.ordered || (t >= xMin && t <= xMax)) fn(this.data, off, i);
+      const off = slot * stride;
+      if (++slot === capacity) slot = 0;
+      if (!ordered) {
+        const t = data[off]!;
+        if (rightNeighbor ? t < xMin : !(t >= xMin && t <= xMax)) continue;
+      }
+      fn(data, off, i);
     }
   }
 
@@ -117,7 +147,7 @@ export class RingBuffer {
 
   private feedExtent(base: number): void {
     const t = this.data[base]!;
-    if (!Number.isFinite(t) || t < this.lastT) this.ordered = false;
+    if (!Number.isFinite(t) || t < this.lastT) this.breakSeq = this.totalPushed;
     this.lastT = t;
     this.revision++;
     const ext = this.extent;
@@ -181,12 +211,16 @@ export class RingBuffer {
 
   /**
    * Min of the tracked value column over retained records whose `t` (column 0)
-   * is >= `xMin`. `+Infinity` when none (or extent tracking is off).
+   * is in `[xMin, xMax]`. `+Infinity` when none (or extent tracking is off).
    * Requires {@link enableExtent}.
+   *
+   * O(log n) through the sliding-window deques unless records lie past `xMax`
+   * (then a walk over the window only). Unordered data ignores `xMax`, exactly
+   * as 1.7.0 did, until the order break is evicted.
    */
   extentMin(xMin: number, xMax = Infinity): number {
     if (!this.extent) return Number.POSITIVE_INFINITY;
-    if (!this.ordered || xMax < this.lastT) return this.queryRange(xMin, xMax).min;
+    if (xMax < this.lastT && this.ordered) return this.queryRange(xMin, xMax).min;
     const minSeq = this.totalPushed - this.capacity;
     return this.extent.queryMin(minSeq > 0 ? minSeq : 0, xMin);
   }
@@ -194,7 +228,7 @@ export class RingBuffer {
   /** Max counterpart of {@link extentMin}; `-Infinity` when none. */
   extentMax(xMin: number, xMax = Infinity): number {
     if (!this.extent) return Number.NEGATIVE_INFINITY;
-    if (!this.ordered || xMax < this.lastT) return this.queryRange(xMin, xMax).max;
+    if (xMax < this.lastT && this.ordered) return this.queryRange(xMin, xMax).max;
     const minSeq = this.totalPushed - this.capacity;
     return this.extent.queryMax(minSeq > 0 ? minSeq : 0, xMin);
   }
@@ -207,7 +241,7 @@ export class RingBuffer {
   }
 
   clear(): void {
-    this.ordered = true;
+    this.breakSeq = -Infinity;
     this.lastT = -Infinity;
     this.revision++;
     this.head = 0;

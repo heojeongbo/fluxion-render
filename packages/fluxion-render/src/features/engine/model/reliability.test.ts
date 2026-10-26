@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AreaChartLayer } from "../../../entities/area-chart-layer/model/area-chart-layer";
 import { AxisGridLayer } from "../../../entities/axis-grid-layer/model/axis-grid-layer";
 import { LayerStack } from "../../../entities/layer-stack/model/layer-stack";
@@ -142,5 +142,51 @@ describe("renderer compatibility boundaries", () => {
     engine.pushRaw("line", shared);
     expect(received).toEqual([3, 4]);
     engine.dispatch({ op: Op.DISPOSE });
+  });
+});
+
+type StreamingLayer = LineChartLayer | AreaChartLayer | StepChartLayer;
+const STREAMING_LAYERS: Array<[string, new (id: string) => StreamingLayer]> = [
+  ["line", LineChartLayer],
+  ["area", AreaChartLayer],
+  ["step", StepChartLayer],
+];
+
+function pathPoints(layer: StreamingLayer, vp: Viewport): Array<[number, number]> {
+  const ctx = createFakeCtx();
+  layer.draw(ctx as unknown as OffscreenCanvasRenderingContext2D, vp);
+  return ctx.calls
+    .filter((c) => c.name === "moveTo" || c.name === "lineTo")
+    .map((c) => [c.args[0] as number, c.args[1] as number]);
+}
+
+describe("timestamp glitches keep 1.7.0 draw coverage", () => {
+  // A backward t makes WindowExtent warn once; keep output clean.
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("decimated 2d paths still reach the right edge while a backward step is retained", () => {
+    for (const [, Layer] of STREAMING_LAYERS) {
+      const vp = new Viewport();
+      vp.setSize(100, 100, 1);
+      vp.setBounds({ xMin: 0, xMax: 1000, yMin: 0, yMax: 1 });
+      const layer = new Layer("glitch");
+      layer.setConfig({ decimate: true, capacity: 4096 });
+      const pts = [-5, 0, -6, 0]; // one backward step, long before the window
+      for (let i = 0; i < 300; i++) pts.push(i, 0.5);
+      for (let t = 350; t <= 1150; t += 100) pts.push(t, 0.5);
+      const data = new Float32Array(pts);
+      layer.setData(data.buffer, data.length, vp);
+      vp.beginScan();
+      layer.scan(vp);
+      // Unordered there is no index bound, so — like 1.7.0 and the GL path —
+      // every sample not left of xMin is walked: the last column is t=1150
+      // (x=115), past the plot edge, instead of stopping short at t=950.
+      expect(Math.max(...pathPoints(layer, vp).map(([x]) => x))).toBe(115);
+    }
   });
 });
