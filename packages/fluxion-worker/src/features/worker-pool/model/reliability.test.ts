@@ -49,19 +49,62 @@ describe("RPC identity and ownership", () => {
     await expect(next).resolves.toMatchObject({ value: 2 });
     handle.dispose();
   });
-  it("preserves sequential legacy workers but rejects ambiguous untagged replies", async () => {
+  it("routes untagged replies in order to the oldest pending request", async () => {
     const { handle, worker } = setup();
     const first = handle.request({ job: "first" });
     worker.reply({ hostId: handle.hostId, value: 1 });
     await expect(first).resolves.toEqual({ value: 1 });
     const a = handle.request({ job: "a" });
     const b = handle.request({ job: "b" });
-    const assertions = Promise.all([
-      expect(a).rejects.toThrow("Ambiguous"),
-      expect(b).rejects.toThrow("Ambiguous"),
-    ]);
     worker.reply({ hostId: handle.hostId, value: 2 });
-    await assertions;
+    worker.reply({ hostId: handle.hostId, value: 3 });
+    await expect(a).resolves.toEqual({ value: 2 });
+    await expect(b).resolves.toEqual({ value: 3 });
+    handle.dispose();
+  });
+  it("keeps serving a non-echoing worker after a timeout or abort", async () => {
+    vi.useFakeTimers();
+    try {
+      const { handle, worker } = setup();
+      const timedOut = handle.request({ job: "slow" }, { timeoutMs: 10 });
+      const rejected = expect(timedOut).rejects.toThrow("timed out");
+      await vi.advanceTimersByTimeAsync(10);
+      await rejected;
+      // The slow reply lands while nothing is pending, then work resumes.
+      worker.reply({ hostId: handle.hostId, value: "late" });
+      const abort = new AbortController();
+      const aborted = handle.request({ job: "aborted" }, { signal: abort.signal });
+      const abortRejected = expect(aborted).rejects.toThrow();
+      abort.abort();
+      await abortRejected;
+      worker.reply({ hostId: handle.hostId, value: "late" });
+      for (const value of [1, 2]) {
+        const next = handle.request({ job: "next" });
+        worker.reply({ hostId: handle.hostId, value });
+        await expect(next).resolves.toEqual({ value });
+      }
+      handle.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("does not treat untagged messages as replies once the worker echoes ids", async () => {
+    const { handle, worker, reply } = setup();
+    const tagged = handle.request({ job: "tagged" });
+    reply(0, { value: 1 });
+    await expect(tagged).resolves.toMatchObject({ value: 1 });
+    const pending = handle.request({ job: "pending" });
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    // e.g. defineWorker answering a fire-and-forget postMessage
+    worker.reply({ hostId: handle.hostId, value: "unrelated" });
+    worker.reply({ hostId: handle.hostId, __fluxionError: true, message: "unrelated" });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    reply(1, { value: 2 });
+    await expect(pending).resolves.toMatchObject({ job: "pending", value: 2 });
     handle.dispose();
   });
   it("cleans up synchronous postMessage failures and rejects requests after disposal", async () => {

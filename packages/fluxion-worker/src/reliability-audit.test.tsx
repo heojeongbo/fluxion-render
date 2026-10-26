@@ -1,4 +1,5 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   defineWorker,
@@ -80,29 +81,31 @@ it("AUDIT-W2: a caller AbortSignal must cancel a hook request", async () => {
   h.dispose();
   expect(aborted).toBe(true);
 });
-it("AUDIT-W3: concurrent state updates on one host must not overwrite each other", async () => {
+it("AUDIT-W3: a later message for a host reaches the handler while an async one is pending", async () => {
   const b = bridge();
-  const releases: (() => void)[] = [];
-  const seen: number[] = [];
+  let release!: () => void;
+  const order: string[] = [];
   defineWorkerWithState<{ op: string }, { value: number }, number>(
     async (msg, reply, ctx) => {
-      if (msg.op === "read") {
-        seen.push(ctx.state ?? 0);
-        reply({ value: ctx.state ?? 0 });
-        return;
+      order.push(`${msg.op}@${ctx.state ?? 0}`);
+      if (msg.op === "run") {
+        await new Promise<void>((r) => {
+          release = r;
+        });
+        order.push("run settled");
+        return (ctx.state ?? 0) + 1;
       }
-      await new Promise<void>((r) => releases.push(r));
-      return (ctx.state ?? 0) + 1;
+      reply({ value: ctx.state ?? 0 });
     },
   );
-  b.side.onmessage!({ data: { hostId: "same", op: "increment" } } as MessageEvent);
-  b.side.onmessage!({ data: { hostId: "same", op: "increment" } } as MessageEvent);
-  releases[0]();
-  for (let i = 0; i < 8; i++) await Promise.resolve();
-  releases[1]();
+  b.side.onmessage!({ data: { hostId: "same", op: "run" } } as MessageEvent);
+  // A cancel/steer message must not wait for the job it is meant to stop.
+  b.side.onmessage!({ data: { hostId: "same", op: "cancel" } } as MessageEvent);
+  expect(order).toEqual(["run@0", "cancel@0"]);
+  release();
   for (let i = 0; i < 8; i++) await Promise.resolve();
   b.side.onmessage!({ data: { hostId: "same", op: "read" } } as MessageEvent);
-  expect(seen).toEqual([2]);
+  expect(order).toEqual(["run@0", "cancel@0", "run settled", "read@1"]);
 });
 
 it("reports an already-aborted request without posting work", async () => {
@@ -182,5 +185,23 @@ it.each([
   h.onStream(stream);
   h.emit({});
   expect(stream).toHaveBeenCalledWith({ ok: true });
+  h.dispose();
+});
+it("serves a non-echoing worker under StrictMode's abort-and-resend", async () => {
+  const b = bridge();
+  // A hand-written worker that never echoes __fluxionRequestId, replying async.
+  b.side.onmessage = (e: MessageEvent) =>
+    queueMicrotask(() => b.side.postMessage({ hostId: e.data.hostId, sum: 6 }));
+  const h = new WorkerHandle<{ op: string }>(() => b.worker);
+  const msg = { op: "sum" };
+  const view = renderHook(() => useWorkerRequest<{ op: string }, { sum: number }>(h, msg), {
+    wrapper: StrictMode,
+  });
+  await act(async () => {
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+  });
+  expect(view.result.current.error).toBeNull();
+  expect(view.result.current.data).toEqual({ sum: 6 });
+  view.unmount();
   h.dispose();
 });

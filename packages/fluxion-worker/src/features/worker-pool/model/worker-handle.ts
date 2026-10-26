@@ -12,7 +12,8 @@ export class WorkerHandle<TMsg extends object> implements WorkerLike {
   private _terminated = false;
   private _released = false;
   private _requestSeq = 0;
-  private _legacyRepliesSafe = true;
+  // Set by the first reply that echoes `__fluxionRequestId` (defineWorker does).
+  private _echoesRequestIds = false;
   private readonly _requests = new Map<
     number,
     {
@@ -24,13 +25,12 @@ export class WorkerHandle<TMsg extends object> implements WorkerLike {
     const data = (event as MessageEvent).data;
     if (!data || data.hostId !== this.hostId || data.__fluxionStream) return;
     const id = data.__fluxionRequestId;
-    if (id === undefined && (!this._legacyRepliesSafe || this._requests.size > 1)) {
-      const error = new Error(
-        "Ambiguous worker reply: echo __fluxionRequestId (or use defineWorker) for concurrent/cancelled requests",
-      );
-      for (const pending of [...this._requests.values()]) pending.reject(error);
-      return;
-    }
+    if (id !== undefined) this._echoesRequestIds = true;
+    // Once the worker echoes ids, an untagged message is not a reply (e.g. the
+    // answer to a fire-and-forget postMessage). A worker that never echoes
+    // them keeps the 0.6.1 contract: replies arrive in order, so the oldest
+    // pending request owns the next one.
+    else if (this._echoesRequestIds) return;
     const pending =
       id === undefined ? this._requests.values().next().value : this._requests.get(id);
     if (!pending) return;
@@ -209,13 +209,7 @@ export class WorkerHandle<TMsg extends object> implements WorkerLike {
         cleanup();
         reject(reason);
       };
-      const cancel = (reason: unknown) => {
-        // A legacy reply has no identity: after cancellation it cannot safely
-        // complete a later request. Tagged replies remain fully supported.
-        this._legacyRepliesSafe = false;
-        fail(reason);
-      };
-      const abort = () => cancel(new Error("Worker was terminated"));
+      const abort = () => fail(new Error("Worker was terminated"));
       if (this._requests.size === 0)
         this._worker.addEventListener("message", this._rpcListener);
       this._requests.set(id, {
@@ -228,12 +222,12 @@ export class WorkerHandle<TMsg extends object> implements WorkerLike {
       this._abortCallbacks.add(abort);
       if (opts?.timeoutMs !== undefined) {
         const ms = opts.timeoutMs;
-        timerId = setTimeout(() => cancel(new WorkerTimeoutError(ms)), ms);
+        timerId = setTimeout(() => fail(new WorkerTimeoutError(ms)), ms);
       }
       if (opts?.signal) {
         const signal = opts.signal;
         signalListener = () =>
-          cancel(signal.reason instanceof Error ? signal.reason : new Error("Aborted"));
+          fail(signal.reason instanceof Error ? signal.reason : new Error("Aborted"));
         signal.addEventListener("abort", signalListener, { once: true });
       }
       try {

@@ -99,31 +99,6 @@ export interface HostContext<TState> {
 
 const _SOLO_KEY = "__solo__";
 
-/** Runs synchronously while idle; asynchronous work only blocks its own host. */
-class HostQueue {
-  private readonly queues = new Map<string, (() => void | Promise<void>)[]>();
-  run(key: string, work: () => void | Promise<void>): void {
-    const queue = this.queues.get(key);
-    if (queue) {
-      queue.push(work);
-      return;
-    }
-    this.queues.set(key, [work]);
-    const drain = (): void => {
-      const pending = this.queues.get(key)!;
-      while (pending.length) {
-        const result = pending.shift()!();
-        if (result instanceof Promise) {
-          void result.then(drain);
-          return;
-        }
-      }
-      this.queues.delete(key);
-    };
-    drain();
-  }
-}
-
 function _postError(
   hostId: string | undefined,
   e: unknown,
@@ -148,6 +123,10 @@ function _postError(
  * - Return `null` to delete the state for this host.
  * - Return `undefined` (or void) to leave state unchanged.
  * - Works in standalone mode: messages without a `hostId` share a single `"__solo__"` slot.
+ * - Messages are dispatched as they arrive, so a later message (e.g. a cancel)
+ *   reaches the handler while an earlier async handler is still pending. An
+ *   async handler's returned state is applied when it settles, against the
+ *   `ctx.state` snapshot it started from.
  *
  * @example
  * ```ts
@@ -179,7 +158,6 @@ export function defineWorkerWithState<
   ) => void | Promise<void>,
 ): void {
   const stateMap = new Map<string, TState>();
-  const queue = new HostQueue();
 
   (self as unknown as Worker).onmessage = (evt: MessageEvent<WorkerMsg<TMsg>>) => {
     const msg = evt.data;
@@ -188,72 +166,64 @@ export function defineWorkerWithState<
     const key = hostId ?? _SOLO_KEY;
     const mode: FluxionMode = (msg as { mode?: FluxionMode }).mode ?? "rpc";
 
-    queue.run(key, () => {
-      const ctx: HostContext<TState> = { hostId: key, state: stateMap.get(key), mode };
+    const ctx: HostContext<TState> = { hostId: key, state: stateMap.get(key), mode };
 
-      if (mode === "stream" && streamHandler) {
-        const push: PushFn<TStreamResult> = (result, transfer) => {
-          const out =
-            hostId !== undefined
-              ? { ...result, hostId, __fluxionStream: true as const }
-              : { ...result, __fluxionStream: true as const };
-          if (transfer && transfer.length > 0) {
-            (self as unknown as Worker).postMessage(out, transfer);
-          } else {
-            (self as unknown as Worker).postMessage(out);
-          }
-        };
-        try {
-          const result = streamHandler(
-            msg as unknown as WorkerMsg<TStreamMsg>,
-            push,
-            ctx,
-          );
-          if (result instanceof Promise) {
-            return result.catch((e) => _postError(hostId, e, requestId, mode));
-          }
-        } catch (e) {
-          _postError(hostId, e, requestId, mode);
-        }
-        return;
-      }
-
-      const reply: ReplyFn<TResult> = (result, transfer) => {
-        const out = {
-          ...result,
-          ...(hostId === undefined ? {} : { hostId }),
-          ...(requestId === undefined ? {} : { __fluxionRequestId: requestId }),
-          ...(mode === "stream" ? { __fluxionStream: true as const } : {}),
-        };
+    if (mode === "stream" && streamHandler) {
+      const push: PushFn<TStreamResult> = (result, transfer) => {
+        const out =
+          hostId !== undefined
+            ? { ...result, hostId, __fluxionStream: true as const }
+            : { ...result, __fluxionStream: true as const };
         if (transfer && transfer.length > 0) {
           (self as unknown as Worker).postMessage(out, transfer);
         } else {
-          /* v8 ignore next */
           (self as unknown as Worker).postMessage(out);
         }
       };
-
-      const applyState = (newState: TState | null | void): void => {
-        if (newState === null) {
-          stateMap.delete(key);
-        } else if (newState !== undefined) {
-          stateMap.set(key, newState);
-        }
-      };
-
       try {
-        const result = rpcHandler(msg, reply, ctx);
+        const result = streamHandler(msg as unknown as WorkerMsg<TStreamMsg>, push, ctx);
         if (result instanceof Promise) {
-          return result
-            .then(applyState)
-            .catch((e) => _postError(hostId, e, requestId, mode));
-        } else {
-          applyState(result);
+          result.catch((e) => _postError(hostId, e, requestId, mode));
         }
       } catch (e) {
         _postError(hostId, e, requestId, mode);
       }
-    });
+      return;
+    }
+
+    const reply: ReplyFn<TResult> = (result, transfer) => {
+      const out = {
+        ...result,
+        ...(hostId === undefined ? {} : { hostId }),
+        ...(requestId === undefined ? {} : { __fluxionRequestId: requestId }),
+        ...(mode === "stream" ? { __fluxionStream: true as const } : {}),
+      };
+      if (transfer && transfer.length > 0) {
+        (self as unknown as Worker).postMessage(out, transfer);
+      } else {
+        /* v8 ignore next */
+        (self as unknown as Worker).postMessage(out);
+      }
+    };
+
+    const applyState = (newState: TState | null | void): void => {
+      if (newState === null) {
+        stateMap.delete(key);
+      } else if (newState !== undefined) {
+        stateMap.set(key, newState);
+      }
+    };
+
+    try {
+      const result = rpcHandler(msg, reply, ctx);
+      if (result instanceof Promise) {
+        result.then(applyState).catch((e) => _postError(hostId, e, requestId, mode));
+      } else {
+        applyState(result);
+      }
+    } catch (e) {
+      _postError(hostId, e, requestId, mode);
+    }
   };
 }
 
