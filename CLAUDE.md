@@ -17,7 +17,12 @@ pnpm test        # vitest per package (happy-dom; fake OffscreenCanvas in src/te
 pnpm typecheck   # tsc --noEmit per package
 pnpm dev         # build, then worker/render watch + vite-demo
 pnpm dev:replay  # build, then all package watchers + fluxion-replay-demo
-pnpm lint:fix    # biome check --write . (formatter + import sort; linter disabled)
+pnpm lint:fix    # biome check --write . (formatter + import sort + safe lint fixes)
+
+# Release gate = what release-it's before:init runs (~7 min; headed browsers — run nothing else alongside):
+pnpm verify:release  # build → typecheck → test:coverage → lint → test:architecture → test:package → test:perf:cpu → test:e2e → test:perf
+#   test:package = replay's render-peer guard + packed-tarball consumer smoke (imports + tsc)
+#   test:e2e / test:perf = Chromium AND Firefox (needs `pnpm -C examples/vite-demo exec playwright install chromium firefox`)
 
 # Perf bench (headed Playwright, from examples/vite-demo after `pnpm build` there):
 #   pnpm bench --browser firefox|chromium --charts 60 --rate 25 --runs 3
@@ -57,7 +62,7 @@ Use the `release` skill.
 
 **The publish happens in CI, not on your machine.** Split of responsibilities:
 - **release-it (local)** — verifies, bumps the version, writes CHANGELOG, commits, tags `fluxion-<pkg>-v<semver>`, pushes, creates the GitHub release. It does **not** publish.
-- **`.github/workflows/release.yml`** — triggered by that tag. Re-installs from the lockfile, runs the whole workspace (build → typecheck → test → lint), then `pnpm pack` + `npm publish --provenance`.
+- **`.github/workflows/release.yml`** — triggered by that tag. Re-installs from the lockfile, runs the same gates as `verify:release` over the whole workspace (build → typecheck → coverage → lint → architecture → package → perf:cpu → browser E2E → browser perf under `xvfb-run`), then `pnpm pack` + `npm publish --provenance`.
 
 Why split that way: `pnpm pack` is the only half that rewrites `workspace:^` to a real range (`fluxion-render` depends on `fluxion-worker` that way, so a plain `npm publish` would ship an uninstallable package.json), and `npm publish` is the only half that emits provenance. The workflow packs with one and publishes the tarball with the other, and hard-fails if any `workspace:` range survives into the tarball — across all four dependency maps, since worker and replay have no `dependencies` at all and a `dependencies`-only check passed them vacuously.
 
@@ -65,11 +70,13 @@ Why split that way: `pnpm pack` is the only half that rewrites `workspace:^` to 
 - `release-it --dry-run` runs `npm version` FOR REAL — the `:dry` scripts auto-restore `package.json` afterward, but never trust a dirty tree after a dry-run; a leftover bump skews the next computed version.
 - The bare `release` / `:dry` scripts pass NO level, so `@release-it/conventional-changelog` (angular) computes one — and angular's `whatBump` returns **major** for any commit carrying a note, which is how 1.6.0 picked up a bogus `BREAKING CHANGES` block from the words "breaking change" in a body. Always use the explicit `release:<pkg>:patch|minor|major[:dry]` scripts.
 - release-it requires a clean tree and branch `main`; `.env` must provide `GITHUB_TOKEN`. The npm token now lives only in the `NPM_TOKEN` Actions secret — there is no longer a reason to keep one in a local `.npmrc`.
-- `before:init` runs the **whole workspace**, not just the package being released. `fluxion-replay` peer-depends on any `fluxion-render` 1.x and imports its source in tests, so a render-only gate could ship a render change that breaks replay.
-- A failed publish does not need a new version: re-run the workflow via `workflow_dispatch` with the existing tag.
+- `before:init` runs `pnpm -w run verify:release` — the **whole workspace** plus the headed browser gates, not just the package being released. `fluxion-replay` peer-depends on any `fluxion-render` 1.x and imports its source in tests, so a render-only gate could ship a render change that breaks replay.
+- A failed publish caused by the **environment** does not need a new version: re-run via `workflow_dispatch` with the existing tag. The dispatch checks out the TAG's code and tests but runs `main`'s workflow file, so workflow/container fixes apply on re-dispatch — a fix to code or tests needs a new patch version. (That is why render 1.7.1 / replay 0.13.3 are tagged but were never published.)
 
 ## CI
 
-`ci.yml` runs on `pull_request` / `workflow_dispatch` / weekly — **not** on push to main. `main` has no branch protection and the repo has never used a PR, so a post-push check gates nothing; the checks that protect users run in `release.yml` and in release-it's `before:init` instead. What CI still covers is the clean-environment sweep local dev never does: frozen-lockfile install, dependency-ordered build, examples typecheck, and all three packages' coverage thresholds in a single `build-test` job.
+`ci.yml` runs on `pull_request` / `workflow_dispatch` / weekly — **not** on push to main. `main` has no branch protection and the repo has never used a PR, so a post-push check gates nothing; the checks that protect users run in `release.yml` and in release-it's `before:init` instead. What CI still covers is the clean-environment sweep local dev never does: frozen-lockfile install, dependency-ordered build, examples typecheck, all three packages' coverage thresholds, and the same architecture/package/browser E2E/perf gates as release, in a single `build-test` job.
+
+Both workflows run inside the digest-pinned `mcr.microsoft.com/playwright:v1.62.0-noble` image (browsers + OS libs preinstalled; apt mirrors made the gates time out) — bump it together with the lockfile's Playwright version. Container gotchas, each of which failed a run: `defaults.run.shell: bash` (container jobs default to `sh`, which rejects `set -o pipefail`), `NODE_OPTIONS=--dns-result-order=ipv4first` (vite preview and Node `fetch` resolved `localhost` to different families), and `chown "$HOME"` before browsers (Firefox refuses a home owned by another uid).
 
 Dependabot watches github-actions only, **grouped into one PR** (`.github/dependabot.yml`) — ungrouped it opened three separate green PRs that then sat unmerged for three weeks. `directory: /` covers both workflows.
