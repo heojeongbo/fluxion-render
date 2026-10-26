@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.7.3](https://github.com/heojeongbo/fluxion-render/compare/fluxion-render-v1.7.2...fluxion-render-v1.7.3) (2026-10-26)
+
+
+### Bug Fixes
+
+* **render:** keep lane-mode edge vertices inside their band ([08ee78b](https://github.com/heojeongbo/fluxion-render/commit/08ee78be606c18d586740e69aedd14aaf172e608))
+* **render:** pack the current worker version as render's dependency ([ee4d2ed](https://github.com/heojeongbo/fluxion-render/commit/ee4d2edea507bd00b644bed9cfcf71ed7016ee96))
+* **render:** recover the ring's ordered fast path once a glitch is evicted ([cc379b3](https://github.com/heojeongbo/fluxion-render/commit/cc379b308646e77d8ee06165fc328219933e2f41))
+* **worker,render:** revive hook-owned pools after a React 19 Activity ([a21991b](https://github.com/heojeongbo/fluxion-render/commit/a21991b1cda4c35df1820ffec91107d55e22045b))
+
 ## [1.7.2](https://github.com/heojeongbo/fluxion-render/compare/fluxion-render-v1.7.1...fluxion-render-v1.7.2) (2026-10-22)
 
 ## [1.7.1](https://github.com/heojeongbo/fluxion-render/compare/fluxion-render-v1.7.0...fluxion-render-v1.7.1) (2026-10-22)
