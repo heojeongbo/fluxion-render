@@ -104,7 +104,7 @@ importers:
   packages/fluxion-render:
     dependencies:
       '@heojeongbo/fluxion-worker':
-        specifier: workspace:^0.6.2
+        specifier: workspace:^
         version: link:../fluxion-worker
     devDependencies:
       '@release-it/conventional-changelog':
