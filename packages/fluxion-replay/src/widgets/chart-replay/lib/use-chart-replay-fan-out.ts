@@ -125,10 +125,6 @@ export function useChartReplayFanOut<T>(
   const isHostLiveRef = useRef(opts.isHostLive);
   isHostLiveRef.current = opts.isHostLive;
 
-  // Cache the last hydrate's query so same-window re-scrubs skip the IDB round
-  // trip. The query is channel+window only (independent of lines), so it's
-  // reusable across every fan-out target.
-
   // Live frames accumulated between ticks; each fans across N lines on drain.
   const liveBufferRef = useRef<ReplayPlayerFrame<T>[]>([]);
 
@@ -155,6 +151,10 @@ export function useChartReplayFanOut<T>(
         ? host.scatter(line.layerId)
         : host.line(line.layerId);
 
+    // Cache the last hydrate's query so same-window re-scrubs skip the IDB round
+    // trip. The query is channel+window only (independent of lines), so it's
+    // reusable across every fan-out target. Scoped to this effect run and
+    // tagged with the store's recording generation.
     let cache: {
       from: number;
       to: number;

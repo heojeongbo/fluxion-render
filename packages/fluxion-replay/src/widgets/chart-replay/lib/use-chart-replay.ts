@@ -100,9 +100,6 @@ export function useChartReplay<T>(opts: UseChartReplayOptions<T>): UseChartRepla
   const pickRef = useRef(pickValue);
   pickRef.current = pickValue;
 
-  // Fix 1: cache the last hydrate result so seeks within the same window
-  // skip the IDB round-trip entirely.
-
   // Fix 3: accumulate onFrame events per tick instead of calling handle.push()
   // once per frame — drained as a single pushBatch() in onTick.
   const liveBufferRef = useRef<LineSample[]>([]);
@@ -126,6 +123,10 @@ export function useChartReplay<T>(opts: UseChartReplayOptions<T>): UseChartRepla
   useEffect(() => {
     if (!handle || !player || !store) return;
 
+    // Fix 1: cache the last hydrate result so seeks within the same window
+    // skip the IDB round-trip entirely. Scoped to this effect run and tagged
+    // with the store's recording generation, so a new recording or a changed
+    // channel/store never serves stale frames.
     let cache: {
       from: number;
       to: number;
