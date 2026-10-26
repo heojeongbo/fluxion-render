@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.3](https://github.com/heojeongbo/fluxion-render/compare/fluxion-worker-v0.6.2...fluxion-worker-v0.6.3) (2026-10-26)
+
+
+### Bug Fixes
+
+* **worker,render:** revive hook-owned pools after a React 19 Activity ([a21991b](https://github.com/heojeongbo/fluxion-render/commit/a21991b1cda4c35df1820ffec91107d55e22045b))
+* **worker:** restore 0.6.1 reply routing and message dispatch ([645d1fb](https://github.com/heojeongbo/fluxion-render/commit/645d1fb7ad3c3f75a3e65bcc106ca296c61e9e04))
+
 ## [0.6.2](https://github.com/heojeongbo/fluxion-render/compare/fluxion-worker-v0.6.1...fluxion-worker-v0.6.2) (2026-10-22)
 
 
