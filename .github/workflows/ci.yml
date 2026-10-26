@@ -101,7 +101,7 @@ jobs:
       - run: pnpm test:e2e
       # The chart benchmark uses headed compositing; Linux runners need Xvfb.
       - run: xvfb-run -a pnpm test:perf
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: browser-regressions
