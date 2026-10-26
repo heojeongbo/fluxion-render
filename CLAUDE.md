@@ -22,6 +22,7 @@ pnpm lint:fix    # biome check --write . (formatter + import sort + safe lint fi
 # Release gate = what release-it's before:init runs (~7 min; headed browsers — run nothing else alongside):
 pnpm verify:release  # build → typecheck → test:coverage → lint → test:architecture → test:package → test:perf:cpu → test:e2e → test:perf
 #   test:package = replay's render-peer guard + packed-tarball consumer smoke (imports + tsc)
+#                  + the packed hooks under react@19 <Activity> (root `react-19` alias; React 18 has no Activity)
 #   test:e2e / test:perf = Chromium AND Firefox (needs `pnpm -C examples/vite-demo exec playwright install chromium firefox`)
 
 # Perf bench (headed Playwright, from examples/vite-demo after `pnpm build` there):
