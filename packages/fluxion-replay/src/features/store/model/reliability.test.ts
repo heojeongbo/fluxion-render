@@ -189,6 +189,11 @@ it("surfaces request and transaction failures without discarding staged frames",
   await expect(store.getTimeRange()).rejects.toThrow("transaction failed");
   transaction.mockImplementationOnce(failTransaction);
   await expect(store.getStorageInfo()).rejects.toThrow("request failed");
+  // clearAll may first scan for legacy channels; target its clear transaction.
+  vi.spyOn(
+    store as unknown as { _legacyChannels(): Promise<string[]> },
+    "_legacyChannels",
+  ).mockResolvedValueOnce([]);
   transaction.mockImplementationOnce(failTransaction);
   await expect(store.clearAll()).rejects.toThrow("transaction failed");
   store.appendFrame(frame(1));

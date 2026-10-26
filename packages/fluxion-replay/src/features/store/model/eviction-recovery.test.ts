@@ -30,7 +30,8 @@ it("keeps cleanup intent after file failure, then retries without dangling metad
   vi.spyOn(dir, "removeEntry").mockRejectedValueOnce(
     new DOMException("denied", "NotAllowedError"),
   );
-  await expect(store.deleteFramesBefore(2)).rejects.toThrow("denied");
+  // The rows are committed; a failed file removal must not reject the delete.
+  await store.deleteFramesBefore(2);
   expect(await store.getFrames(0, 2)).toEqual([]);
   expect(await store.readVideoChunk("cam", "1.chunk")).not.toBeNull();
   await collectVideoGarbage(db, root, 500);
@@ -60,23 +61,29 @@ it.each([
   new Error("offline"),
   new DOMException("denied", "NotAllowedError"),
 ])("handles directory lookup failure %s without losing retry intent", async (error) => {
-  const { db, root } = await fixture();
+  const { store, db, root } = await fixture();
   await deleteFrameBatch(db, 2, 500);
   vi.spyOn(root, "getDirectoryHandle").mockRejectedValueOnce(error);
-  const task = collectVideoGarbage(db, root, 500);
-  if (error.name === "NotFoundError") await task;
-  else await expect(task).rejects.toBe(error);
+  // Entries are independent: one failed lookup never rejects the pass.
+  await collectVideoGarbage(db, root, 500);
+  if (error.name === "NotFoundError") return;
+  expect(await store.readVideoChunk("cam", "1.chunk")).not.toBeNull();
+  await collectVideoGarbage(db, root, 500);
+  expect(await store.readVideoChunk("cam", "1.chunk")).toBeNull();
 });
 it.each([
   new DOMException("missing", "NotFoundError"),
   new Error("offline"),
 ])("handles already deleted files or transient file failures %s", async (error) => {
-  const { db, root, dir } = await fixture();
+  const { store, db, root, dir } = await fixture();
   await deleteFrameBatch(db, 2, 500);
   vi.spyOn(dir, "removeEntry").mockRejectedValueOnce(error);
-  const task = collectVideoGarbage(db, root, 500);
-  if (error.name === "NotFoundError") await task;
-  else await expect(task).rejects.toBe(error);
+  await collectVideoGarbage(db, root, 500);
+  if (error.name === "NotFoundError") return;
+  // A transient failure keeps the intent; the next pass removes the file.
+  expect(await store.readVideoChunk("cam", "1.chunk")).not.toBeNull();
+  await collectVideoGarbage(db, root, 500);
+  expect(await store.readVideoChunk("cam", "1.chunk")).toBeNull();
 });
 it.each([
   "outbox-read",
@@ -136,19 +143,32 @@ it("shares an in-flight cleanup and waits before clear, including cleanup failur
   await Promise.all([removing, second, clearing]);
   expect(await store.getFrames(0, 2)).toEqual([]);
 });
-it("rechecks storage at the low watermark while pressure remains high", async () => {
+it.each([
+  [70, [80, 68, 60], [true, true, false]],
+  // A small threshold must still release: the low watermark stays above 0%.
+  [3, [5, 2, 1, 0], [true, true, false, false]],
+])("keeps trimming under pressure until usage falls below the low watermark (threshold %i%%)", async (threshold, usages, trims) => {
   const { store } = await fixture();
   const internal = store as unknown as {
     _evictThresholdPct: number;
-    _maybeEvict(): Promise<void>;
+    _maybeEvict(checkQuota: boolean): Promise<void>;
+    _evictOldest(fraction: number): Promise<number | null>;
   };
-  internal._evictThresholdPct = 70;
+  internal._evictThresholdPct = threshold;
   const estimate = vi.spyOn(navigator.storage, "estimate");
-  for (const usage of [80, 68, 60]) {
+  const trim = vi.spyOn(internal, "_evictOldest");
+  const trimmed: boolean[] = [];
+  for (const usage of usages) {
     estimate.mockResolvedValue({ usage, quota: 100 });
-    await internal._maybeEvict();
+    trim.mockClear();
+    await internal._maybeEvict(true);
+    trimmed.push(trim.mock.calls.length > 0);
   }
-  expect(estimate).toHaveBeenCalledTimes(3);
+  expect(trimmed).toEqual(trims);
+  expect(trim).not.toHaveBeenCalledWith(0.1);
+  estimate.mockClear();
+  await internal._maybeEvict(false);
+  expect(estimate).not.toHaveBeenCalled();
 });
 it("does not install timers when disposed during recovery", async () => {
   const s = new ReplayStore({ storageLogIntervalMs: 1000 });
@@ -275,7 +295,7 @@ it("supports an existing v1 schema without an outbox and retries file failures",
   legacySchema(db);
   const tx = vi.spyOn(db, "transaction");
   vi.spyOn(dir, "removeEntry").mockRejectedValueOnce(new Error("disk busy"));
-  await expect(store.deleteFramesBefore(2)).rejects.toThrow("disk busy");
+  await store.deleteFramesBefore(2);
   expect(await store.getFrames(0, 2)).toEqual([]);
   expect(await store.readVideoChunk("cam", "1.chunk")).not.toBeNull();
   await store.flush();

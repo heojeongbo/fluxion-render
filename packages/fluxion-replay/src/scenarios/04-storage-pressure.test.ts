@@ -43,8 +43,8 @@ describe("Scenario 04: storage pressure and auto-eviction", () => {
     }
     await store.flush();
 
-    // cutoff = earliest(1000) + floor(span(4900) * 0.1) = 1000 + 490 = 1490
-    expect(deleteSpy).toHaveBeenCalledWith(1490);
+    // cutoff = earliest(1000) + floor(span(4900) * 0.01) = 1000 + 49 = 1049
+    expect(deleteSpy).toHaveBeenCalledWith(1049);
     store.dispose();
   });
 

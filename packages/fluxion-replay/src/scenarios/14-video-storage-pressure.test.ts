@@ -97,9 +97,9 @@ describe("Scenario 14: video storage pressure evicts OPFS chunks + IDB frames", 
   it("reclaims the oldest OPFS chunk AND its IDB frame together once over threshold", async () => {
     await seedAll();
     pressurize();
-    await session.store.flush(); // eviction pass: cutoff = 0 + floor(2950 * 0.1) = 295
+    await session.store.flush(); // eviction pass: cutoff = 0 + floor(2950 * 0.01) = 29
 
-    // Oldest video chunk (t=0 < 295) reclaimed from OPFS…
+    // Oldest video chunk (t=0 < 29) reclaimed from OPFS…
     expect(await session.store.readVideoChunk(CAM, "0.chunk")).toBeNull();
     // …and its IDB metadata frame is gone too.
     const cam = await session.store.getFramesByChannel(CAM, 0, 10_000);

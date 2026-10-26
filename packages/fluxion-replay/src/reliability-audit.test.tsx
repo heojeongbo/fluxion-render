@@ -259,26 +259,37 @@ it("AUDIT-R9: stored playback rate must apply when entering the next DVR cycle",
   });
   expect(p.play).toHaveBeenLastCalledWith(2);
 });
-it("quota eviction catches up with sustained 1000 frames per second ingestion", async () => {
+it("quota eviction keeps up with sustained ingestion without collapsing history", async () => {
   vi.useFakeTimers();
   const store = new ReplayStore({
     dbName: "audit-quota-throughput",
     evictThresholdPct: 70,
   });
+  // Usage never drops: data this store cannot reclaim (another database, files
+  // an older release left behind). Trimming must stay bounded both ways.
   vi.spyOn(navigator.storage, "estimate").mockResolvedValue({ usage: 80, quota: 100 });
   await store.open();
   try {
-    for (let tick = 0; tick < 20; tick++) {
-      for (let i = 0; i < 500; i++)
+    const spans: number[] = [];
+    for (let tick = 0; tick < 240; tick++) {
+      for (let i = 0; i < 50; i++)
         store.appendFrame({
-          t: tick * 500 + i,
+          t: tick * 500 + i * 10,
           channelId: "m",
           payload: new ArrayBuffer(4),
         });
       await vi.advanceTimersByTimeAsync(500);
+      if (tick % 60 === 59) {
+        const range = await store.getTimeRange();
+        spans.push(range!.latest - range!.earliest);
+      }
     }
-    const count = (await store.getStorageInfo()).idbFrameCount;
-    expect(count).toBeLessThan(5500);
+    // 1% per 500 ms drain settles near 50 s of history: no unbounded growth,
+    // and not the ~4.5 s that trimming 10% every drain collapsed it to.
+    for (const span of spans.slice(2)) {
+      expect(span).toBeGreaterThan(30_000);
+      expect(span).toBeLessThan(60_000);
+    }
   } finally {
     store.dispose();
     vi.useRealTimers();

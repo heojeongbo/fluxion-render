@@ -384,7 +384,7 @@ describe("ReplayStore", () => {
       deleteSpy.mockRestore();
     });
 
-    it("_maybeEvict deletes oldest 10% when storage exceeds threshold", async () => {
+    it("_maybeEvict trims the oldest 1% per flush when storage exceeds threshold", async () => {
       const evictStore = new ReplayStore({ batchIntervalMs: 9999, evictThresholdPct: 0 });
       await evictStore.open();
       const deleteSpy = vi.spyOn(evictStore, "deleteFramesBefore");
@@ -401,8 +401,8 @@ describe("ReplayStore", () => {
       }
       await evictStore.flush();
 
-      // earliest=1000, latest=5000, span=4000, cutoff = 1000 + floor(4000 * 0.1) = 1400
-      expect(deleteSpy).toHaveBeenCalledWith(1400);
+      // earliest=1000, latest=5000, span=4000, cutoff = 1000 + floor(4000 * 0.01) = 1040
+      expect(deleteSpy).toHaveBeenCalledWith(1040);
       evictStore.dispose();
       deleteSpy.mockRestore();
     });
@@ -423,10 +423,10 @@ describe("ReplayStore", () => {
       }
       await evictStore.flush();
 
-      // cutoffMs = 1000 + floor(4000 * 0.1) = 1400
+      // cutoffMs = 1000 + floor(4000 * 0.01) = 1040
       const segs = evictStore.getSegments();
       expect(segs.length).toBe(1);
-      expect(segs[0]!.start).toBeGreaterThanOrEqual(1400);
+      expect(segs[0]!.start).toBeGreaterThanOrEqual(1040);
       evictStore.dispose();
     });
 
@@ -739,7 +739,7 @@ describe("ReplayStore", () => {
 
       await evictStore.flush();
 
-      // cutoff = 1000 + floor(4000 * 0.1) = 1400 → only the t=1000 chunk is older.
+      // cutoff = 1000 + floor(4000 * 0.01) = 1040 → only the t=1000 chunk is older.
       expect(await evictStore.readVideoChunk(CH, "1000.chunk")).toBeNull();
       expect(await evictStore.readVideoChunk(CH, "2000.chunk")).not.toBeNull();
       evictStore.dispose();
@@ -928,8 +928,8 @@ describe("ReplayStore", () => {
 
       evictStore.setEvictionPaused(false);
       await evictStore.flush(); // pending already drained → the final _maybeEvict runs
-      // cutoff = 1000 + floor(4000 * 0.1) = 1400
-      expect(deleteSpy).toHaveBeenCalledWith(1400);
+      // cutoff = 1000 + floor(4000 * 0.01) = 1040
+      expect(deleteSpy).toHaveBeenCalledWith(1040);
 
       evictStore.dispose();
       deleteSpy.mockRestore();

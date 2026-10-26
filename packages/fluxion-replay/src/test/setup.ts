@@ -112,7 +112,14 @@ class FakeIDBIndex {
     }
     let idx = 0;
     const req = new FakeIDBRequest<FakeIDBCursorWithValue | null>(null, false);
-    const advance = () => {
+    const advance = (key?: IDBValidKey) => {
+      // continue(key): skip to the first record at or past `key` (ascending).
+      while (
+        key !== undefined &&
+        idx < records.length &&
+        cmpKey(this._keyOf(records[idx]), key) < 0
+      )
+        idx++;
       if (idx >= records.length) {
         req._result = null;
         req.onsuccess?.({ target: req } as unknown as Event);
@@ -127,7 +134,7 @@ class FakeIDBIndex {
           if (i !== -1) this._store._records.splice(i, 1);
           return new FakeIDBRequest(undefined);
         },
-        continue: () => advance(),
+        continue: (key?: IDBValidKey) => advance(key),
       };
       req._result = cursor;
       req.onsuccess?.({ target: req } as unknown as Event);
@@ -148,7 +155,7 @@ interface FakeIDBCursorWithValue {
   value: IDBRecord;
   key: IDBValidKey;
   delete(): FakeIDBRequest<undefined>;
-  continue(): void;
+  continue(key?: IDBValidKey): void;
 }
 
 class FakeIDBRequest<T> {

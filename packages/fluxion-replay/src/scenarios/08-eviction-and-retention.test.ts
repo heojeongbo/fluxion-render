@@ -5,8 +5,9 @@
  * recording exercises both at once:
  *
  *  - Quota eviction (`evictThresholdPct`, default 70): after each IDB flush,
- *    if `percentUsed` exceeds the threshold, the oldest ~10% of the recorded
- *    time span is deleted from IndexedDB (`deleteFramesBefore`).
+ *    if `percentUsed` reaches the threshold, every flush trims the oldest 1% of
+ *    the recorded time span from IndexedDB (`deleteFramesBefore`) until usage
+ *    falls below the low watermark.
  *  - Retention trim (`retentionMs`): on every `record()`, the recorder's
  *    in-memory buffer drops frames older than `now - retentionMs`.
  *
@@ -86,13 +87,13 @@ describe("Scenario 08: quota eviction + retention together", () => {
     seed();
     await session.store.flush();
 
-    // Oldest ~10% of the recorded span is dropped from IDB. Eviction can fire
+    // The oldest slice of the recorded span is dropped from IDB. Eviction can fire
     // more than once (a periodic pass during the batched writes + the explicit
     // flush), so assert at least one pass with a sane cutoff.
     expect(deleteSpy).toHaveBeenCalled();
     const cutoff = deleteSpy.mock.calls[0]![0] as number;
     expect(cutoff).toBeGreaterThan(0);
-    // The cut targets the oldest ~10% of the span, never the whole recording.
+    // The cut targets the oldest slice of the span, never the whole recording.
     const span = DURATION_MS - STEP_MS;
     expect(cutoff).toBeLessThanOrEqual(span * 0.1 + STEP_MS);
   });
