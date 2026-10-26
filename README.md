@@ -229,13 +229,13 @@ written under `.cache/`.
   Declarative layer types live outside React; imperative and React APIs share them.
 - React worker hooks return non-null pools with stable identity. Constructors are
   pure, workers start at commit/first use, and unmount disposal occurs one microtask
-  later so StrictMode replay does not retain a dead pool. Imperative pools still
+  later so StrictMode replay does not retain a dead pool; a React 19 `<Activity>`
+  reveal after that disposal hands out a fresh pool. Imperative pools still
   start eagerly unless `lazy: true` is set.
 - Worker requests carry `__fluxionRequestId`. `defineWorker` and
-  `defineWorkerWithState` echo it automatically. Custom workers should echo this
-  field in replies/errors. Untagged sequential replies remain supported, but
-  ambiguous concurrent replies and untagged replies after cancellation/timeout
-  reject rather than returning the wrong request's data.
+  `defineWorkerWithState` echo it automatically, so concurrent and cancelled
+  requests are matched exactly. Workers that do not echo it keep the 0.6.1
+  contract: untagged replies go, in order, to the oldest pending request.
 - Replay video files are stored under `fluxion-replay/<encoded-dbName>/` in OPFS.
   Clearing a recording deletes only that namespace. Legacy root files remain
   readable while referenced by that database; shared legacy files are not deleted

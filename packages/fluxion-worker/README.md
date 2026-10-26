@@ -439,9 +439,22 @@ MIT
 
 ## Lifecycle and concurrency
 
-`defineWorkerWithState` serializes asynchronous handlers for the same host in arrival
-order. Different hosts remain independent, and idle synchronous handlers reply
-synchronously. Stream failures reach `onError` without completing or rejecting an
+`defineWorkerWithState` dispatches every message as it arrives, so a cancel or steer
+message reaches the handler while an earlier asynchronous handler for the same host
+is still pending. An asynchronous handler's returned state is applied when it
+settles, computed from the `ctx.state` snapshot it started with.
+
+Requests carry `__fluxionRequestId`, which `defineWorker` and `defineWorkerWithState`
+echo, so concurrent and cancelled requests are matched exactly. A hand-written
+worker that does not echo it keeps working: its untagged replies go, in order, to
+the oldest pending request. Once a worker has echoed an id, untagged messages on that
+handle are not treated as replies.
+
+`useWorkerPool` / `useDisposableResource` keep one instance through StrictMode's
+effect replay. If React 19 `<Activity>` hides the component long enough for the
+deferred dispose to run, revealing it hands out a fresh instance.
+
+Stream failures reach `onError` without completing or rejecting an
 unrelated RPC and never arrive as stream data. Custom workers must include
 `__fluxionStream: true` on stream error envelopes.
 
