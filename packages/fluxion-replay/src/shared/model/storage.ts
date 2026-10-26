@@ -17,6 +17,8 @@ export interface VideoChunkReader {
 }
 export interface VideoChunkWriter {
   writeVideoChunk(channelId: string, filename: string, data: Uint8Array): Promise<void>;
+  /** Lets a writer drop a chunk whose metadata could not be recorded. */
+  deleteVideoChunk?(channelId: string, filename: string): Promise<void>;
 }
 export interface ReplayClock {
   readonly currentT: number;

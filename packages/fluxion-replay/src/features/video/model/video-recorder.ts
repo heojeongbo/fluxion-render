@@ -331,8 +331,21 @@ export class VideoRecorder {
       codedHeight,
     };
 
-    if (generation === this._generation)
-      this._recorder.record(this._channelId, frameInfo, tMs);
+    let failure: unknown = null;
+    if (generation === this._generation && this._recorder.isRecording) {
+      try {
+        this._recorder.record(this._channelId, frameInfo, tMs);
+        return;
+      } catch (error) {
+        failure = error;
+      }
+    }
+    // No metadata row will ever reference this file — a newer recording
+    // started, the recorder stopped first, or recording the metadata failed
+    // (e.g. a full write queue under maxPendingFrames). Remove it instead of
+    // leaking it forever.
+    await this._store.deleteVideoChunk?.(this._channelId, filename).catch(() => {});
+    if (failure !== null) this._onWriteError?.(failure);
   }
 
   private _startFallback(_track: MediaStreamTrack): void {

@@ -78,7 +78,7 @@ function harness(options: Partial<VideoRecorderOptions> = {}) {
       new EncodedVideoChunk({ type: kind, timestamp: 0, data: new Uint8Array(size) }),
       {},
     );
-  return { video, encoders, record, write, frame, output };
+  return { video, encoders, recorder, record, write, frame, output };
 }
 it("bounds pending chunks and resumes only at a keyframe", async () => {
   const h = harness({ maxPendingChunks: 1 });
@@ -197,4 +197,44 @@ it("closes an input frame and stops when encoding throws", async () => {
   expect(close).toHaveBeenCalledOnce();
   expect(h.video.isRunning).toBe(false);
   expect(error).toHaveBeenCalled();
+});
+it("removes a chunk whose metadata cannot be recorded", async () => {
+  const onWriteError = vi.fn();
+  // Even a failing removal must not surface as an unhandled rejection.
+  const remove = vi.fn(async () => {
+    throw new Error("locked");
+  });
+  const h = harness({
+    onWriteError,
+    store: { writeVideoChunk: vi.fn(async () => {}), deleteVideoChunk: remove },
+  });
+  h.record.mockImplementationOnce(() => {
+    throw new RangeError("ReplayStore write queue is full");
+  });
+  await h.video.start({} as MediaStreamTrack);
+  h.frame();
+  await settle();
+  h.output("key");
+  await settle();
+  expect(remove).toHaveBeenCalledWith("cam", expect.stringMatching(/\.chunk$/));
+  expect(onWriteError).toHaveBeenCalledWith(expect.any(RangeError));
+  h.video.stop();
+});
+it("removes a chunk that lands after its recorder stopped", async () => {
+  const onWriteError = vi.fn();
+  const remove = vi.fn(async () => {});
+  const h = harness({
+    onWriteError,
+    store: { writeVideoChunk: vi.fn(async () => {}), deleteVideoChunk: remove },
+  });
+  await h.video.start({} as MediaStreamTrack);
+  h.frame();
+  await settle();
+  h.recorder.stop(); // the session stopped recording before the encoder drained
+  h.output("key");
+  await settle();
+  expect(h.record).not.toHaveBeenCalled();
+  expect(remove).toHaveBeenCalledOnce();
+  expect(onWriteError).not.toHaveBeenCalled();
+  h.video.stop();
 });
