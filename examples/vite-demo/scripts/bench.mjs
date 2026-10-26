@@ -40,6 +40,7 @@ const opts = {
   labels: arg("labels", "1"), // "0" turns off tick labels
   grid: arg("grid", "1"), // "0" turns off grid lines
   renderer: arg("renderer", "2d"), // "webgl" opts into the GL backend
+  intervals: arg("intervals", "0"), // "1" adds raw frame intervals to each run line
 };
 
 const browserType = { firefox, chromium }[opts.browser];
@@ -104,7 +105,8 @@ try {
     const result = await page.evaluate(() => window.__benchResult);
     await browser.close();
     results.push(result);
-    console.log(JSON.stringify({ run, browser: opts.browser, currentTime: opts.currentTime, ...flat(result) }));
+    const raw = opts.intervals === "1" ? { intervals: result.main.intervals.map((v) => Math.round(v * 100) / 100) } : {};
+    console.log(JSON.stringify({ run, browser: opts.browser, currentTime: opts.currentTime, ...flat(result), ...raw }));
   }
 } finally {
   preview.kill();

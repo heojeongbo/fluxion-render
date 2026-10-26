@@ -75,6 +75,8 @@ interface BenchResult {
     p99Ms: number;
     maxMs: number;
     jankRatio: number;
+    /** Raw inter-frame intervals in sampling order, for pooled statistics. */
+    intervals: number[];
   };
   worker: {
     statsReports: number;
@@ -223,11 +225,11 @@ export function BenchDemoPage() {
       const samplingSec = (performance.now() - samplingStart) / 1000;
       cancelAnimationFrame(raf);
 
-      const intervals: number[] = [];
+      const raw: number[] = [];
       for (let i = 1; i < frameTimes.length; i++) {
-        intervals.push(frameTimes[i]! - frameTimes[i - 1]!);
+        raw.push(frameTimes[i]! - frameTimes[i - 1]!);
       }
-      intervals.sort((a, b) => a - b);
+      const intervals = [...raw].sort((a, b) => a - b);
       const meanMs =
         intervals.reduce((sum, v) => sum + v, 0) / Math.max(1, intervals.length);
       const acc = workerAccRef.current;
@@ -246,6 +248,7 @@ export function BenchDemoPage() {
           jankRatio:
             intervals.filter((v) => v > JANK_THRESHOLD_MS).length /
             Math.max(1, intervals.length),
+          intervals: raw,
         },
         worker: {
           statsReports: acc.reports,
