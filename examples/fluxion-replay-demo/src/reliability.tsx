@@ -392,23 +392,38 @@ const scenarios = {
 };
 async function storagePerformance(durationMs = 60_000) {
   const s = await store();
-  let input = 0,
-    peakPending = 0;
+  let input = 0;
+  // Pending-queue depth sampled after every 100-frame append (~every 100 ms).
+  const backlog: number[] = [];
   const start = performance.now();
   try {
     while (performance.now() - start < durationMs) {
       for (let i = 0; i < 100; i++) s.appendFrame(frame(input++));
-      peakPending = Math.max(peakPending, s.pendingFrameCount);
+      backlog.push(s.pendingFrameCount);
       await delay(100);
     }
     const drainStart = performance.now();
     await s.flush();
     const drainMs = performance.now() - drainStart;
     const count = (await s.getStorageInfo()).idbFrameCount;
-    const metrics = JSON.stringify({ durationMs, input, count, peakPending, drainMs });
+    const peakPending = Math.max(...backlog);
+    // A transient IndexedDB stall (disk contention) spikes the peak and then
+    // drains; writes that cannot keep up grow the queue for the rest of the
+    // run. Gate on the sustained depth (median of the second half), not the
+    // single worst sample: identical runs peaked anywhere from 500 to 2,800.
+    const late = backlog.slice(Math.floor(backlog.length / 2)).sort((a, b) => a - b);
+    const sustainedPending = late[Math.floor(late.length / 2)] ?? 0;
+    const metrics = JSON.stringify({
+      durationMs,
+      input,
+      count,
+      peakPending,
+      sustainedPending,
+      drainMs,
+    });
     check(count === input, `sustained recording lost frames: ${metrics}`);
-    check(peakPending < 5000, `unbounded recording backlog: ${metrics}`);
-    return { durationMs, input, count, peakPending, drainMs };
+    check(sustainedPending < 2000, `unbounded recording backlog: ${metrics}`);
+    return { durationMs, input, count, peakPending, sustainedPending, drainMs, backlog };
   } finally {
     await s.clearAll();
     s.dispose();
